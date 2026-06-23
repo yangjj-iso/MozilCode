@@ -8,6 +8,7 @@
 - `tools`: Agent 可调用的工具。
 - `providers`: LLM Provider 适配。
 - `adapters`: TUI/GUI 等外部交互适配器。
+- `runtime`: 本地 Agent Host、任务线程和云端连接。
 - `context`: 项目上下文感知。
 - `memory`: 长期记忆。
 - `auth`: 鉴权和配额。
@@ -20,6 +21,7 @@
 
 ```text
 adapters -> core -> ports
+runtime -> core -> ports
 providers -> core/ports
 tools -> core/ports
 index.ts -> 组装所有模块
@@ -32,4 +34,17 @@ core -> adapters
 core -> providers
 core -> tools 具体实现
 core -> store
+tools -> adapters
+mobile/gui -> tools
 ```
+
+## 远程控制分层
+
+手机控制任务时，`src` 内部只负责本地执行端：
+
+- `runtime` 维护本地任务会话、工作区和云端连接。
+- `core` 控制 Agent Loop 和工具调度。
+- `tools` 执行本地副作用。
+- `adapters` 提供 TUI/GUI/WebSocket 等入口。
+
+Java 云端控制面放在仓库的 `server` 层或独立服务中。

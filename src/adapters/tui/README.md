@@ -24,3 +24,16 @@
 - TUI 不应该直接调用 LLM SDK。
 - TUI 不应该直接执行工具。
 - 所有工具执行都应经过 core 的 Agent Loop。
+- TUI 不保存长期任务状态；长期状态应由 runtime 或 store 承接。
+- TUI 和手机端是并列入口，不能互相依赖。
+
+## 和远程控制的关系
+
+TUI 是本地交互入口。未来手机端接入后，TUI 仍然只是一个 Adapter：
+
+```text
+TUI 输入 -> Runtime/Core
+手机输入 -> Java 云端 -> Runtime/Core
+```
+
+两种入口应复用同一套 Agent Core、ToolRegistry 和安全确认规则。
