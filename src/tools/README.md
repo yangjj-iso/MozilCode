@@ -9,6 +9,7 @@
 - 搜索代码。
 - 执行本地 Shell 命令。
 - 后续扩展远程 SSH、语义搜索、Git 操作等能力。
+- 接收 MCP 适配后的外部工具，并统一纳入工具注册和风险控制。
 
 ## MVP 工具
 
@@ -16,6 +17,7 @@
 - `write_file`: 写入工作区内文件，需要用户确认。
 - `code_grep`: 搜索代码关键词。
 - `run_shell`: 执行本地命令，需要用户确认。
+- `mcp_*`: 由 `src/mcp` 适配出来的外部 MCP 工具，是否启用取决于配置和策略。
 
 ## 安全边界
 
@@ -32,3 +34,15 @@
 工具实现 `core/ports` 中的 `AgentTool` 接口。`core` 不直接依赖具体工具文件，而是通过 `ToolRegistry` 调度。
 
 手机端、Web 端或 TUI 发起的任务最终都必须汇入同一个 ToolRegistry，避免不同入口出现不同安全规则。
+
+## MCP 工具
+
+MCP 工具不是直接写在 `tools` 目录里的内置工具，而是由 `src/mcp` 连接外部 MCP Server 后转换成 `AgentTool`。
+
+最终注册方式仍然一致：
+
+```text
+MCP Tool -> AgentTool -> ToolRegistry -> LLMProvider
+```
+
+因此 Agent Loop 不需要关心工具来自本地实现、memory 模块还是 MCP Server。
