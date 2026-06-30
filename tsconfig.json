@@ -9,8 +9,11 @@
     "skipLibCheck": true,
     "rootDir": ".",
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "noEmit": false
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
