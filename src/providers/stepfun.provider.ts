@@ -72,6 +72,11 @@ export class StepFunProvider implements LLMProviderPort {
 
     if (!response.ok) {
       const errText = await response.text()
+      // 400 错误时打印请求体到 stderr，便于调试
+      if (response.status === 400) {
+        console.error('[stepfun] 400 error - request body:')
+        console.error(JSON.stringify(body, null, 2))
+      }
       throw new Error(`StepFun API ${response.status}: ${errText}`)
     }
 
@@ -198,9 +203,18 @@ export class StepFunProvider implements LLMProviderPort {
           type: 'function',
           function: { name: tc.function.name, arguments: tc.function.arguments },
         }))
+        // 有 tool_calls 时 content 设为 null（OpenAI 标准）
+        // 但 StepFun 可能不接受 null，用空字符串
+        if (!openaiMsg.content) {
+          openaiMsg.content = ''
+        }
       }
       if (msg.toolCallId) {
         openaiMsg.tool_call_id = msg.toolCallId
+        // tool 结果消息 content 不能为空
+        if (!openaiMsg.content) {
+          openaiMsg.content = '(no output)'
+        }
       }
       messages.push(openaiMsg)
     }

@@ -1,6 +1,6 @@
 import React from 'react'
 import { Text, Box } from 'ink'
-import { purple } from '../theme.js'
+import { purple, status } from '../theme.js'
 import { BLACK_CIRCLE, TOOL_INDENT } from '../figures.js'
 import { MarkdownText } from './MarkdownText.js'
 import type { ChatMessage } from '../types.js'
@@ -56,10 +56,18 @@ export const MessageRow: React.FC<MessageRowProps> = ({ message }) => {
   if (message.role === 'tool') {
     const isError = message.content.toLowerCase().includes('error') ||
       message.content.toLowerCase().includes('not found')
+    const toolName = message.toolCalls?.[0]?.name || 'tool'
+    const toolArgs = message.toolCalls?.[0]?.argsDisplay || ''
+
+    // 解析参数，提取可读摘要
+    const summary = getToolSummary(toolName, toolArgs)
+
     return (
-      <Box marginLeft={2} marginY={1}>
+      <Box marginLeft={2} marginY={0}>
         <Text color={purple.textMuted}>{TOOL_INDENT} </Text>
-        <Text color={isError ? '#ef4444' : '#10b981'}>{message.content}</Text>
+        <Text color={purple.primaryBright}>{toolName}</Text>
+        <Text color={purple.textSecondary}> {summary}</Text>
+        <Text color={isError ? '#ef4444' : '#10b981'}>{isError ? ' ✗' : ' ✓'}</Text>
       </Box>
     )
   }
@@ -72,4 +80,44 @@ export const MessageRow: React.FC<MessageRowProps> = ({ message }) => {
       </Text>
     </Box>
   )
+}
+
+/** 从工具参数中提取可读摘要（截断长命令/路径） */
+function getToolSummary(toolName: string, argsStr: string): string {
+  const MAX_LEN = 40
+
+  // 尝试解析 JSON 参数
+  let args: Record<string, unknown>
+  try {
+    args = JSON.parse(argsStr || '{}')
+  } catch {
+    return argsStr.slice(0, MAX_LEN)
+  }
+
+  if (toolName === 'read_file') {
+    const p = String(args.path || '')
+    return shortenPath(p)
+  }
+
+  if (toolName === 'list_directory') {
+    const p = String(args.path || '.')
+    return shortenPath(p)
+  }
+
+  if (toolName === 'exec_command') {
+    const cmd = String(args.command || '')
+    return cmd.length > MAX_LEN ? cmd.slice(0, MAX_LEN) + '...' : cmd
+  }
+
+  // 默认：显示原始参数，截断
+  return argsStr.length > MAX_LEN ? argsStr.slice(0, MAX_LEN) + '...' : argsStr
+}
+
+/** 缩短路径显示 */
+function shortenPath(p: string): string {
+  if (p.length <= 40) return p
+  // 取最后两段
+  const parts = p.replace(/\\/g, '/').split('/')
+  if (parts.length <= 2) return p
+  return '.../' + parts.slice(-2).join('/')
 }
