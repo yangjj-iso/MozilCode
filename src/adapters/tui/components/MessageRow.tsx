@@ -56,11 +56,12 @@ export const MessageRow: React.FC<MessageRowProps> = ({ message }) => {
   if (message.role === 'tool') {
     const isError = message.content.toLowerCase().includes('error') ||
       message.content.toLowerCase().includes('not found')
-    const toolName = message.toolCalls?.[0]?.name || 'tool'
-    const toolArgs = message.toolCalls?.[0]?.argsDisplay || ''
+    const toolCall = message.toolCalls?.[0]
+    const toolName = toolCall?.name || 'tool'
+    const args = toolCall?.args || {}
 
     // 解析参数，提取可读摘要
-    const summary = getToolSummary(toolName, toolArgs)
+    const summary = getToolSummary(toolName, args)
 
     return (
       <Box marginLeft={2} marginY={0}>
