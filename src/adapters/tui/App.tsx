@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const { exit } = useApp()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streamingText, setStreamingText] = useState<string | undefined>(undefined)
+  const [reasoningText, setReasoningText] = useState<string | undefined>(undefined)
   const [thinking, setThinking] = useState<string | null>(null)
   const [agentRunning, setAgentRunning] = useState(false)
   const [mode, setMode] = useState<'default' | 'plan' | 'accept-edits'>('default')
@@ -44,6 +45,7 @@ const App: React.FC = () => {
   const abortRef = useRef<AbortController | null>(null)
   const pendingToolRef = useRef<Set<string>>(new Set())
   const streamingTextRef = useRef<string | undefined>(undefined)
+  const reasoningTextRef = useRef<string | undefined>(undefined)
   const msgIdCounter = useRef(0)
 
   useEffect(() => {
@@ -57,6 +59,11 @@ const App: React.FC = () => {
         provider,
         tools,
         cwd: process.cwd(),
+        maxTurns: 0, // 不限制
+        maxRetries: 3,
+        maxContextTokens: 20000, // 保守上限，超限主动压缩
+        maxToolResultChars: 3000, // 工具结果在 messages 中最多 3000 字符
+        debug: process.env.MOZIL_DEBUG === '1',
         systemPrompt: `你是 MozilCode，一个运行在用户本地终端的 AI 编程助手。
 你帮助用户理解代码、修改文件、执行命令、调试问题。
 
@@ -69,7 +76,8 @@ const App: React.FC = () => {
 - 当用户需要查看文件、目录或执行命令时，请主动使用这些工具，而不是让用户自己操作。
 - 使用 read_file 后，**不要在你的回复中重复输出完整文件内容**。文件内容已经在工具结果中单独展示给用户，你只需总结或引用关键片段。
 - list_directory 的目录列表可以在工具结果中展示，这是允许的。
-- 请用简洁的中文回答。`,
+- 用户每次发的新消息都是一个新的请求，**你必须只回应用户最新的这条消息**，不要重复回答上一条消息的内容，不要继续之前未完成的动作。
+- 请用简洁的中文回答。`
       })
     }
   }, [])
@@ -146,6 +154,37 @@ const App: React.FC = () => {
   })
 
   const handleSubmit = async (text: string) => {
+    // 斜杠命令
+    if (text.startsWith('/')) {
+      const cmd = text.trim().toLowerCase()
+      if (cmd === '/clear' || cmd === '/c') {
+        loopRef.current?.clearHistory()
+        setMessages([])
+        setTurn(0)
+        setCost(0)
+        setStreamingText(undefined)
+        streamingTextRef.current = undefined
+        return
+      }
+      if (cmd === '/help' || cmd === '/h') {
+        setMessages(prev => [...prev, {
+          id: `msg-help-${Date.now()}`,
+          role: 'assistant',
+          content: '可用命令:\n  /clear  - 清空对话历史\n  /help   - 显示帮助\n\n快捷键:\n  Ctrl+J  - 切换多行模式\n  Shift+Tab - 切换模式 (default/plan/accept-edits)\n  ESC     - 中断 Agent',
+          timestamp: Date.now(),
+        }])
+        return
+      }
+      // 未知命令
+      setMessages(prev => [...prev, {
+        id: `msg-unknown-${Date.now()}`,
+        role: 'assistant',
+        content: `未知命令: ${text}\n输入 /help 查看可用命令`,
+        timestamp: Date.now(),
+      }])
+      return
+    }
+
     if (!loopRef.current) {
       setMessages(prev => [...prev, {
         id: `msg-err-${Date.now()}-${msgIdCounter.current++}`,
@@ -190,6 +229,8 @@ const App: React.FC = () => {
     } finally {
       setStreamingText(undefined)
       streamingTextRef.current = undefined
+      setReasoningText(undefined)
+      reasoningTextRef.current = undefined
       setThinking(null)
       setAgentRunning(false)
       abortRef.current = null
@@ -221,9 +262,31 @@ const App: React.FC = () => {
       }
 
       case 'stream_delta': {
+        // 收到正文输出，先固定 reasoning 为消息
+        if (reasoningTextRef.current && reasoningTextRef.current.trim()) {
+          const reasoning = reasoningTextRef.current
+          setMessages(prev => [...prev, {
+            id: `msg-${Date.now()}-reasoning-${msgIdCounter.current++}`,
+            role: 'system',
+            content: reasoning,
+            timestamp: Date.now(),
+          }])
+        }
+        setReasoningText(undefined)
+        reasoningTextRef.current = undefined
+
         setStreamingText(prev => {
           const next = prev === undefined ? event.delta : prev + event.delta
           streamingTextRef.current = next
+          return next
+        })
+        break
+      }
+
+      case 'reasoning_delta': {
+        setReasoningText(prev => {
+          const next = prev === undefined ? event.delta : prev + event.delta
+          reasoningTextRef.current = next
           return next
         })
         break
@@ -298,6 +361,23 @@ const App: React.FC = () => {
       }
 
       case 'done': {
+        // 先清理流式状态（与添加消息在同一批次，避免重复显示）
+        // 如果有未固定的 reasoning，先固定为消息
+        if (reasoningTextRef.current && reasoningTextRef.current.trim()) {
+          const reasoning = reasoningTextRef.current
+          setMessages(prev => [...prev, {
+            id: `msg-${Date.now()}-reasoning-${msgIdCounter.current++}`,
+            role: 'system',
+            content: reasoning,
+            timestamp: Date.now(),
+          }])
+        }
+
+        setStreamingText(undefined)
+        streamingTextRef.current = undefined
+        setReasoningText(undefined)
+        reasoningTextRef.current = undefined
+
         // 添加最终 assistant 消息
         setMessages(prev => {
           // 如果最后一条是流式占位消息，替换它
@@ -378,6 +458,14 @@ const App: React.FC = () => {
       </Static>
 
       {/* ===== 动态区域：流式输出 + 思考 + 输入（行数少，重绘不影响滚动） ===== */}
+      {reasoningText !== undefined && (
+        <Box flexDirection="column">
+          {reasoningText.split('\n').map((line, i) => (
+            <Text key={i} color="#6b7280" italic>{line || ' '}</Text>
+          ))}
+        </Box>
+      )}
+
       {streamingText !== undefined && (
         <Box>
           <Text color={purple.primaryBright}>● </Text>

@@ -63,6 +63,7 @@ export interface LLMResponse {
 // ===== 流式 chunk =====
 export interface LLMStreamChunk {
   delta?: string
+  reasoningDelta?: string
   toolCall?: ToolCall
   finishReason?: 'stop' | 'length' | 'tool_calls'
 }

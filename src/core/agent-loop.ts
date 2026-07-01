@@ -62,6 +62,7 @@ export type TransitionReason =
 export type AgentEvent =
   | { type: 'state_change'; from: LoopState; to: LoopState; reason: TransitionReason; turn: number }
   | { type: 'stream_delta'; delta: string }
+  | { type: 'reasoning_delta'; delta: string }
   | { type: 'stream_end'; content: string }
   | { type: 'tool_call_start'; toolCall: ToolCall; turn: number }
   | { type: 'tool_call_end'; toolCallId: string; result: string; isError: boolean; turn: number }
@@ -77,6 +78,10 @@ export interface AgentLoopConfig {
   cwd: string
   maxTurns?: number
   maxRetries?: number
+  /** 上下文 token 上限估算值，超过则在 PREPARING 阶段主动压缩 */
+  maxContextTokens?: number
+  /** 工具结果在 messages 中的最大字符数（超出则截断保留头尾） */
+  maxToolResultChars?: number
   /** 是否打印状态转换日志（DEBUG 模式） */
   debug?: boolean
 }
@@ -102,6 +107,7 @@ export class AgentLoop {
   private currentContent = ''
   private currentToolCalls: ToolCall[] = []
   private currentFinishReason: 'stop' | 'length' | 'tool_calls' = 'stop'
+  private lastErrorMessage = ''
 
   constructor(private config: AgentLoopConfig) {}
 
@@ -149,8 +155,9 @@ export class AgentLoop {
           continue
         }
 
-        // 检查最大轮次
-        if (this.turn >= (this.config.maxTurns ?? 20) && currentState !== 'ABORTING' && currentState !== 'DONE') {
+        // 检查最大轮次（0 = 不限制）
+        const maxTurns = this.config.maxTurns ?? 0
+        if (maxTurns > 0 && this.turn >= maxTurns && currentState !== 'ABORTING' && currentState !== 'DONE') {
           yield { type: 'error', error: 'max turns reached', recoverable: false }
           this.transition(currentState, 'DONE', 'max_turns')
           continue
@@ -192,6 +199,7 @@ export class AgentLoop {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          this.lastErrorMessage = msg
           yield { type: 'error', error: msg, recoverable: true }
           const s = this.getState()
           if (s !== 'ABORTING' && s !== 'DONE') {
@@ -214,8 +222,18 @@ export class AgentLoop {
 
   // ===== PREPARING：组装请求 =====
   private handlePreparing(): void {
-    // MVP：不做主动压缩，直接进入 STREAMING
-    // 未来：在这里做 autocompact（预测 token 超限就先压）
+    // 主动压缩：估算 token，超限则先压缩
+    const maxTokens = this.config.maxContextTokens ?? 24000 // 保守上限
+    const estimated = this.estimateTokens()
+
+    if (this.config.debug) {
+      console.error(`[agent-loop] PREPARING: estimated ${estimated} tokens, max ${maxTokens}`)
+    }
+
+    if (estimated > maxTokens) {
+      this.compressContext(estimated)
+    }
+
     this.transition('PREPARING', 'STREAMING', 'request_ready')
   }
 
@@ -246,6 +264,9 @@ export class AgentLoop {
         if (chunk.delta) {
           this.currentContent += chunk.delta
           yield { type: 'stream_delta', delta: chunk.delta }
+        }
+        if (chunk.reasoningDelta) {
+          yield { type: 'reasoning_delta', delta: chunk.reasoningDelta }
         }
         if (chunk.toolCall) {
           this.currentToolCalls = this.mergeToolCall(this.currentToolCalls, chunk.toolCall)
@@ -314,15 +335,7 @@ export class AgentLoop {
 
   // ===== COMPRESSING：上下文压缩 =====
   private handleCompressing(): void {
-    // MVP：简单截断——保留 system + 最近 N 条消息
-    const keepRecent = 10
-    if (this.messages.length > keepRecent + 1) {
-      const system = this.messages.filter(m => m.role === 'system')
-      const recent = this.messages.slice(-keepRecent)
-      this.messages = [...system, ...recent]
-    }
-
-    // 压缩后重试
+    this.compressContext(this.estimateTokens())
     this.transition('COMPRESSING', 'PREPARING', 'compressed')
   }
 
@@ -338,21 +351,31 @@ export class AgentLoop {
 
     this.retryCount++
 
-    // 策略：压缩后重试
-    yield {
-      type: 'error',
-      error: `recovering (attempt ${this.retryCount}/${maxRetries}): compressing context and retrying`,
-      recoverable: true,
+    // 检测是否为上下文过长错误
+    const lastError = this.lastErrorMessage || ''
+    const isContextTooLong = lastError.includes('input length too long') ||
+                             lastError.includes('context length') ||
+                             lastError.includes('maximum context')
+
+    if (isContextTooLong) {
+      yield {
+        type: 'error',
+        error: `context too long, compressing aggressively (attempt ${this.retryCount}/${maxRetries})`,
+        recoverable: true,
+      }
+      // 激进压缩：只保留最近 4 条 + 截断所有工具结果
+      this.compressContext(this.estimateTokens(), 4)
+    } else {
+      yield {
+        type: 'error',
+        error: `recovering (attempt ${this.retryCount}/${maxRetries}): compressing context and retrying`,
+        recoverable: true,
+      }
+      // 普通压缩
+      this.compressContext(this.estimateTokens())
     }
 
-    // 简单压缩
-    const keepRecent = 6
-    if (this.messages.length > keepRecent + 1) {
-      const system = this.messages.filter(m => m.role === 'system')
-      const recent = this.messages.slice(-keepRecent)
-      this.messages = [...system, ...recent]
-    }
-
+    this.lastErrorMessage = ''
     this.transition('ERROR_RECOVERY', 'PREPARING', 'recovered')
   }
 
@@ -412,11 +435,11 @@ export class AgentLoop {
 
     yield { type: 'tool_call_end', toolCallId: tc.id, result, isError, turn: this.turn }
 
-    // tool 结果回喂
+    // tool 结果回喂（截断超长结果，避免上下文爆炸）
     this.messages.push({
       id: `msg-${Date.now()}-tool-${tc.id}`,
       role: 'tool',
-      content: result,
+      content: this.truncateToolResult(result),
       toolCallId: tc.id,
       timestamp: Date.now(),
     })
@@ -481,11 +504,11 @@ export class AgentLoop {
 
     events.push({ type: 'tool_call_end', toolCallId: tc.id, result, isError, turn: this.turn })
 
-    // tool 结果回喂
+    // tool 结果回喂（截断超长结果）
     this.messages.push({
       id: `msg-${Date.now()}-tool-${tc.id}`,
       role: 'tool',
-      content: result,
+      content: this.truncateToolResult(result),
       toolCallId: tc.id,
       timestamp: Date.now(),
     })
@@ -506,6 +529,104 @@ export class AgentLoop {
   /** 读取当前状态（避免 TS 窄化 this.state） */
   private getState(): LoopState {
     return this.state
+  }
+
+  /** 粗略估算当前上下文 token 数（~4 chars/token） */
+  private estimateTokens(): number {
+    let totalChars = this.config.systemPrompt.length
+    for (const msg of this.messages) {
+      totalChars += msg.content.length
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          totalChars += tc.function.name.length + tc.function.arguments.length
+        }
+      }
+    }
+    return Math.ceil(totalChars / 4)
+  }
+
+  /** 截断工具结果文本（保留头尾，中间用省略号替代） */
+  private truncateToolResult(text: string): string {
+    const maxChars = this.config.maxToolResultChars ?? 3000
+    if (text.length <= maxChars) return text
+    const headLen = Math.floor(maxChars * 0.6)
+    const tailLen = Math.floor(maxChars * 0.3)
+    return (
+      text.slice(0, headLen) +
+      `\n\n... (truncated ${text.length - headLen - tailLen} chars)\n\n` +
+      text.slice(-tailLen)
+    )
+  }
+
+  /**
+   * 压缩上下文
+   *
+   * 策略：
+   * 1. 截断所有 tool 消息中的超长内容
+   * 2. 如果仍超限，保留最近 keepRecent 条消息（默认 6）
+   * 3. 确保不破坏 tool_call → tool_result 的配对关系
+   */
+  private compressContext(_currentTokens: number, keepRecent = 6): void {
+    const maxTokens = this.config.maxContextTokens ?? 24000
+
+    // Step 1: 截断所有 tool 结果
+    for (const msg of this.messages) {
+      if (msg.role === 'tool' && msg.content.length > 1000) {
+        msg.content = this.truncateToolResult(msg.content)
+      }
+    }
+
+    // Step 2: 如果截断后仍超限，删除旧消息
+    let estimated = this.estimateTokens()
+    if (estimated <= maxTokens) {
+      if (this.config.debug) {
+        console.error(`[agent-loop] compress: truncated tool results, now ${estimated} tokens`)
+      }
+      return
+    }
+
+    // 保留最近 keepRecent 条，但需要保证 tool_call 和 tool_result 配对
+    // 从尾部往前找，保证不截断配对的中间
+    while (this.messages.length > keepRecent + 2 && estimated > maxTokens) {
+      // 找到第一条可以安全删除的消息
+      const removed = this.messages.shift()
+      if (!removed) break
+
+      // 如果删除了带 toolCalls 的 assistant 消息，其对应的 tool 结果也必须删除
+      if (removed.toolCalls && removed.toolCalls.length > 0) {
+        const tcIds = new Set(removed.toolCalls.map(tc => tc.id))
+        // 删除紧接着的 tool 消息
+        while (this.messages.length > 0 && this.messages[0].role === 'tool' && tcIds.has(this.messages[0].toolCallId || '')) {
+          this.messages.shift()
+        }
+      }
+
+      // 如果删除了 tool 消息，检查它对应的 assistant toolCall 消息是否还在
+      // 如果 assistant 还在但没有对应的 tool 结果，也要删除 assistant
+      if (removed.role === 'tool' && removed.toolCallId) {
+        // 找到对应的 assistant 消息
+        const assistantIdx = this.messages.findIndex(
+          m => m.role === 'assistant' && m.toolCalls?.some(tc => tc.id === removed.toolCallId)
+        )
+        if (assistantIdx !== -1) {
+          const assistant = this.messages[assistantIdx]
+          // 检查这个 assistant 的所有 toolCalls 是否都有对应的 tool 结果
+          const allHaveResults = assistant.toolCalls!.every(tc =>
+            this.messages.some(m => m.role === 'tool' && m.toolCallId === tc.id)
+          )
+          if (!allHaveResults) {
+            // 删除孤立的 assistant 消息
+            this.messages.splice(assistantIdx, 1)
+          }
+        }
+      }
+
+      estimated = this.estimateTokens()
+    }
+
+    if (this.config.debug) {
+      console.error(`[agent-loop] compress: reduced to ${this.messages.length} messages, ~${estimated} tokens`)
+    }
   }
 
   /** 合并流式 tool_call 分片
@@ -566,6 +687,7 @@ export class AgentLoop {
     this.messages = []
     this.turn = 0
     this.retryCount = 0
+    this.lastErrorMessage = ''
     this.state = 'IDLE'
   }
 

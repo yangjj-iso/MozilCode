@@ -19,6 +19,7 @@ export interface StepFunConfig {
   apiKey: string
   baseUrl: string // https://api.stepfun.com/step_plan/v1
   model: string // step-3.7-flash
+  debug?: boolean
 }
 
 interface OpenAIMessage {
@@ -34,6 +35,7 @@ interface OpenAIMessage {
 
 interface OpenAIStreamDelta {
   content?: string
+  reasoning_content?: string
   tool_calls?: Array<{
     index: number
     id?: string
@@ -72,12 +74,23 @@ export class StepFunProvider implements LLMProviderPort {
 
     if (!response.ok) {
       const errText = await response.text()
-      // 400 错误时打印请求体到 stderr，便于调试
-      if (response.status === 400) {
-        console.error('[stepfun] 400 error - request body:')
-        console.error(JSON.stringify(body, null, 2))
+      // 尝试解析 JSON 错误体，提取错误码和消息
+      let errorDetail = errText
+      try {
+        const errJson = JSON.parse(errText)
+        errorDetail = errJson.msg || errJson.message || errJson.error || errText
+        if (errJson.code) {
+          errorDetail = `[code:${errJson.code}] ${errorDetail}`
+        }
+      } catch {
+        // 非 JSON 响应，保持原始文本
       }
-      throw new Error(`StepFun API ${response.status}: ${errText}`)
+
+      if (response.status === 400 && this.config.debug) {
+        console.error(`[stepfun] 400 error: ${errorDetail}`)
+      }
+
+      throw new Error(`StepFun API ${response.status}: ${errorDetail}`)
     }
 
     if (!response.body) {
@@ -116,6 +129,11 @@ export class StepFunProvider implements LLMProviderPort {
             // 文本 delta
             if (delta.content) {
               yield { delta: delta.content }
+            }
+
+            // 思考过程 delta（reasoning_content）
+            if (delta.reasoning_content) {
+              yield { reasoningDelta: delta.reasoning_content }
             }
 
             // tool_calls 增量

@@ -84,16 +84,8 @@ export const MessageRow: React.FC<MessageRowProps> = ({ message }) => {
 }
 
 /** 从工具参数中提取可读摘要（截断长命令/路径） */
-function getToolSummary(toolName: string, argsStr: string): string {
+function getToolSummary(toolName: string, args: Record<string, unknown>): string {
   const MAX_LEN = 40
-
-  // 尝试解析 JSON 参数
-  let args: Record<string, unknown>
-  try {
-    args = JSON.parse(argsStr || '{}')
-  } catch {
-    return argsStr.slice(0, MAX_LEN)
-  }
 
   if (toolName === 'read_file') {
     const p = String(args.path || '')
@@ -111,13 +103,13 @@ function getToolSummary(toolName: string, argsStr: string): string {
   }
 
   // 默认：显示原始参数，截断
+  const argsStr = JSON.stringify(args)
   return argsStr.length > MAX_LEN ? argsStr.slice(0, MAX_LEN) + '...' : argsStr
 }
 
 /** 缩短路径显示 */
 function shortenPath(p: string): string {
   if (p.length <= 40) return p
-  // 取最后两段
   const parts = p.replace(/\\/g, '/').split('/')
   if (parts.length <= 2) return p
   return '.../' + parts.slice(-2).join('/')
