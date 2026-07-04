@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.uv-cache/
+.uv-python/
+*.egg-info/
+build/
+dist/
+
+# Node / Tauri
+mewcode-gui/node_modules/
+mewcode-gui/dist/
+mewcode-gui/src-tauri/target/
+
+# Java
+mewcode-cloud/target/
+
+# Local runtime state
+.mewcode/
+.workbuddy/
+MewCode-python/.tools/
+MewCode-python/snake.html
+*.log
+.env
+.env.*
+!.env.example
+!mewcode-gui/.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+nul

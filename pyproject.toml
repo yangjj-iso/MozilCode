@@ -1,0 +1,12 @@
+[project]
+name = "mewcode-workspace"
+version = "0.1.0"
+description = "Workspace metadata for the MewCode project."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["MewCode-python"]

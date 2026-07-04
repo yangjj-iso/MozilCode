@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MewCode</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github.min.css">
+<style>
+  :root {
+    /* Kraft paper theme — warm tans & espresso ink */
+    --bg: #e6d7b8; --bg2: #f1e7d0; --bg3: #dccbaa;
+    --border: #c7b189; --text: #3b2f21; --muted: #7c6a4f; --dim: #a89577;
+    --accent: #a2542a; --accent-dim: #cfae7e;
+    --green: #5c7a34; --red: #a13a2e; --yellow: #9c7a16;
+    --cyan: #3f6f63; --r: 8px;
+    --mono: 'Cascadia Code','Fira Code','Consolas',monospace;
+    --sans: -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
+  body{font-family:var(--sans);font-size:14px;color:var(--text);background-color:var(--bg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E")}
+  .app{display:flex;height:100vh}
+  .sidebar{width:260px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+  .sb-h{padding:16px;border-bottom:1px solid var(--border)}
+  .sb-h h1{font-size:18px;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:8px}
+  .sb-h h1 .cat{width:20px;height:20px}
+  .avatar .cat{width:15px;height:15px;color:#fff}
+  .sb-h .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .sb-btns{display:flex;gap:6px;margin:12px 16px}
+  .btn-new{flex:1;padding:10px;background:var(--accent-dim);border:none;border-radius:var(--r);color:var(--text);font-size:13px;cursor:pointer}
+  .btn-new:hover{background:var(--accent)}
+  .btn-open{padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:12px;cursor:pointer;white-space:nowrap}
+  .btn-open:hover{border-color:var(--accent)}
+  .slist{flex:1;overflow-y:auto;padding:8px}
+  .sgroup{margin-bottom:4px}
+  .sg-h{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:var(--r);cursor:pointer;color:var(--muted);font-size:12px}
+  .sg-h:hover{background:var(--bg3)}
+  .sg-caret{width:10px;color:var(--dim)}
+  .sg-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+  .sg-count{color:var(--dim);font-size:11px}
+  .sg-items{padding-left:12px}
+  .ficon{width:14px;height:14px;flex-shrink:0;margin-right:6px;vertical-align:-2px;color:var(--muted)}
+  .sg-name .ficon{color:var(--accent);opacity:.85}
+  .sitem{position:relative;display:flex;align-items:center;gap:6px;padding:7px 8px 7px 12px;border-radius:6px;cursor:pointer;margin-bottom:1px}
+  .sitem:hover{background:var(--bg3)}
+  .sitem.active{background:var(--bg3)}
+  .sitem.active::before{content:'';position:absolute;left:3px;top:7px;bottom:7px;width:2px;border-radius:2px;background:var(--accent)}
+  .stitle{flex:1;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sitem:hover .stitle{color:var(--text)}
+  .sitem.active .stitle{color:var(--text);font-weight:500}
+  .sdel{opacity:0;flex-shrink:0;width:18px;height:18px;line-height:1;text-align:center;border:none;background:transparent;color:var(--dim);font-size:16px;cursor:pointer;border-radius:4px}
+  .sitem:hover .sdel{opacity:1}
+  .sdel:hover{background:var(--bg2);color:var(--red)}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+  .topbar .tb-ws{font-size:12px;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar .tb-btn{padding:4px 10px;font-size:12px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;white-space:nowrap}
+  .topbar .tb-btn:hover{border-color:var(--accent)}
+  .rightbar{width:300px;background:var(--bg2);border-left:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;overflow:hidden}
+  .rb-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+  .rb-tab{flex:1;padding:10px;background:transparent;border:none;color:var(--muted);font-size:13px;cursor:pointer;border-bottom:2px solid transparent}
+  .rb-tab:hover{color:var(--text)}
+  .rb-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .rb-files{flex:1;display:flex;flex-direction:column;overflow:hidden}
+  .rb-files-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .rb-files-root{font-size:12px;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rb-refresh{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:0 4px;line-height:1}
+  .rb-refresh:hover{color:var(--accent)}
+  .rb-files-empty{padding:16px 12px;color:var(--dim);font-size:12px}
+  .ftree{flex:1;overflow-y:auto;padding:4px 0}
+  .fnode{display:flex;align-items:center;gap:4px;padding:3px 8px;cursor:pointer;font-size:13px;color:var(--muted);white-space:nowrap}
+  .fnode:hover{background:var(--bg3);color:var(--text)}
+  .fcaret{width:12px;flex-shrink:0;color:var(--dim);font-size:10px;text-align:center}
+  .fnode .ficon{margin-right:2px;color:var(--accent);opacity:.85}
+  .fnode .ficon.fdoc{color:var(--muted);opacity:.7}
+  .fname{overflow:hidden;text-overflow:ellipsis}
+  .rb-info{padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .rb-sec{font-size:12px;color:var(--accent);font-weight:600;margin-top:4px}
+  .rb-item{display:flex;flex-direction:column;gap:2px}
+  .rb-k{font-size:11px;color:var(--muted)}
+  .rb-v{font-size:13px;color:var(--text);word-break:break-all}
+  .rb-v.mono{font-family:var(--mono);font-size:12px}
+  .rb-sep{height:1px;background:var(--border);margin:8px 0}
+  .rb-input{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:12px;font-family:var(--mono);outline:none}
+  .rb-input:focus{border-color:var(--accent)}
+  .rb-btn{padding:8px 10px;background:var(--accent-dim);border:none;border-radius:var(--r);color:var(--text);font-size:13px;cursor:pointer}
+  .rb-btn:hover{background:var(--accent)}
+  .rb-hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:4px}
+  .sb-f{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--muted);cursor:pointer}
+  .sb-f:hover{background:var(--bg3);color:var(--text)}
+  .sb-f .gear{width:16px;height:16px;flex-shrink:0}
+  .sb-f-name{flex:1}
+  .settings{position:fixed;inset:0;z-index:300;display:flex;background:var(--bg)}
+  .set-nav{width:240px;background:var(--bg2);border-right:1px solid var(--border);flex-shrink:0;padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+  .set-back{display:flex;align-items:center;gap:8px;padding:8px 10px;background:transparent;border:none;color:var(--muted);font-size:13px;cursor:pointer;border-radius:6px;margin-bottom:10px}
+  .set-back svg{width:18px;height:18px}
+  .set-back:hover{background:var(--bg3);color:var(--text)}
+  .set-group{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:8px 10px 4px}
+  .set-item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:transparent;border:none;color:var(--muted);font-size:13px;cursor:pointer;border-radius:6px;text-align:left}
+  .set-item .si{width:16px;height:16px;flex-shrink:0}
+  .set-item:hover{background:var(--bg3);color:var(--text)}
+  .set-item.active{background:var(--accent-dim);color:var(--text)}
+  .set-main{flex:1;overflow-y:auto;padding:40px 48px}
+  .set-pane{max-width:720px}
+  .set-pane h2{font-size:20px;font-weight:600;margin-bottom:4px}
+  .set-desc{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .set-empty{color:var(--dim);font-size:13px;padding:20px 0}
+  .set-row-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;color:var(--muted);font-size:13px}
+  .set-add{padding:6px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;cursor:pointer}
+  .set-add:hover{border-color:var(--accent)}
+  .set-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;margin-bottom:8px}
+  .set-row-l{min-width:0}
+  .set-row-title{font-size:14px;color:var(--text);font-weight:500}
+  .set-tag{font-size:11px;color:var(--dim);background:var(--bg3);padding:1px 6px;border-radius:4px;margin-left:6px;font-weight:400}
+  .set-row-desc{font-size:12px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px}
+  .set-row-desc.mono{font-family:var(--mono)}
+  .set-row-r{display:flex;align-items:center;gap:12px;flex-shrink:0}
+  .set-del{background:transparent;border:none;color:var(--dim);font-size:12px;cursor:pointer}
+  .set-del:hover{color:var(--red)}
+  .set-form{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+  .set-form input,.set-form textarea{background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-size:13px;outline:none;font-family:var(--sans);resize:vertical}
+  .set-form input:focus,.set-form textarea:focus{border-color:var(--accent)}
+  .set-form-acts{display:flex;gap:8px;justify-content:flex-end}
+  .set-save{padding:6px 16px;background:var(--accent);color:var(--bg);border:none;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500}
+  .set-cancel{padding:6px 16px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer}
+  .set-note{color:var(--dim);font-size:12px;margin-top:14px}
+  .switch{position:relative;display:inline-block;width:38px;height:22px;flex-shrink:0}
+  .switch input{opacity:0;width:0;height:0}
+  .switch .track{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--border);border-radius:22px;transition:.2s}
+  .switch .track::before{content:'';position:absolute;height:16px;width:16px;left:3px;top:2px;background:var(--muted);border-radius:50%;transition:.2s}
+  .switch input:checked + .track{background:var(--accent);border-color:var(--accent)}
+  .switch input:checked + .track::before{transform:translateX(16px);background:#fff}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .dot.ok{background:var(--green)}.dot.err{background:var(--red)}
+  .chat{flex:1;overflow-y:auto;padding:24px 24px 48px}
+  .thread{max-width:780px;margin:0 auto}
+  .msg{margin-bottom:24px;animation:msgin .24s ease}
+  @keyframes msgin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  .msg-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .avatar{width:24px;height:24px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .avatar.assistant{background:linear-gradient(135deg,var(--accent),#7a3d18)}
+  .avatar.user{background:var(--bg3);color:var(--muted);font-size:11px;font-weight:600}
+  .who{font-size:12.5px;color:var(--text);font-weight:600}
+  .msg-content{line-height:1.7;padding-left:32px}
+  .think{border-left:2px solid var(--dim);margin:2px 0 10px}
+  .think-h{display:flex;gap:8px;align-items:center;cursor:pointer;font-size:12px;color:var(--muted);padding:2px 0 2px 10px}
+  .think-h .tg{color:var(--dim)}
+  .think-b{padding:4px 0 4px 10px;color:var(--dim);font-size:13px;white-space:pre-wrap;font-style:italic}
+  .think.collapsed .think-b{display:none}
+  .md p{margin:6px 0}.md p:first-child{margin-top:0}.md p:last-child{margin-bottom:0}
+  .md pre{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px;overflow-x:auto;margin:8px 0}
+  .md code{font-family:var(--mono);font-size:13px}
+  .md :not(pre)>code{background:var(--bg3);padding:1px 5px;border-radius:4px;font-size:12px;color:var(--cyan)}
+  .md pre code{background:none;padding:0}
+  .md ul,.md ol{padding-left:22px;margin:6px 0}.md li{margin:2px 0}
+  .md a{color:var(--accent)}
+  .md h1,.md h2,.md h3,.md h4{margin:14px 0 6px;font-weight:600;line-height:1.3}
+  .md h1{font-size:20px}.md h2{font-size:17px}.md h3{font-size:15px}
+  .md blockquote{border-left:3px solid var(--border);padding-left:12px;color:var(--muted);margin:8px 0}
+  .md table{border-collapse:collapse;margin:8px 0;font-size:13px}
+  .md th,.md td{border:1px solid var(--border);padding:4px 10px;text-align:left}.md th{background:var(--bg2)}
+  .md hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+  .md pre{position:relative}
+  .copy-btn{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px;background:var(--bg3);color:var(--muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;opacity:0;transition:opacity .15s}
+  .md pre:hover .copy-btn{opacity:1}
+  .copy-btn:hover{color:var(--text);border-color:var(--accent)}
+  .msg-copy{margin-left:8px;padding:0 6px;font-size:11px;background:transparent;color:var(--dim);border:1px solid var(--border);border-radius:4px;cursor:pointer}
+  .msg-copy:hover{color:var(--text);border-color:var(--accent)}
+  .term{font-family:var(--mono);font-size:12px}
+  .term-cmd{color:var(--green);margin-bottom:6px;white-space:pre-wrap;word-break:break-all}
+  .term-prompt{color:var(--accent);font-weight:600;margin-right:6px}
+  .term-out{color:var(--muted);white-space:pre-wrap;word-break:break-all}
+  .term-out.err{color:var(--red)}
+  .tc-b .code-block{margin:0;padding:0;background:none;font-family:var(--mono);font-size:12px;white-space:pre;overflow-x:auto;color:var(--text)}
+  .tc-b .code-block code{font-family:var(--mono);background:none;padding:0}
+  .tc-b .diff{margin:0;font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-all}
+  .tc-b .d-del{color:var(--red);background:rgba(247,118,142,.08)}
+  .tc-b .d-add{color:var(--green);background:rgba(158,206,106,.08)}
+  .bubble{display:inline-block;padding:10px 14px;border-radius:12px;max-width:100%;margin-left:32px;background:var(--bg2);border:1px solid var(--border);white-space:pre-wrap;word-break:break-word;line-height:1.6}
+  .tc{background:transparent;border:1px solid var(--border);border-radius:8px;margin:6px 0;overflow:hidden}
+  .tc-h{padding:6px 10px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px}
+  .tc-h:hover{background:var(--bg2)}
+  .tc-h .tn{color:var(--cyan);font-weight:600;font-family:var(--mono)}
+  .tc-h .ta{color:var(--muted);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
+  .tc-h .ts{font-size:11px;width:14px;text-align:center;flex-shrink:0}
+  .tc-h .ts.running{color:var(--yellow)}.tc-h .ts.done{color:var(--green)}.tc-h .ts.error{color:var(--red)}
+  .tc-h .te{color:var(--dim);font-size:11px;flex-shrink:0}
+  .tc-b{padding:8px 10px;border-top:1px solid var(--border);background:var(--bg);font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow-y:auto;color:var(--muted)}
+  .tc-b.hide{display:none}
+  .cursor{display:inline-block;width:8px;height:16px;background:var(--accent);animation:bk 1s infinite;vertical-align:text-bottom;margin-left:2px}
+  @keyframes bk{0%,50%{opacity:1}51%,100%{opacity:0}}
+  .input-area{padding:12px 24px 18px;border-top:1px solid var(--border);background:var(--bg)}
+  .composer{display:flex;align-items:flex-end;gap:8px;max-width:780px;margin:0 auto;background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:8px 8px 8px 16px;transition:border-color .15s,box-shadow .15s}
+  .composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(162,84,42,.14)}
+  .composer.disabled{opacity:.6}
+  .composer-input{flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text);font-size:14px;font-family:var(--sans);line-height:1.5;padding:6px 0;min-height:24px;max-height:200px}
+  .composer-input::placeholder{color:var(--dim)}
+  .composer-send{flex-shrink:0;width:34px;height:34px;border-radius:10px;border:none;background:var(--accent);color:var(--bg);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:transform .1s,background .15s}
+  .composer-send svg{width:18px;height:18px}
+  .composer-send:hover:not(:disabled){transform:translateY(-1px)}
+  .composer-send:disabled{background:var(--bg2);color:var(--dim);cursor:not-allowed}
+  .composer-hint{max-width:780px;margin:6px auto 0;font-size:11px;color:var(--dim);text-align:center}
+  .spin{width:14px;height:14px;border:2px solid rgba(0,0,0,.25);border-top-color:currentColor;border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+  .modal{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:480px;width:90%}
+  .modal h3{font-size:16px;margin-bottom:12px;color:var(--accent)}
+  .modal p{margin-bottom:16px;line-height:1.6}
+  .modal .desc{background:var(--bg3);border-radius:var(--r);padding:10px;font-family:var(--mono);font-size:12px;margin-bottom:16px}
+  .modal .acts{display:flex;gap:8px;justify-content:flex-end}
+  .modal .acts button{padding:8px 16px;border:none;border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:500}
+  .b-allow{background:var(--green);color:var(--bg)}
+  .b-deny{background:var(--bg3);color:var(--text);border:1px solid var(--border)}
+  .b-always{background:var(--accent);color:var(--bg)}
+  .approve{max-width:780px;margin:0 auto 10px;background:var(--bg2);border:1px solid var(--accent-dim);border-radius:12px;padding:12px 14px}
+  .approve-head{font-size:13px;font-weight:600;color:var(--yellow);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .approve-tool{color:var(--cyan);font-family:var(--mono)}
+  .approve-desc{font-size:12px;color:var(--muted);font-family:var(--mono);background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:10px;max-height:140px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+  .approve-q{font-size:13px;color:var(--text);margin-bottom:10px;line-height:1.5}
+  .approve-acts{display:flex;gap:8px;justify-content:flex-end}
+  .approve-acts button{padding:6px 16px;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500}
+  .approve-opts{display:flex;flex-direction:column;gap:6px}
+  .approve-opt{text-align:left;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg3);color:var(--text);font-size:13px;cursor:pointer}
+  .approve-opt:hover{border-color:var(--accent)}
+  .approve-input{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-size:13px;outline:none}
+  .approve-input:focus{border-color:var(--accent)}
+  .modal .opts{margin-bottom:16px}
+  .modal .opt{padding:10px 12px;border:1px solid var(--border);border-radius:var(--r);cursor:pointer;margin-bottom:6px}
+  .modal .opt:hover{border-color:var(--accent);background:var(--bg3)}
+  .modal .ti{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:10px;font-size:14px;outline:none}
+  .toast{position:fixed;top:16px;right:16px;padding:10px 16px;border-radius:var(--r);font-size:13px;z-index:200;animation:si .3s}
+  .toast.ok{background:var(--green);color:var(--bg)}.toast.err{background:var(--red);color:var(--bg)}
+  @keyframes si{from{transform:translateX(100px);opacity:0}}
+  ::-webkit-scrollbar{width:8px}::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+  .tok{font-size:11px;color:var(--dim);padding:0 24px 4px}
+  .hide{display:none!important}
+  .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:62vh;color:var(--muted)}
+  .empty .ic{margin-bottom:16px}
+  .empty .ic .cat{width:44px;height:44px;color:var(--accent);opacity:.9}
+  .empty-title{font-size:20px;font-weight:600;color:var(--text);margin-bottom:6px}
+  .empty-sub{font-size:12px;margin-top:6px;color:var(--dim)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="app">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sb-h">
+        <h1><svg class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg>{{ APP_NAME }}</h1>
+      </div>
+      <div class="sb-btns">
+        <button class="btn-new" @click="createSession()">＋ 新对话</button>
+        <button class="btn-open" @click="pickWorkspace" title="选择工作区"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>打开工作区</button>
+      </div>
+      <div class="slist">
+        <div v-for="g in sessionGroups" :key="g.workDir" class="sgroup">
+          <div class="sg-h" @click="toggleGroup(g.workDir)" :title="g.workDir">
+            <span class="sg-caret">{{ collapsedGroups[g.workDir] ? '▸' : '▾' }}</span>
+            <span class="sg-name"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ g.short }}</span>
+            <span class="sg-count">{{ g.items.length }}</span>
+          </div>
+          <div v-show="!collapsedGroups[g.workDir]" class="sg-items">
+            <div v-for="s in g.items" :key="s.id" class="sitem" :class="{active: s.id === activeSessionId}" @click="selectSession(s.id)">
+              <span class="stitle">{{ s.title || '新对话' }}</span>
+              <button class="sdel" type="button" title="删除会话" @click.stop="deleteSession(s.id)">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="sb-f" @click="openSettings" title="个人中心 / 设置">
+        <svg class="gear" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94a7.49 7.49 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7 7 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.87a.5.5 0 0 0 .12.61l2.03 1.58a7.49 7.49 0 0 0 0 1.88L2.82 14.5a.5.5 0 0 0-.12.61l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96a7 7 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.61zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+        <span class="sb-f-name">个人中心</span>
+        <span class="dot" :class="connected ? 'ok' : 'err'" :title="connected ? 'Daemon 已连接' : 'Daemon 未连接'"></span>
+      </div>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+      <div class="topbar">
+        <div class="tb-ws" :title="currentWorkDir"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ currentWorkShort || '未选择工作区' }}</div>
+        <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
+      </div>
+      <div class="chat" ref="chatEl">
+        <div class="thread">
+        <div v-if="messages.length === 0" class="empty">
+          <div class="ic"><svg class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg></div>
+          <div class="empty-title">{{ APP_NAME }}</div>
+          <p>输入消息开始对话</p>
+          <p class="empty-sub">Agent 可以读写文件、运行命令、搜索代码</p>
+        </div>
+
+        <div v-for="(msg, i) in messages" :key="msg._id || i" class="msg" :class="msg.role">
+          <div class="msg-head">
+            <span class="avatar" :class="msg.role">
+              <template v-if="msg.role === 'user'">你</template>
+              <svg v-else class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg>
+            </span>
+            <span class="who">{{ msg.role === 'user' ? '你' : APP_NAME }}</span>
+            <button v-if="msg.role === 'assistant' && msg.content" class="msg-copy" type="button" @click="copyMsg(msg)">复制</button>
+          </div>
+          <div v-if="msg.role === 'user'" class="bubble">{{ msg.content }}</div>
+          <div v-else class="msg-content">
+            <div v-if="msg.thinking" class="think" :class="{collapsed: msg.thinkCollapsed}">
+              <div class="think-h" @click="msg.thinkCollapsed = !msg.thinkCollapsed">
+                <span class="ti">💭 思考</span>
+                <span class="tg">{{ msg.thinkCollapsed ? '展开' : '收起' }}</span>
+              </div>
+              <div class="think-b">{{ msg.thinking }}</div>
+            </div>
+            <div v-for="tool in (msg.tools || [])" :key="tool.id" class="tc">
+              <div class="tc-h" @click="tool.expanded = !tool.expanded">
+                <span class="ts" :class="tool.status">{{ tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '✓' }}</span>
+                <span class="tn">{{ tool.name }}</span>
+                <span class="ta">{{ fmtArgs(tool) }}</span>
+                <span class="te" v-if="tool.elapsed">{{ tool.elapsed.toFixed(1) }}s</span>
+              </div>
+              <div class="tc-b" :class="{hide: !tool.expanded}">
+                <div v-if="tool.name === 'Bash'" class="term">
+                  <div class="term-cmd"><span class="term-prompt">$</span> {{ tool.args && tool.args.command }}</div>
+                  <div class="term-out" :class="{err: tool.status === 'error'}">{{ fmtRes(tool.result) }}</div>
+                </div>
+                <div v-else class="tbody" v-html="tool.expanded ? toolBody(tool) : ''"></div>
+              </div>
+            </div>
+            <div v-if="msg.content" class="md" @click="onMdClick">
+              <span v-html="msg.html"></span><span v-if="msg.streaming" class="cursor"></span>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div v-if="perm" class="approve">
+          <div class="approve-head"><span class="approve-ic">⚠</span> 权限请求 · <span class="approve-tool">{{ perm.tool_name }}</span></div>
+          <div class="approve-desc">{{ perm.description }}</div>
+          <div class="approve-acts">
+            <button class="b-deny" @click="resolvePerm('deny')">拒绝</button>
+            <button class="b-allow" @click="resolvePerm('allow')">允许</button>
+            <button class="b-always" @click="resolvePerm('allow_always')">始终允许</button>
+          </div>
+        </div>
+        <div v-if="ask && ask.currentQ < ask.questions.length" class="approve">
+          <div class="approve-head"><span class="approve-ic">?</span> Agent 提问</div>
+          <div class="approve-q">{{ ask.questions[ask.currentQ].message }}</div>
+          <div v-if="ask.questions[ask.currentQ].options && ask.questions[ask.currentQ].options.length" class="approve-opts">
+            <button v-for="opt in ask.questions[ask.currentQ].options" :key="opt" class="approve-opt" @click="pickOpt(ask.questions[ask.currentQ].name, opt)">{{ opt }}</button>
+          </div>
+          <input v-else type="text" class="approve-input" :ref="el => el && el.focus()" @keydown.enter="pickText(ask.questions[ask.currentQ].name, $event.target.value)" placeholder="输入回答后回车…">
+        </div>
+        <div class="composer" :class="{disabled: !activeSessionId}">
+          <textarea ref="inputEl" class="composer-input" v-model="inputText" @keydown="onKey" @input="autoGrow"
+            :placeholder="activeSessionId ? '输入消息…' : '先创建对话'"
+            :disabled="!activeSessionId" rows="1"></textarea>
+          <button class="composer-send" @click="send" :disabled="!inputText.trim() || busy || !activeSessionId" :title="busy ? '生成中' : '发送'">
+            <svg v-if="!busy" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l6 6-1.41 1.41L13 8.83V19h-2V8.83l-3.59 3.58L6 11z"/></svg>
+            <span v-else class="spin"></span>
+          </button>
+        </div>
+        <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+      </div>
+    </div>
+
+    <!-- Right sidebar (toggleable): file tree + session details -->
+    <div v-if="showInfo" class="rightbar">
+      <div class="rb-tabs">
+        <button class="rb-tab" :class="{active: rightTab === 'files'}" @click="selectTab('files')">文件</button>
+        <button class="rb-tab" :class="{active: rightTab === 'info'}" @click="selectTab('info')">详情</button>
+      </div>
+
+      <div v-show="rightTab === 'files'" class="rb-files">
+        <div class="rb-files-h">
+          <span class="rb-files-root" :title="currentWorkDir">{{ currentWorkShort || '工作区' }}</span>
+          <button class="rb-refresh" @click="loadFiles" title="刷新">⟳</button>
+        </div>
+        <div v-if="filesLoading" class="rb-files-empty">加载中…</div>
+        <div v-else-if="fileTree.length === 0" class="rb-files-empty">（空）</div>
+        <div v-else class="ftree">
+          <div v-for="node in fileTree" :key="node.rel" class="fnode" :style="{ paddingLeft: (node.depth * 14 + 6) + 'px' }" @click="toggleNode(node)">
+            <span class="fcaret">{{ node.is_dir ? (node.expanded ? '▾' : '▸') : '' }}</span>
+            <svg v-if="node.is_dir" class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+            <svg v-else class="ficon fdoc" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13z"/></svg>
+            <span class="fname">{{ node.name }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-show="rightTab === 'info'" class="rb-info">
+        <div class="rb-item"><span class="rb-k">工作区</span><div class="rb-v mono">{{ currentWorkDir || '—' }}</div></div>
+        <div class="rb-item"><span class="rb-k">会话 ID</span><div class="rb-v mono">{{ activeSessionId || '—' }}</div></div>
+        <div class="rb-item"><span class="rb-k">Tokens</span><div class="rb-v">↑{{ tokenInfo.input }} ↓{{ tokenInfo.output }}</div></div>
+        <div class="rb-sep"></div>
+        <div class="rb-sec">在指定工作区新建会话</div>
+        <input class="rb-input" v-model="newWorkspace" placeholder="工作区绝对路径（留空用默认）" spellcheck="false">
+        <button class="rb-btn" @click="createSessionAt">＋ 在此工作区新建</button>
+        <div class="rb-hint">提示：会话记录已持久化，重启 daemon 也会保留。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Personal center / settings (full screen) -->
+  <div v-if="showSettings" class="settings">
+    <div class="set-nav">
+      <button class="set-back" @click="showSettings = false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+        返回应用
+      </button>
+      <div class="set-group">扩展</div>
+      <button class="set-item" :class="{active: setTab === 'skills'}" @click="setSettingsTab('skills')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.6 5.3 5.9.9-4.3 4.1 1 5.9L12 21.4 6.8 18.2l1-5.9L3.5 8.2l5.9-.9z"/></svg>
+        Skills
+      </button>
+      <button class="set-item" :class="{active: setTab === 'mcp'}" @click="setSettingsTab('mcp')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16v5H4zm0 9h16v5H4zm3-6.5h2v2H7zm0 9h2v2H7z"/></svg>
+        MCP 服务器
+      </button>
+    </div>
+    <div class="set-main">
+      <div v-if="setTab === 'skills'" class="set-pane">
+        <h2>Skills</h2>
+        <p class="set-desc">管理可用的技能（Agent 能力扩展）。开关会保存，新建会话时生效。</p>
+        <div class="set-row-h"><span>技能</span><button class="set-add" @click="showAddSkill = !showAddSkill">＋ 创建技能</button></div>
+        <div v-if="showAddSkill" class="set-form">
+          <input v-model="newSkill.name" placeholder="名称（小写字母/数字/连字符，如 my-skill）">
+          <input v-model="newSkill.description" placeholder="描述（一句话说明技能用途，Agent 据此决定何时调用）">
+          <textarea v-model="newSkill.body" rows="5" placeholder="技能指令 / 提示词正文（可选）"></textarea>
+          <div class="set-form-acts"><button class="set-save" @click="addSkill">创建</button><button class="set-cancel" @click="showAddSkill = false">取消</button></div>
+        </div>
+        <div v-if="skills.length === 0" class="set-empty">没有可用的技能</div>
+        <div v-for="s in skills" :key="s.name" class="set-row">
+          <div class="set-row-l">
+            <div class="set-row-title">{{ s.name }} <span class="set-tag">{{ s.source }}</span></div>
+            <div class="set-row-desc">{{ s.description }}</div>
+          </div>
+          <div class="set-row-r">
+            <button v-if="s.source === 'user'" class="set-del" @click="delSkill(s.name)" title="删除">删除</button>
+            <label class="switch"><input type="checkbox" :checked="s.enabled" @change="toggleSkill(s)"><span class="track"></span></label>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="setTab === 'mcp'" class="set-pane">
+        <h2>MCP 服务器</h2>
+        <p class="set-desc">连接外部工具和数据源。</p>
+        <div class="set-row-h"><span>服务器</span><button class="set-add" @click="showAddMcp = !showAddMcp">＋ 添加服务器</button></div>
+        <div v-if="showAddMcp" class="set-form">
+          <input v-model="newMcp.name" placeholder="名称（必填）">
+          <input v-model="newMcp.command" placeholder="命令，如 npx / python（本地 stdio）">
+          <input v-model="newMcp.args" placeholder="参数，空格分隔（可选）">
+          <input v-model="newMcp.url" placeholder="或远程 URL（可选）">
+          <div class="set-form-acts"><button class="set-save" @click="addMcp">保存</button><button class="set-cancel" @click="showAddMcp = false">取消</button></div>
+        </div>
+        <div v-if="mcpServers.length === 0" class="set-empty">还没有配置 MCP 服务器</div>
+        <div v-for="m in mcpServers" :key="m.name" class="set-row">
+          <div class="set-row-l">
+            <div class="set-row-title">{{ m.name }}</div>
+            <div class="set-row-desc mono">{{ m.url || ((m.command || '') + (m.args ? ' ' + m.args : '')) || '—' }}</div>
+          </div>
+          <div class="set-row-r">
+            <button class="set-del" @click="delMcp(m.name)" title="删除">删除</button>
+            <label class="switch"><input type="checkbox" :checked="m.enabled" @change="toggleMcp(m.name)"><span class="track"></span></label>
+          </div>
+        </div>
+        <p class="set-note">提示：配置会保存到本地，接入将在新建会话时生效。</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/highlight.min.js"></script>
+<script>
+const { createApp, ref, computed, nextTick, onMounted } = Vue;
+const APP_NAME = 'MewCode';
+
+function stripTrailingSlash(value) {
+  return (value || '').replace(/\/+$/, '');
+}
+
+function httpToWs(value) {
+  return value.replace(/^http/i, (match) => (match.toLowerCase() === 'https' ? 'wss' : 'ws'));
+}
+
+const API = stripTrailingSlash(window.MEWCODE_DAEMON_HTTP || window.location.origin);
+const WS_URL = stripTrailingSlash(window.MEWCODE_DAEMON_WS || httpToWs(API));
+
+// Markdown → sanitized HTML with syntax-highlighted code fences. Rendered ONCE
+// per message on completion (not per token) to keep streaming smooth.
+if (window.marked) {
+  marked.setOptions({
+    gfm: true,
+    breaks: true,
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      try {
+        const language = window.hljs && hljs.getLanguage(lang) ? lang : 'plaintext';
+        return window.hljs ? hljs.highlight(code, { language }).value : code;
+      } catch { return code; }
+    },
+  });
+}
+function renderMarkdown(text) {
+  if (!window.marked) return text || '';
+  let html = marked.parse(text || '');
+  if (window.DOMPurify) html = DOMPurify.sanitize(html);
+  // Inject a copy button into each code block (post-sanitize; we control this markup).
+  html = html.replace(/<pre>/g, '<pre><button class="copy-btn" type="button">复制</button>');
+  return html;
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function extToLang(p) {
+  const ext = (p || '').split('.').pop().toLowerCase();
+  const map = {
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+    ts: 'typescript', tsx: 'typescript', vue: 'xml', html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
+    py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+    c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp',
+    css: 'css', scss: 'scss', less: 'less', json: 'json', md: 'markdown',
+    sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml',
+    sql: 'sql', toml: 'ini', ini: 'ini', php: 'php', swift: 'swift',
+  };
+  return map[ext] || '';
+}
+
+// Highlight raw source into a <pre><code> block (caps very large inputs).
+function highlightCode(code, filename) {
+  code = code || '';
+  if (code.length > 20000 || !window.hljs) return '<pre class="code-block"><code>' + escapeHtml(code) + '</code></pre>';
+  const lang = extToLang(filename);
+  let inner;
+  try {
+    inner = (lang && hljs.getLanguage(lang)) ? hljs.highlight(code, { language: lang }).value : hljs.highlightAuto(code).value;
+  } catch (e) {
+    inner = escapeHtml(code);
+  }
+  return '<pre class="code-block"><code class="hljs">' + inner + '</code></pre>';
+}
+
+// Naive line diff: old lines as removed, new lines as added.
+function renderDiff(oldStr, newStr) {
+  const del = (oldStr || '').split('\n').map(function (l) { return '<div class="d-del">- ' + escapeHtml(l) + '</div>'; }).join('');
+  const add = (newStr || '').split('\n').map(function (l) { return '<div class="d-add">+ ' + escapeHtml(l) + '</div>'; }).join('');
+  return '<div class="diff">' + del + add + '</div>';
+}
+
+createApp({
+  setup() {
+    const connected = ref(false);
+    const sessions = ref([]);
+    const activeSessionId = ref(null);
+    const messages = ref([]);
+    const inputText = ref('');
+    const busy = ref(false);
+    const chatEl = ref(null);
+    const inputEl = ref(null);
+    const perm = ref(null);
+    const ask = ref(null);
+    const tokenInfo = ref({ input: 0, output: 0 });
+    const defaultWorkDir = ref('');
+    const newWorkspace = ref('');
+    const showInfo = ref(false);
+    const rightTab = ref('files');
+    const fileTree = ref([]);
+    const filesLoading = ref(false);
+    const showSettings = ref(false);
+    const setTab = ref('skills');
+    const skills = ref([]);
+    const mcpServers = ref([]);
+    const showAddMcp = ref(false);
+    const newMcp = ref({ name: '', command: '', args: '', url: '' });
+    const showAddSkill = ref(false);
+    const newSkill = ref({ name: '', description: '', body: '' });
+    const currentSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value) || null);
+    const currentWorkDir = computed(() => (currentSession.value && currentSession.value.work_dir) || defaultWorkDir.value);
+    const currentWorkShort = computed(() => {
+      const w = currentWorkDir.value || '';
+      const parts = w.split(/[\\/]/).filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : w;
+    });
+    const collapsedGroups = ref({});
+    const sessionGroups = computed(() => {
+      const map = new Map();
+      for (const s of sessions.value) {
+        const wd = s.work_dir || '(默认)';
+        if (!map.has(wd)) map.set(wd, []);
+        map.get(wd).push(s);
+      }
+      return Array.from(map.entries()).map(([workDir, items]) => ({
+        workDir,
+        short: workDir.split(/[\\/]/).filter(Boolean).pop() || workDir,
+        items,
+      }));
+    });
+    let ws = null;
+    let _replaying = false; // true while the daemon replays history on connect
+
+    async function checkHealth() {
+      try {
+        const r = await fetch(`${API}/api/health`);
+        const d = await r.json();
+        connected.value = d.status === 'ok';
+        if (d.work_dir && !defaultWorkDir.value) {
+          defaultWorkDir.value = d.work_dir;
+          if (!newWorkspace.value) newWorkspace.value = d.work_dir;
+        }
+      } catch { connected.value = false; }
+    }
+
+    async function refreshSessions() {
+      try {
+        const r = await fetch(`${API}/api/sessions`);
+        const d = await r.json();
+        sessions.value = (d.sessions || []).map((s) => (typeof s === 'string' ? { id: s, work_dir: '', title: '' } : s));
+      } catch {}
+    }
+
+    async function createSession(workDir) {
+      const body = JSON.stringify(workDir ? { work_dir: workDir } : {});
+      const r = await fetch(`${API}/api/session`, { method: 'POST', headers: {'Content-Type':'application/json'}, body });
+      const d = await r.json();
+      if (!r.ok || !d.session_id) { toast(d.error || '创建会话失败', 'err'); return; }
+      await refreshSessions();
+      await selectSession(d.session_id);
+    }
+
+    async function createSessionAt() {
+      const wd = (newWorkspace.value || '').trim();
+      await createSession(wd || undefined);
+    }
+
+    // Browser build has no native folder picker: prompt for a path (Tauri build
+    // uses the native dialog via App.vue instead).
+    async function pickWorkspace() {
+      const dir = window.prompt('输入工作区绝对路径：', newWorkspace.value || '');
+      if (dir && dir.trim()) { newWorkspace.value = dir.trim(); await createSession(dir.trim()); }
+    }
+
+    function toggleGroup(wd) {
+      collapsedGroups.value = Object.assign({}, collapsedGroups.value, { [wd]: !collapsedGroups.value[wd] });
+    }
+
+    async function fetchDir(rel) {
+      if (!activeSessionId.value) return [];
+      try {
+        const r = await fetch(`${API}/api/fs/${activeSessionId.value}?path=${encodeURIComponent(rel)}`);
+        const d = await r.json();
+        return d.entries || [];
+      } catch { return []; }
+    }
+    async function loadFiles() {
+      fileTree.value = [];
+      if (!activeSessionId.value) return;
+      filesLoading.value = true;
+      const entries = await fetchDir('');
+      filesLoading.value = false;
+      fileTree.value = entries.map((e) => ({ name: e.name, is_dir: e.is_dir, rel: e.name, depth: 0, expanded: false }));
+    }
+    async function toggleNode(node) {
+      if (!node.is_dir) {
+        inputText.value = (inputText.value ? inputText.value.replace(/\s*$/, ' ') : '') + node.rel + ' ';
+        if (inputEl.value) inputEl.value.focus();
+        return;
+      }
+      const arr = fileTree.value;
+      const idx = arr.indexOf(node);
+      if (idx < 0) return;
+      if (node.expanded) {
+        node.expanded = false;
+        let count = 0;
+        while (idx + 1 + count < arr.length && arr[idx + 1 + count].depth > node.depth) count++;
+        arr.splice(idx + 1, count);
+      } else {
+        node.expanded = true;
+        const entries = await fetchDir(node.rel);
+        const children = entries.map((e) => ({ name: e.name, is_dir: e.is_dir, rel: node.rel + '/' + e.name, depth: node.depth + 1, expanded: false }));
+        arr.splice(arr.indexOf(node) + 1, 0, ...children);
+      }
+    }
+    function selectTab(t) {
+      rightTab.value = t;
+      if (t === 'files' && fileTree.value.length === 0) loadFiles();
+    }
+
+    function openSettings() { showSettings.value = true; setSettingsTab(setTab.value); }
+    function setSettingsTab(t) {
+      setTab.value = t;
+      if (t === 'skills') loadSkills();
+      else if (t === 'mcp') loadMcp();
+    }
+    async function loadSkills() {
+      try { skills.value = (await (await fetch(`${API}/api/skills`)).json()).skills || []; } catch { skills.value = []; }
+    }
+    async function toggleSkill(s) {
+      s.enabled = !s.enabled;
+      try { await fetch(`${API}/api/skills/${encodeURIComponent(s.name)}/toggle`, { method: 'POST' }); } catch {}
+    }
+    async function addSkill() {
+      const n = (newSkill.value.name || '').trim();
+      if (!n || !newSkill.value.description.trim()) { toast('名称和描述必填', 'err'); return; }
+      try {
+        const r = await fetch(`${API}/api/skills`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(newSkill.value) });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || '创建失败', 'err'); return; }
+        newSkill.value = { name: '', description: '', body: '' };
+        showAddSkill.value = false;
+        await loadSkills();
+        toast('技能已创建', 'ok');
+      } catch { toast('创建失败', 'err'); }
+    }
+    async function delSkill(name) {
+      if (!window.confirm(`删除技能 “${name}”？`)) return;
+      try {
+        const r = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        const d = await r.json();
+        if (!r.ok) { toast(d.error || '删除失败', 'err'); return; }
+      } catch {}
+      await loadSkills();
+    }
+    async function loadMcp() {
+      try { mcpServers.value = (await (await fetch(`${API}/api/settings/mcp`)).json()).servers || []; } catch { mcpServers.value = []; }
+    }
+    async function toggleMcp(name) {
+      const m = mcpServers.value.find((x) => x.name === name);
+      if (m) m.enabled = !m.enabled;
+      try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}/toggle`, { method: 'POST' }); } catch {}
+    }
+    async function addMcp() {
+      const n = (newMcp.value.name || '').trim();
+      if (!n) { toast('请填写名称', 'err'); return; }
+      try {
+        await fetch(`${API}/api/settings/mcp`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(newMcp.value) });
+        newMcp.value = { name: '', command: '', args: '', url: '' };
+        showAddMcp.value = false;
+        await loadMcp();
+      } catch { toast('添加失败', 'err'); }
+    }
+    async function delMcp(name) {
+      if (!window.confirm(`删除 MCP 服务器 “${name}”？`)) return;
+      try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }); } catch {}
+      await loadMcp();
+    }
+    function openInfo() {
+      showInfo.value = !showInfo.value;
+      if (showInfo.value && rightTab.value === 'files' && fileTree.value.length === 0) loadFiles();
+    }
+
+    async function deleteSession(sid) {
+      if (!window.confirm('删除该会话？此操作不可撤销。')) return;
+      try { await fetch(`${API}/api/session/${sid}`, { method: 'DELETE' }); } catch {}
+      const wasActive = sid === activeSessionId.value;
+      await refreshSessions();
+      if (wasActive) {
+        if (ws) { ws._dead = true; ws.close(); }
+        _wsSid = null;
+        const next = sessions.value[0];
+        if (next) await selectSession(next.id);
+        else { activeSessionId.value = null; messages.value = []; }
+      }
+    }
+
+    async function selectSession(sid) {
+      activeSessionId.value = sid;
+      messages.value = [];
+      tokenInfo.value = { input: 0, output: 0 };
+      connectWS(sid);
+      if (showInfo.value && rightTab.value === 'files') loadFiles();
+    }
+
+    let _reconnectTimer = null;
+    let _wsSid = null;
+    let _wsGen = 0; // generation counter to ignore stale events from old connections
+    let _sendLock = false; // synchronous lock to prevent double-click sending
+
+    function connectWS(sid) {
+      if (ws) {
+        ws._stale = true;
+        ws.close();
+      }
+      if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+      _wsSid = sid;
+      const gen = ++_wsGen;
+      // daemon 连接时会回放该会话完整历史，这里重置以干净重建（也避免瞬断重连时重复）。
+      messages.value = [];
+      _replaying = true; // 回放期间忽略历史权限弹窗，直到 ReplayDone
+      ws = new WebSocket(`${WS_URL}/api/stream/${sid}`);
+      ws._gen = gen;
+      ws._dead = false; // set once the daemon says this session no longer exists
+      ws.onopen = () => { connected.value = true; };
+      ws.onmessage = (ev) => {
+        if (ws._gen !== gen) return;
+        const data = JSON.parse(ev.data);
+        // Session vanished server-side (daemon restarted): stop reconnecting the
+        // dead id and rebuild from whatever the daemon currently has.
+        if (data.type === 'SessionNotFound' || data.error === 'session not found') {
+          ws._dead = true;
+          recoverSession(sid);
+          return;
+        }
+        handleEvent(data);
+      };
+      ws.onclose = (ev) => {
+        connected.value = false;
+        // Never hammer-reconnect a forgotten session; only retry transient drops.
+        if (ws._dead || (ev && ev.code === 4404)) return;
+        if (_wsSid && ws._gen === gen) {
+          _reconnectTimer = setTimeout(() => { if (_wsSid) connectWS(_wsSid); }, 3000);
+        }
+      };
+      ws.onerror = () => {};
+    }
+
+    // Active session no longer exists on the daemon (e.g. it was restarted):
+    // recover by selecting another live session or creating a fresh one.
+    async function recoverSession(deadSid) {
+      if (_wsSid === deadSid) _wsSid = null;
+      await refreshSessions();
+      const next = sessions.value.find((s) => s !== deadSid);
+      if (next) {
+        await selectSession(next);
+      } else {
+        await createSession();
+      }
+    }
+
+    function ensureAssistant() {
+      const last = messages.value.at(-1);
+      if (last && last.role === 'assistant') return last;
+      messages.value.push({ role: 'assistant', content: '', html: '', thinking: '', thinkCollapsed: false, streaming: true, tools: [], _id: Date.now() + Math.random() });
+      return messages.value.at(-1);
+    }
+
+    // Finalize a streamed assistant message: parse markdown once, stop the cursor.
+    function finalizeAssistant() {
+      const last = messages.value.at(-1);
+      if (last && last.role === 'assistant') {
+        last.streaming = false;
+        if (last.content) last.html = renderMarkdown(last.content);
+        if (last.thinking) last.thinkCollapsed = true;
+      }
+    }
+
+    // rAF-coalesced live markdown render: many token updates in a frame collapse
+    // into one parse, keeping streaming smooth at high token rates.
+    function scheduleRender(m) {
+      if (m._renderScheduled) return;
+      m._renderScheduled = true;
+      requestAnimationFrame(() => {
+        m._renderScheduled = false;
+        if (m.content) m.html = renderMarkdown(m.content);
+      });
+    }
+
+    // Delegated click on rendered markdown: copy a code block's text.
+    function onMdClick(e) {
+      const btn = e.target.closest('.copy-btn');
+      if (!btn) return;
+      const pre = btn.closest('pre');
+      const code = pre && pre.querySelector('code');
+      const text = code ? code.innerText : (pre ? pre.innerText : '');
+      navigator.clipboard.writeText(text).then(() => {
+        const prev = btn.textContent;
+        btn.textContent = '已复制';
+        setTimeout(() => { btn.textContent = prev; }, 1500);
+      }).catch(() => {});
+    }
+
+    // Copy an entire assistant message (raw markdown source).
+    function copyMsg(m) {
+      navigator.clipboard.writeText(m.content || '').then(() => toast('已复制', 'ok')).catch(() => {});
+    }
+
+    // WriteFile → 写入的代码（result 只是“Successfully wrote”，代码在 args.content）；
+    // EditFile → +/- diff；ReadFile → 高亮内容；其余 → 纯文本。结果缓存到 tool 上。
+    function toolBody(tool) {
+      const a = tool.args || {};
+      const sig = tool.name + '|' + tool.status + '|' + (tool.result ? tool.result.length : 0);
+      if (tool._bodySig === sig && tool._bodyHtml !== undefined) return tool._bodyHtml;
+      let html;
+      if (tool.name === 'WriteFile') {
+        html = highlightCode(a.content, a.file_path);
+      } else if (tool.name === 'EditFile') {
+        html = renderDiff(a.old_string, a.new_string);
+      } else if (tool.name === 'ReadFile') {
+        html = highlightCode(tool.result, a.file_path);
+      } else {
+        html = '<pre class="code-block">' + escapeHtml(fmtRes(tool.result)) + '</pre>';
+      }
+      tool._bodySig = sig;
+      tool._bodyHtml = html;
+      return html;
+    }
+
+    function handleEvent(data) {
+      const t = data.type;
+      const d = data.data || {};
+      if (t === 'UserMessage') {
+        messages.value.push({ role: 'user', content: d.content || '', tools: [], _id: Date.now() + Math.random() });
+        scrollDown();
+      } else if (t === 'StreamText') {
+        // 就地追加：Vue 3 对 ref 数组内对象是深响应式，直接改属性即可触发更新，
+        // 避免每个 token 全量重建数组（长对话卡顿元凶之一）。
+        const m = ensureAssistant();
+        if (m.thinking && !m._thinkAuto) { m.thinkCollapsed = true; m._thinkAuto = true; }
+        m.content += (d.text || '');
+        scheduleRender(m); // 流式期间实时渲染 Markdown（rAF 合帧节流）
+        scrollDown();
+      } else if (t === 'ThinkingText') {
+        ensureAssistant().thinking += (d.text || '');
+        scrollDown();
+      } else if (t === 'RetryEvent') {
+        toast('重试中: ' + (d.reason || ''), 'err');
+      } else if (t === 'ToolUseEvent') {
+        ensureAssistant().tools.push({ id: d.tool_id, name: d.tool_name, args: d.arguments, status: 'running', expanded: false });
+        scrollDown();
+      } else if (t === 'ToolResultEvent') {
+        const last = messages.value.at(-1);
+        const tool = last && last.tools ? last.tools.find((x) => x.id === d.tool_id) : null;
+        if (tool) {
+          tool.status = d.is_error ? 'error' : 'done';
+          tool.result = d.output;
+          tool.elapsed = d.elapsed;
+        }
+      } else if (t === 'ReplayDone') {
+        _replaying = false;
+        scrollToBottom();
+      } else if (t === 'PermissionRequest') {
+        if (_replaying) return;
+        perm.value = { request_id: d.request_id, tool_name: d.tool_name, description: d.description };
+      } else if (t === 'AskUserRequest') {
+        if (_replaying) return;
+        ask.value = { request_id: d.request_id, questions: d.questions || [], answers: {}, currentQ: 0 };
+      } else if (t === 'PermissionResolved') {
+        if (perm.value && perm.value.request_id === d.request_id) perm.value = null;
+      } else if (t === 'AskUserResolved') {
+        if (ask.value && ask.value.request_id === d.request_id) ask.value = null;
+      } else if (t === 'UsageEvent') {
+        tokenInfo.value = { input: d.input_tokens || 0, output: d.output_tokens || 0 };
+      } else if (t === 'LoopComplete') {
+        finalizeAssistant();
+        busy.value = false;
+      } else if (t === 'ErrorEvent') {
+        finalizeAssistant();
+        busy.value = false;
+        toast(d.message || 'Error', 'err');
+      } else if (t === 'CompactNotification') {
+        toast('上下文已压缩', 'ok');
+      }
+    }
+
+    async function send() {
+      const text = inputText.value.trim();
+      if (!text || busy.value || !activeSessionId.value || _sendLock) return;
+      _sendLock = true;
+      // 不乐观插入用户气泡——daemon 会把 prompt 记为 UserMessage 事件并回放，
+      // 所有客户端（含本端）据此渲染，保持单一数据源。
+      inputText.value = '';
+      busy.value = true;
+      await nextTick();
+      if (inputEl.value) inputEl.value.style.height = 'auto';
+      try {
+        await fetch(`${API}/api/task`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ session_id: activeSessionId.value, prompt: text }),
+        });
+      } catch(e) {
+        toast('发送失败: ' + e.message, 'err');
+        busy.value = false;
+      } finally {
+        _sendLock = false;
+      }
+    }
+
+    async function resolvePerm(response) {
+      const rid = perm.value.request_id;
+      perm.value = null;
+      await fetch(`${API}/api/permission/${activeSessionId.value}`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ request_id: rid, response }),
+      });
+    }
+
+    function pickOpt(qname, opt) {
+      ask.value.answers[qname] = opt;
+      advanceAsk();
+    }
+    function pickText(qname, text) {
+      ask.value.answers[qname] = text;
+      advanceAsk();
+    }
+    async function advanceAsk() {
+      if (ask.value.currentQ < ask.value.questions.length - 1) {
+        ask.value.currentQ++;
+      } else {
+        const rid = ask.value.request_id;
+        const answers = ask.value.answers;
+        ask.value = null;
+        await fetch(`${API}/api/askuser/${activeSessionId.value}`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ request_id: rid, answers }),
+        });
+      }
+    }
+
+    let _scrollPending = false;
+    function scrollDown() {
+      if (_scrollPending) return;
+      _scrollPending = true;
+      nextTick(() => { _scrollPending = false; if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight; });
+    }
+    function scrollToBottom() {
+      nextTick(() => {
+        if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight;
+        setTimeout(() => { if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight; }, 60);
+      });
+    }
+    function toast(msg, type) { const t = document.createElement('div'); t.className = 'toast ' + (type||'ok'); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); }
+
+    function fmtArgs(tool) {
+      if (!tool.args) return '';
+      if (['ReadFile','WriteFile','EditFile'].includes(tool.name)) return tool.args.file_path || '';
+      if (tool.name === 'Bash') { const c = tool.args.command || ''; return c.length > 60 ? c.substring(0,60)+'...' : c; }
+      if (tool.name === 'Glob') return tool.args.pattern || '';
+      if (tool.name === 'Grep') return tool.args.pattern || '';
+      if (tool.name === 'Agent') return tool.args.description || '';
+      if (tool.name === 'ToolSearch') return tool.args.query || '';
+      return Object.entries(tool.args).slice(0,2).map(([k,v]) => `${k}=${String(v).substring(0,30)}`).join(', ');
+    }
+    function fmtRes(r) { return !r ? '' : (r.length > 500 ? r.substring(0,500)+'\n...' : r); }
+    function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
+    function autoGrow() { if (inputEl.value) { inputEl.value.style.height = 'auto'; inputEl.value.style.height = Math.min(inputEl.value.scrollHeight, 200) + 'px'; } }
+
+    onMounted(async () => {
+      await checkHealth();
+      await refreshSessions();
+      if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
+      else await createSession();
+      if (inputEl.value) inputEl.value.focus();
+    });
+
+    return {
+      connected, sessions, activeSessionId, messages, inputText, busy,
+      chatEl, inputEl, perm, ask, tokenInfo,
+      defaultWorkDir, newWorkspace, showInfo, currentWorkDir, currentWorkShort,
+      rightTab, fileTree, filesLoading, loadFiles, toggleNode, selectTab, openInfo,
+      showSettings, setTab, skills, mcpServers, showAddMcp, newMcp, showAddSkill, newSkill,
+      openSettings, setSettingsTab, toggleSkill, addSkill, delSkill, toggleMcp, addMcp, delMcp,
+      collapsedGroups, sessionGroups, toggleGroup, pickWorkspace, deleteSession,
+      createSession, createSessionAt, selectSession, send, resolvePerm, pickOpt, pickText,
+      fmtArgs, fmtRes, onKey, autoGrow, onMdClick, copyMsg, toolBody,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
