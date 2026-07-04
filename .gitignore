@@ -20,10 +20,11 @@ mewcode-gui/src-tauri/target/
 mewcode-cloud/target/
 
 # Local runtime state
+.mozilcode/
 .mewcode/
 .workbuddy/
-MewCode-python/.tools/
-MewCode-python/snake.html
+MozilCode-python/.tools/
+MozilCode-python/snake.html
 *.log
 .env
 .env.*

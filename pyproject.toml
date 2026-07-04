@@ -1,7 +1,7 @@
 [project]
-name = "mewcode-workspace"
+name = "mozilcode-workspace"
 version = "0.1.0"
-description = "Workspace metadata for the MewCode project."
+description = "Workspace metadata for the MozilCode project."
 requires-python = ">=3.11"
 dependencies = []
 
@@ -9,4 +9,4 @@ dependencies = []
 package = false
 
 [tool.uv.workspace]
-members = ["MewCode-python"]
+members = ["MozilCode-python"]

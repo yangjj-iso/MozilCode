@@ -10,8 +10,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "mewcode",
-    "mewcode-workspace",
+    "mozilcode",
+    "mozilcode-workspace",
 ]
 
 [[package]]
@@ -491,9 +491,9 @@ wheels = [
 ]
 
 [[package]]
-name = "mewcode"
+name = "mozilcode"
 version = "0.2.0"
-source = { editable = "MewCode-python" }
+source = { editable = "MozilCode-python" }
 dependencies = [
     { name = "anthropic" },
     { name = "httpx" },
@@ -532,7 +532,7 @@ dev = [
 ]
 
 [[package]]
-name = "mewcode-workspace"
+name = "mozilcode-workspace"
 version = "0.1.0"
 source = { virtual = "." }
 

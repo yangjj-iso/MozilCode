@@ -1,8 +1,8 @@
-# MewCode
+# MozilCode
 
-MewCode is split into three active parts:
+MozilCode is split into three active parts:
 
-- `MewCode-python`: Python core, daemon, tools, and tests.
+- `MozilCode-python`: Python core, daemon, tools, and tests.
 - `mewcode-gui`: Vue + Tauri desktop GUI.
 - `mewcode-cloud`: Java Spring Boot cloud service backed by MySQL.
 
@@ -11,7 +11,7 @@ MewCode is split into three active parts:
 Python core:
 
 ```powershell
-cd MewCode-python
+cd MozilCode-python
 uv run pytest -q -k "not daemon"
 ```
 
