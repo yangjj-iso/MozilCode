@@ -73,13 +73,17 @@
           </div>
           <div v-if="msg.role === 'user'" class="bubble">{{ msg.content }}</div>
           <div v-else class="msg-content">
-            <div v-if="msg.thinking" class="think" :class="{ collapsed: msg.thinkCollapsed }">
-              <div class="think-h" @click="msg.thinkCollapsed = !msg.thinkCollapsed">
-                <span class="ti">💭 思考</span>
+            <section v-if="msg.thinking" class="think" :class="{ collapsed: msg.thinkCollapsed }">
+              <button class="think-h" type="button" :aria-expanded="String(!msg.thinkCollapsed)" @click="toggleThinking(msg)">
+                <span class="think-left">
+                  <svg class="think-ic" viewBox="0 0 24 24" fill="currentColor"><path d="M9 21h6v-1.5H9V21Zm3-19C8.1 2 5 5.1 5 9c0 2.2 1 4.1 2.7 5.4.8.6 1.3 1.4 1.3 2.3V17h6v-.3c0-.9.5-1.7 1.3-2.3C18 13.1 19 11.2 19 9c0-3.9-3.1-7-7-7Zm3.1 11.2c-1 .8-1.7 1.9-1.9 3.1h-2.4c-.2-1.2-.9-2.3-1.9-3.1C7.7 12.2 7 10.7 7 9c0-2.8 2.2-5 5-5s5 2.2 5 5c0 1.7-.7 3.2-1.9 4.2Z"/></svg>
+                  <span class="ti">思考过程</span>
+                  <span v-if="msg.streaming && !msg.content" class="think-live">生成中</span>
+                </span>
                 <span class="tg">{{ msg.thinkCollapsed ? '展开' : '收起' }}</span>
-              </div>
-              <div class="think-b">{{ msg.thinking }}</div>
-            </div>
+              </button>
+              <pre class="think-b">{{ msg.thinking }}</pre>
+            </section>
             <div v-for="tool in (msg.tools || [])" :key="tool.id" class="tc">
               <div class="tc-h" @click="tool.expanded = !tool.expanded">
                 <span class="ts" :class="tool.status">{{ tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '✓' }}</span>
@@ -426,6 +430,11 @@ function onMdClick(e) {
 // Copy an entire assistant message (raw markdown source).
 function copyMsg(m) {
   navigator.clipboard.writeText(m.content || '').then(() => toast('已复制', 'ok')).catch(() => {});
+}
+
+function toggleThinking(m) {
+  m.thinkCollapsed = !m.thinkCollapsed;
+  m._thinkUserTouched = true;
 }
 
 function escapeHtml(s) {
@@ -1164,6 +1173,7 @@ function ensureAssistant() {
     html: '',
     thinking: '',
     thinkCollapsed: false,
+    _thinkUserTouched: false,
     streaming: true,
     tools: [],
     _id: Date.now() + Math.random(),
@@ -1193,7 +1203,7 @@ function handleEvent(data) {
     // 避免每个 token 都全量重建数组（长对话卡顿的元凶之一）。
     const m = ensureAssistant();
     // 正文开始时自动收起推理块（Codex 式：回答出来后思考过程折叠）。
-    if (m.thinking && !m._thinkAuto) { m.thinkCollapsed = true; m._thinkAuto = true; }
+    if (m.thinking && !m._thinkAuto && !m._thinkUserTouched) { m.thinkCollapsed = true; m._thinkAuto = true; }
     m.content += (d.text || '');
     scheduleRender(m); // 流式期间实时渲染 Markdown（rAF 合帧节流）
     scrollDown();
@@ -1586,10 +1596,15 @@ onUnmounted(() => {
 .avatar.user { background: var(--bg3); color: var(--muted); font-size: 11px; font-weight: 600; }
 .who { font-size: 12.5px; color: var(--text); font-weight: 600; }
 .msg-content { line-height: 1.7; padding-left: 32px; }
-.think { border-left: 2px solid var(--dim); margin: 2px 0 10px; }
-.think-h { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 12px; color: var(--muted); padding: 2px 0 2px 10px; }
-.think-h .tg { color: var(--dim); }
-.think-b { padding: 4px 0 4px 10px; color: var(--dim); font-size: 13px; white-space: pre-wrap; font-style: italic; }
+.think { border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); margin: 2px 0 10px; overflow: hidden; }
+.think-h { width: 100%; min-height: 34px; display: flex; justify-content: space-between; gap: 8px; align-items: center; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 7px 10px; font-size: 12px; font-family: var(--sans); text-align: left; }
+.think-h:hover { background: var(--bg3); color: var(--text); }
+.think-left { min-width: 0; display: inline-flex; align-items: center; gap: 7px; }
+.think-ic { width: 14px; height: 14px; color: var(--accent); flex-shrink: 0; }
+.think-h .ti { color: var(--text); font-weight: 600; }
+.think-live { padding: 1px 6px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); font-size: 10px; font-weight: 600; }
+.think-h .tg { color: var(--dim); flex-shrink: 0; }
+.think-b { margin: 0; border-top: 1px solid var(--border); padding: 9px 10px; max-height: 260px; overflow-y: auto; color: var(--muted); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; background: var(--bg); }
 .think.collapsed .think-b { display: none; }
 .md :deep(p) { margin: 6px 0; }
 .md :deep(p:first-child) { margin-top: 0; }
