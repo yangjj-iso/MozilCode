@@ -255,6 +255,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
         返回应用
       </button>
+      <div class="set-group">模型</div>
+      <button class="set-item" :class="{ active: setTab === 'model' }" @click="setSettingsTab('model')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v4H4zm0 8h16v4H4zm2-6.5h3v1H6zm0 8h3v1H6z"/></svg>
+        模型配置
+      </button>
       <div class="set-group">扩展</div>
       <button class="set-item" :class="{ active: setTab === 'skills' }" @click="setSettingsTab('skills')">
         <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.6 5.3 5.9.9-4.3 4.1 1 5.9L12 21.4 6.8 18.2l1-5.9L3.5 8.2l5.9-.9z"/></svg>
@@ -266,7 +271,32 @@
       </button>
     </div>
     <div class="set-main">
-      <div v-if="setTab === 'skills'" class="set-pane">
+      <div v-if="setTab === 'model'" class="set-pane">
+        <h2>模型配置</h2>
+        <p class="set-desc">配置完成后，GUI 会使用同一个 daemon 创建会话。</p>
+        <div class="set-form model-form">
+          <select v-model="modelConfig.protocol" @change="applyProtocolDefaults" class="set-select">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai-compat">OpenAI Compatible</option>
+          </select>
+          <input v-model="modelConfig.name" placeholder="Provider 名称" />
+          <input v-model="modelConfig.base_url" placeholder="Base URL" />
+          <input v-model="modelConfig.model" placeholder="模型名称，例如 gpt-4.1 / claude-sonnet-4-5" />
+          <input v-model="modelConfig.api_key" type="password" placeholder="API Key（留空则使用环境变量）" autocomplete="off" />
+          <div class="set-grid2">
+            <input v-model.number="modelConfig.context_window" type="number" min="0" placeholder="Context window（0 自动）" />
+            <input v-model.number="modelConfig.max_output_tokens" type="number" min="0" placeholder="Max output tokens（0 自动）" />
+          </div>
+          <label class="check-row"><input type="checkbox" v-model="modelConfig.thinking" /> 启用 thinking</label>
+          <div class="set-form-acts">
+            <button class="set-save" @click="saveModelConfig">保存并启用</button>
+          </div>
+          <div class="set-note mono">配置文件: {{ configStatus.config_path || '—' }}</div>
+        </div>
+      </div>
+
+      <div v-else-if="setTab === 'skills'" class="set-pane">
         <h2>Skills</h2>
         <p class="set-desc">管理可用的技能（Agent 能力扩展）。开关会保存，新建会话时生效。</p>
         <div class="set-row-h"><span>技能</span><button class="set-add" @click="showAddSkill = !showAddSkill">＋ 创建技能</button></div>
@@ -312,6 +342,29 @@
           </div>
         </div>
         <p class="set-note">提示：配置会保存到本地，接入将在新建会话时生效。</p>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="needsConfig" class="setup">
+    <div class="setup-panel">
+      <div class="setup-mark">
+        <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>
+      </div>
+      <h2>MozilCode</h2>
+      <p>配置模型后开始使用 GUI。</p>
+      <div class="set-form model-form setup-form">
+        <select v-model="modelConfig.protocol" @change="applyProtocolDefaults" class="set-select">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="openai-compat">OpenAI Compatible</option>
+        </select>
+        <input v-model="modelConfig.name" placeholder="Provider 名称" />
+        <input v-model="modelConfig.base_url" placeholder="Base URL" />
+        <input v-model="modelConfig.model" placeholder="模型名称，例如 gpt-4.1 / claude-sonnet-4-5" />
+        <input v-model="modelConfig.api_key" type="password" placeholder="API Key（留空则使用环境变量）" autocomplete="off" />
+        <button class="set-save setup-save" @click="saveModelConfig">保存并进入</button>
+        <div v-if="configStatus.error" class="setup-error">{{ configStatus.error }}</div>
       </div>
     </div>
   </div>
@@ -494,13 +547,26 @@ const rightTab = ref('files');
 const fileTree = ref([]);
 const filesLoading = ref(false);
 const showSettings = ref(false);
-const setTab = ref('skills');
+const setTab = ref('model');
 const skills = ref([]);
 const mcpServers = ref([]);
 const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '', url: '' });
 const showAddSkill = ref(false);
 const newSkill = ref({ name: '', description: '', body: '' });
+const configLoaded = ref(false);
+const configStatus = ref({ configured: false, config_path: '', error: '', providers: [] });
+const modelConfig = ref({
+  protocol: 'openai',
+  name: 'openai',
+  base_url: 'https://api.openai.com/v1',
+  model: 'gpt-4.1',
+  api_key: '',
+  permission_mode: 'default',
+  context_window: 0,
+  max_output_tokens: 0,
+  thinking: false,
+});
 const currentSession = computed(() => sessions.value.find((s) => s.id === activeSessionId.value) || null);
 const currentWorkDir = computed(() => (currentSession.value && currentSession.value.work_dir) || defaultWorkDir.value);
 const currentWorkShort = computed(() => {
@@ -512,6 +578,7 @@ const collapsedGroups = ref({});
 const tokenPercent = computed(() => sessionStatus.value.token_percent || 0);
 const canStop = computed(() => busy.value || Boolean(sessionStatus.value.active_task && sessionStatus.value.active_task.running));
 const worktrees = computed(() => worktreeState.value.worktrees || []);
+const needsConfig = computed(() => connected.value && configLoaded.value && !configStatus.value.configured);
 // Group sessions by their workspace, folder-style.
 const sessionGroups = computed(() => {
   const map = new Map();
@@ -536,12 +603,99 @@ async function checkHealth() {
     const r = await fetch(`${API}/api/health`);
     const d = await r.json();
     connected.value = d.status === 'ok';
+    if (typeof d.configured === 'boolean') configStatus.value.configured = d.configured;
+    if (d.config_path) configStatus.value.config_path = d.config_path;
     if (d.work_dir && !defaultWorkDir.value) {
       defaultWorkDir.value = d.work_dir;
       if (!newWorkspace.value) newWorkspace.value = d.work_dir;
     }
   } catch {
     connected.value = false;
+  }
+}
+
+function applyProtocolDefaults() {
+  if (modelConfig.value.protocol === 'openai') {
+    modelConfig.value.name = modelConfig.value.name || 'openai';
+    modelConfig.value.base_url = 'https://api.openai.com/v1';
+    if (!modelConfig.value.model || modelConfig.value.model.startsWith('claude')) modelConfig.value.model = 'gpt-4.1';
+  } else if (modelConfig.value.protocol === 'anthropic') {
+    modelConfig.value.name = modelConfig.value.name || 'anthropic';
+    modelConfig.value.base_url = 'https://api.anthropic.com';
+    if (!modelConfig.value.model || modelConfig.value.model.startsWith('gpt')) modelConfig.value.model = 'claude-sonnet-4-5';
+  } else {
+    modelConfig.value.name = modelConfig.value.name || 'compat';
+    if (modelConfig.value.base_url === 'https://api.openai.com/v1' || modelConfig.value.base_url === 'https://api.anthropic.com') {
+      modelConfig.value.base_url = '';
+    }
+  }
+}
+
+function loadConfigIntoForm(data) {
+  const p = data.providers && data.providers[0];
+  if (!p) return;
+  modelConfig.value = {
+    protocol: p.protocol || 'openai',
+    name: p.name || p.protocol || 'openai',
+    base_url: p.base_url || '',
+    model: p.model || '',
+    api_key: '',
+    permission_mode: data.permission_mode || 'default',
+    context_window: p.context_window || 0,
+    max_output_tokens: p.max_output_tokens || 0,
+    thinking: Boolean(p.thinking),
+  };
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch(`${API}/api/config`);
+    const d = await r.json();
+    configStatus.value = {
+      configured: Boolean(d.configured),
+      config_path: d.config_path || '',
+      error: d.error || '',
+      providers: d.providers || [],
+    };
+    loadConfigIntoForm(d);
+  } catch (e) {
+    configStatus.value = { ...configStatus.value, configured: false, error: e.message || '配置读取失败' };
+  } finally {
+    configLoaded.value = true;
+  }
+}
+
+async function saveModelConfig() {
+  if (!modelConfig.value.model.trim()) { toast('请填写模型名称', 'err'); return; }
+  if (!modelConfig.value.base_url.trim()) { toast('请填写 Base URL', 'err'); return; }
+  try {
+    const r = await fetch(`${API}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(modelConfig.value),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      configStatus.value = { ...configStatus.value, error: d.error || '配置保存失败' };
+      toast(d.error || '配置保存失败', 'err');
+      return;
+    }
+    configStatus.value = {
+      configured: Boolean(d.configured),
+      config_path: d.config_path || '',
+      error: '',
+      providers: d.providers || [],
+    };
+    toast('模型配置已保存', 'ok');
+    await refreshSessions();
+    if (!activeSessionId.value && configStatus.value.configured) {
+      if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
+      else await createSession();
+    } else if (activeSessionId.value) {
+      await loadStatus();
+    }
+  } catch (e) {
+    toast('配置保存失败: ' + e.message, 'err');
   }
 }
 
@@ -643,6 +797,11 @@ async function createSession(workDir) {
   const r = await fetch(`${API}/api/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
   const d = await r.json();
   if (!r.ok || !d.session_id) {
+    if (d.configured === false) {
+      configStatus.value = { ...configStatus.value, configured: false, error: d.error || '请先配置模型' };
+      configLoaded.value = true;
+      setTab.value = 'model';
+    }
     toast(d.error || '创建会话失败', 'err');
     return;
   }
@@ -832,7 +991,8 @@ function openSettings() {
 }
 function setSettingsTab(t) {
   setTab.value = t;
-  if (t === 'skills') loadSkills();
+  if (t === 'model') loadConfig();
+  else if (t === 'skills') loadSkills();
   else if (t === 'mcp') loadMcp();
 }
 async function loadSkills() {
@@ -1217,9 +1377,12 @@ let _statusTimer = null;
 
 onMounted(async () => {
   await checkHealth();
+  await loadConfig();
   await refreshSessions();
-  if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
-  else await createSession();
+  if (configStatus.value.configured) {
+    if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
+    else await createSession();
+  }
   if (inputEl.value) inputEl.value.focus();
   _statusTimer = setInterval(() => {
     checkHealth();
@@ -1386,6 +1549,11 @@ onUnmounted(() => {
 .set-form { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
 .set-form input, .set-form textarea { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 10px; font-size: 13px; outline: none; font-family: var(--sans); resize: vertical; }
 .set-form input:focus, .set-form textarea:focus { border-color: var(--accent); }
+.set-select { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 10px; font-size: 13px; outline: none; font-family: var(--sans); }
+.set-select:focus { border-color: var(--accent); }
+.set-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.check-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.model-form { max-width: 620px; }
 .set-form-acts { display: flex; gap: 8px; justify-content: flex-end; }
 .set-save { padding: 6px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; }
 .set-cancel { padding: 6px 16px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
@@ -1396,6 +1564,15 @@ onUnmounted(() => {
 .switch .track::before { content: ''; position: absolute; height: 16px; width: 16px; left: 3px; top: 2px; background: var(--muted); border-radius: 50%; transition: 0.2s; }
 .switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
 .switch input:checked + .track::before { transform: translateX(16px); background: #fff; }
+.setup { position: fixed; inset: 0; z-index: 500; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(246, 247, 244, 0.96); }
+.setup-panel { width: min(560px, 100%); background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 28px; box-shadow: 0 18px 60px rgba(32, 36, 33, 0.14); }
+.setup-mark { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--accent-dim); color: var(--accent); margin-bottom: 14px; }
+.setup-mark .logo { width: 24px; height: 24px; }
+.setup-panel h2 { font-size: 22px; margin-bottom: 6px; }
+.setup-panel p { color: var(--muted); margin-bottom: 16px; }
+.setup-form { max-width: none; margin-bottom: 0; }
+.setup-save { width: 100%; padding: 10px 16px; }
+.setup-error { color: var(--red); font-size: 12px; line-height: 1.5; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.ok { background: var(--green); }
 .dot.err { background: var(--red); }

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
 from starlette.applications import Starlette
 from starlette.routing import Route, WebSocketRoute
 from starlette.requests import Request
@@ -30,6 +31,7 @@ from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig, WorktreeConfig
+from mozilcode.validator import ConfigError, validate_config_structure
 from mozilcode.client import create_client, resolve_context_window
 from mozilcode.conversation import ConversationManager
 from mozilcode.permissions import (
@@ -67,6 +69,9 @@ _SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
 # GUI-managed settings (MCP servers added via the UI, disabled skills, ...).
 _GUI_SETTINGS_FILE = Path.home() / ".mozilcode" / "gui_settings.json"
 
+# First-run model configuration written by the GUI.
+_USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
+
 
 def _session_dir(sid: str) -> Path:
     return _SESSIONS_DIR / sid
@@ -90,6 +95,80 @@ def _save_gui_settings(data: dict) -> None:
         _GUI_SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         log.warning("Failed to save gui settings: %s", e)
+
+
+def _default_base_url(protocol: str) -> str:
+    if protocol == "anthropic":
+        return "https://api.anthropic.com"
+    if protocol == "openai":
+        return "https://api.openai.com/v1"
+    return ""
+
+
+def _public_config(config: AppConfig | None, error: str = "") -> dict:
+    providers = []
+    if config is not None:
+        for provider in config.providers:
+            providers.append({
+                "name": provider.name,
+                "protocol": provider.protocol,
+                "base_url": provider.base_url,
+                "model": provider.model,
+                "api_key_set": bool(provider.api_key),
+                "thinking": provider.thinking,
+                "context_window": provider.context_window,
+                "max_output_tokens": provider.max_output_tokens,
+            })
+    return {
+        "configured": config is not None and bool(config.providers),
+        "config_path": str(_USER_CONFIG_FILE),
+        "error": error,
+        "providers": providers,
+        "permission_mode": config.permission_mode if config is not None else "default",
+    }
+
+
+def _config_from_gui_payload(body: dict) -> dict:
+    protocol = (body.get("protocol") or "openai").strip()
+    base_url = (body.get("base_url") or _default_base_url(protocol)).strip()
+    model = (body.get("model") or "").strip()
+    name = (body.get("name") or protocol or "default").strip()
+
+    raw = {
+        "providers": [{
+            "name": name,
+            "protocol": protocol,
+            "base_url": base_url,
+            "model": model,
+            "api_key": (body.get("api_key") or "").strip(),
+            "thinking": bool(body.get("thinking", False)),
+            "context_window": int(body.get("context_window") or 0),
+            "max_output_tokens": int(body.get("max_output_tokens") or 0),
+        }],
+        "permission_mode": (body.get("permission_mode") or "default").strip(),
+        "mcp_servers": [],
+        "hooks": [],
+        "enable_fork": bool(body.get("enable_fork", False)),
+        "enable_verification_agent": bool(body.get("enable_verification_agent", False)),
+        "worktree": {
+            "symlink_directories": ["node_modules", ".venv", "vendor"],
+            "stale_cleanup_interval": 3600,
+            "stale_cutoff_hours": 24,
+        },
+        "teammate_mode": "",
+        "enable_coordinator_mode": bool(body.get("enable_coordinator_mode", False)),
+    }
+    validate_config_structure(raw)
+    return raw
+
+
+def _write_user_config(raw: dict) -> AppConfig:
+    _USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _USER_CONFIG_FILE.write_text(
+        yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return load_config(_USER_CONFIG_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +283,7 @@ async def create_agent_from_config(
 class DaemonServer:
     """Holds shared state across HTTP/WS requests."""
 
-    def __init__(self, config: AppConfig, work_dir: str, hook_engine: HookEngine | None = None):
+    def __init__(self, config: AppConfig | None, work_dir: str, hook_engine: HookEngine | None = None):
         self.config = config
         self.work_dir = work_dir
         self.hook_engine = hook_engine
@@ -296,6 +375,8 @@ class DaemonServer:
         self, session_id: str | None = None, work_dir: str | None = None
     ) -> str:
         """Create a new Agent session in the given workspace. Returns session_id."""
+        if self.config is None:
+            raise ValueError("model provider is not configured")
         sid = session_id or uuid.uuid4().hex[:12]
         wd = work_dir or self.work_dir
         if not Path(wd).is_dir():
@@ -319,6 +400,8 @@ class DaemonServer:
         sessions that were loaded from disk. Returns True if usable."""
         if sid in self._agents:
             return True
+        if self.config is None:
+            return False
         meta = self._session_meta.get(sid)
         if meta is None:
             return False
@@ -466,7 +549,7 @@ class DaemonServer:
                 if agent.registry.is_enabled(t.name)
             ]
 
-        provider = deps.provider if deps is not None else (self.config.providers[0] if self.config.providers else None)
+        provider = deps.provider if deps is not None else (self.config.providers[0] if self.config and self.config.providers else None)
         context_window = agent.context_window if agent is not None else (provider.get_context_window() if provider else 0)
         input_tokens = agent.total_input_tokens if agent is not None else 0
         output_tokens = agent.total_output_tokens if agent is not None else 0
@@ -475,7 +558,7 @@ class DaemonServer:
             "id": sid,
             "work_dir": meta.get("work_dir", self.work_dir),
             "title": meta.get("title", ""),
-            "permission_mode": agent.permission_mode.value if agent else self.config.permission_mode,
+            "permission_mode": agent.permission_mode.value if agent else (self.config.permission_mode if self.config else "default"),
             "plan_mode": bool(agent.plan_mode) if agent else False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -568,8 +651,33 @@ class DaemonServer:
 async def health(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     return JSONResponse(
-        {"status": "ok", "service": "mozilcode-daemon", "work_dir": server.work_dir}
+        {
+            "status": "ok",
+            "service": "mozilcode-daemon",
+            "work_dir": server.work_dir,
+            "configured": server.config is not None,
+            "config_path": str(_USER_CONFIG_FILE),
+        }
     )
+
+
+async def config_status(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    return JSONResponse(_public_config(server.config))
+
+
+async def save_config(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    try:
+        body = await request.json()
+        raw = _config_from_gui_payload(body or {})
+        server.config = _write_user_config(raw)
+    except (ConfigError, ValueError, TypeError) as e:
+        return JSONResponse(_public_config(server.config, str(e)), status_code=400)
+    except Exception as e:
+        log.exception("Failed to save config")
+        return JSONResponse(_public_config(server.config, str(e)), status_code=500)
+    return JSONResponse(_public_config(server.config))
 
 
 async def create_session(request: Request) -> JSONResponse:
@@ -580,7 +688,7 @@ async def create_session(request: Request) -> JSONResponse:
     try:
         sid = await server.init_session(session_id, work_dir)
     except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"error": str(e), "configured": server.config is not None}, status_code=400)
     return JSONResponse({"session_id": sid, **server.session_info(sid)})
 
 
@@ -1085,13 +1193,15 @@ async def serve_gui(request: Request) -> JSONResponse:
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(config: AppConfig, work_dir: str, hook_engine: HookEngine | None = None) -> Starlette:
+def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine | None = None) -> Starlette:
     """Create the Starlette application with all routes wired."""
     server = DaemonServer(config, work_dir, hook_engine)
 
     routes = [
         Route("/", serve_gui, methods=["GET"]),
         Route("/api/health", health, methods=["GET"]),
+        Route("/api/config", config_status, methods=["GET"]),
+        Route("/api/config", save_config, methods=["POST"]),
         Route("/api/session", create_session, methods=["POST"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/task", start_task, methods=["POST"]),
@@ -1148,10 +1258,14 @@ def run_daemon(host: str = "127.0.0.1", port: int = 7800, work_dir: str | None =
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigError as e:
+        log.warning("Starting without model config: %s", e)
+        config = None
 
     try:
-        hooks = load_hooks(config.raw_hooks)
+        hooks = load_hooks(config.raw_hooks if config is not None else [])
     except Exception as e:
         log.warning("Hook loading failed: %s", e)
         hooks = []
