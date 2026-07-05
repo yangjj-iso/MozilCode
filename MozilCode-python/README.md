@@ -46,3 +46,9 @@ Official Telegram Bot API:
 - Windows helper: `scripts/start-telegram-bot.ps1`
 
 Private chats can send either `/mew <prompt>` or plain text. Group chats require the configured command prefix by default.
+
+## Memory plugins
+
+Long-term memory is routed through `MemoryHub`, with the legacy Markdown memory kept as the default provider. Custom memory systems can be added with `memory.providers` in `config.yaml` using `type: python`, `module`, and `class`.
+
+See `mozilcode/docs/memory-plugins.md` for the provider protocol, configuration examples, and guidance for adapting external memory projects such as Tencent agent-memory.

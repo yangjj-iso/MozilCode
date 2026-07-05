@@ -125,11 +125,31 @@ class WorktreeConfig:
 
 
 @dataclass
+class MemoryProviderConfig:
+    name: str
+    type: str
+    enabled: bool = True
+    config: dict = field(default_factory=dict)
+    module: str = ""
+    class_name: str = ""
+
+
+@dataclass
+class MemoryConfig:
+    enabled: bool = True
+    providers: list[MemoryProviderConfig] = field(
+        default_factory=lambda: [MemoryProviderConfig(name="markdown", type="builtin.markdown")]
+    )
+
+
+@dataclass
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     raw_hooks: list[dict] = field(default_factory=list)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    memory_declared: bool = False
     enable_fork: bool = False
     enable_verification_agent: bool = False
     worktree: WorktreeConfig = field(default_factory=WorktreeConfig)
@@ -144,6 +164,7 @@ def _load_single_file(path: Path) -> AppConfig:
         raise ConfigError(f"Failed to parse config {path}: {e}") from e
 
     validated = validate_config_structure(raw)
+    memory_declared = isinstance(raw, dict) and "memory" in raw
 
     providers = [
         ProviderConfig(
@@ -177,12 +198,28 @@ def _load_single_file(path: Path) -> AppConfig:
         stale_cleanup_interval=wt["stale_cleanup_interval"],
         stale_cutoff_hours=wt["stale_cutoff_hours"],
     )
+    memory_cfg = MemoryConfig(
+        enabled=validated["memory"]["enabled"],
+        providers=[
+            MemoryProviderConfig(
+                name=p["name"],
+                type=p["type"],
+                enabled=p["enabled"],
+                config=p["config"],
+                module=p["module"],
+                class_name=p["class"],
+            )
+            for p in validated["memory"]["providers"]
+        ],
+    )
 
     return AppConfig(
         providers=providers,
         permission_mode=validated["permission_mode"],
         mcp_servers=mcp_servers,
         raw_hooks=validated["hooks"],
+        memory=memory_cfg,
+        memory_declared=memory_declared,
         enable_fork=validated["enable_fork"],
         enable_verification_agent=validated["enable_verification_agent"],
         worktree=worktree_cfg,
@@ -207,6 +244,9 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
                 by_name[s.name] = len(base.mcp_servers) - 1
 
     base.raw_hooks.extend(override.raw_hooks)
+    if override.memory_declared:
+        base.memory = override.memory
+        base.memory_declared = True
     if override.enable_fork:
         base.enable_fork = True
     if override.enable_verification_agent:

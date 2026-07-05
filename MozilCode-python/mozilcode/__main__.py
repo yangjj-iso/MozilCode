@@ -82,6 +82,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     from mozilcode.client import create_client, resolve_context_window
     from mozilcode.conversation import ConversationManager
     from mozilcode.memory.instructions import load_instructions
+    from mozilcode.memory.providers import build_memory_hub
     from mozilcode.permissions import (
         DangerousCommandDetector,
         PathSandbox,
@@ -121,6 +122,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     )
 
     instructions = load_instructions(work_dir)
+    memory_hub = build_memory_hub(config.memory, work_dir)
     registry = create_default_registry()
     registry.register(ToolSearchTool(registry, protocol=provider.protocol))
 
@@ -132,6 +134,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
         permission_checker=checker,
         context_window=provider.get_context_window(),
         instructions_content=instructions,
+        memory_hub=memory_hub,
         hook_engine=hook_engine,
     )
 
@@ -212,4 +215,3 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
 
 if __name__ == "__main__":
     main()
-

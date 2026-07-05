@@ -32,6 +32,7 @@ from mozilcode.context import (
 from mozilcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mozilcode.memory.auto_memory import MemoryManager
+from mozilcode.memory.providers import MemoryEvent, MemoryHub, MemoryScope, MarkdownMemoryProvider
 from mozilcode.permissions import (
     Decision,
     PermissionChecker,
@@ -340,6 +341,7 @@ class Agent:
         context_window: int = 200_000,
         instructions_content: str = "",
         memory_manager: MemoryManager | None = None,
+        memory_hub: MemoryHub | None = None,
         hook_engine: HookEngine | None = None,
     ) -> None:
         self.client = client
@@ -363,6 +365,11 @@ class Agent:
         self.total_output_tokens = 0
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
+        self.memory_hub = memory_hub
+        if self.memory_hub is None and self.memory_manager is not None:
+            self.memory_hub = MemoryHub(
+                providers=[MarkdownMemoryProvider(work_dir, manager=self.memory_manager)]
+            )
         self.hook_engine = hook_engine
         self._loop_count = 0
         self._extracting = False
@@ -456,6 +463,17 @@ class Agent:
             for n in self.hook_engine.drain_notifications()
         ]
 
+    async def _load_memory_context(self, query: str = "") -> str:
+        if not self.memory_hub:
+            return ""
+        scope = MemoryScope(
+            query=query,
+            session_id=self.session_id,
+            project_root=self.work_dir,
+            source="agent",
+        )
+        return await self.memory_hub.load_context(query, scope)
+
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
         self._current_conversation = conversation
         env_context = build_environment_context(
@@ -463,7 +481,7 @@ class Agent:
         )
         conversation.inject_environment(env_context)
 
-        memory_content = self.memory_manager.load() if self.memory_manager else ""
+        memory_content = await self._load_memory_context()
         conversation.inject_long_term_memory(self.instructions_content, memory_content)
 
         if self.hook_engine:
@@ -520,7 +538,7 @@ class Agent:
             )
             if isinstance(compact_result, CompactEvent):
                 conversation.inject_environment(env_context)
-                mem = self.memory_manager.load() if self.memory_manager else ""
+                mem = await self._load_memory_context()
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
                 )
@@ -669,7 +687,7 @@ class Agent:
                 self._loop_count += 1
                 if (
                     self._loop_count % MEMORY_EXTRACTION_INTERVAL == 0
-                    and self.memory_manager
+                    and self.memory_hub
                 ):
                     asyncio.ensure_future(self._extract_memories(conversation))
                 if self.hook_engine:
@@ -1184,12 +1202,20 @@ class Agent:
     async def _extract_memories(
         self, conversation: ConversationManager
     ) -> None:
-        if self._extracting or not self.memory_manager:
+        if self._extracting or not self.memory_hub:
             return
         self._extracting = True
         try:
-            await self.memory_manager.extract(
-                self.client, conversation, self.protocol
+            await self.memory_hub.observe(
+                MemoryEvent(
+                    type="turn_committed",
+                    source="agent",
+                    session_id=self.session_id,
+                    conversation=conversation,
+                    client=self.client,
+                    protocol=self.protocol,
+                    metadata={"agent_id": self.agent_id},
+                )
             )
         except Exception as e:
             log.debug("Memory extraction failed: %s", e)
@@ -1223,7 +1249,7 @@ class Agent:
                 self._agent_catalog,
             )
             conversation.inject_environment(env_context)
-            memory_content = self.memory_manager.load() if self.memory_manager else ""
+            memory_content = await self._load_memory_context()
             conversation.inject_long_term_memory(
                 self.instructions_content, memory_content
             )
@@ -1256,11 +1282,10 @@ class Agent:
             )
             conversation.inject_environment(env_context)
 
-            if self.instructions_content:
-                memory_content = self.memory_manager.load() if self.memory_manager else ""
-                conversation.inject_long_term_memory(
-                    self.instructions_content, memory_content
-                )
+            memory_content = await self._load_memory_context(task)
+            conversation.inject_long_term_memory(
+                self.instructions_content, memory_content
+            )
 
         if task:
             conversation.add_user_message(task)

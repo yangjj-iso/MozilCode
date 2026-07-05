@@ -6,6 +6,17 @@ from mozilcode.memory.recall import (
     find_relevant_memories,
     render_reminder,
 )
+from mozilcode.memory.providers import (
+    BaseMemoryProvider,
+    MemoryEvent,
+    MemoryHub,
+    MemoryItem,
+    MemoryProvider,
+    MemoryProviderLoadError,
+    MemoryScope,
+    MarkdownMemoryProvider,
+    build_memory_hub,
+)
 from mozilcode.memory.session import (
     ResumeResult,
     Session,
@@ -21,7 +32,16 @@ from mozilcode.memory.session import (
 
 __all__ = [
     "MemoryManager",
+    "BaseMemoryProvider",
+    "MemoryEvent",
+    "MemoryHub",
+    "MemoryItem",
+    "MemoryProvider",
+    "MemoryProviderLoadError",
+    "MemoryScope",
+    "MarkdownMemoryProvider",
     "RelevantMemory",
+    "build_memory_hub",
     "ResumeResult",
     "Session",
     "SessionManager",
@@ -36,4 +56,3 @@ __all__ = [
     "render_reminder",
     "validate_message_chain",
 ]
-

@@ -35,6 +35,7 @@
    - `mozilcode/context/manager.py`：工具结果预算、大输出持久化、自动 compact、压缩恢复附件。
    - `mozilcode/memory/session.py`：会话 JSONL 持久化、恢复、compact boundary 记录。
    - `mozilcode/memory/*`：长期记忆加载、召回、抽取。
+   - `mozilcode/memory/providers/*`：`MemoryHub` 和可插拔记忆 provider。
 
 可以把主流程想成：
 
@@ -626,4 +627,3 @@ _run_prompt or AgentTool or TaskManager
 6. `mozilcode/permissions/checker.py`：理解工具调用安全边界。
 7. `mozilcode/context/manager.py`：理解长对话、工具大输出、compact。
 8. `mozilcode/memory/session.py`：理解多轮会话如何持久化和恢复。
-

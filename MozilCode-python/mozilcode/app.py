@@ -55,6 +55,7 @@ from mozilcode.memory import (
     MemoryManager,
     Session,
     SessionManager,
+    build_memory_hub,
     find_relevant_memories,
     generate_session_summary,
     load_instructions,
@@ -696,6 +697,11 @@ class MozilCodeApp(App):
 
         self._instructions_content = load_instructions(work_dir)
         self.memory_manager = MemoryManager(work_dir)
+        memory_hub = build_memory_hub(
+            self.config.memory,
+            work_dir,
+            legacy_manager=self.memory_manager,
+        )
         self.session_manager = SessionManager(work_dir)
         self.session_manager.cleanup()
         self.session = self.session_manager.create()
@@ -728,6 +734,7 @@ class MozilCodeApp(App):
             context_window=provider.get_context_window(),
             instructions_content=self._instructions_content,
             memory_manager=self.memory_manager,
+            memory_hub=memory_hub,
             hook_engine=self.hook_engine,
         )
         self.agent.file_history = self.file_history

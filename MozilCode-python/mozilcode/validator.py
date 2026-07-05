@@ -163,6 +163,67 @@ def validate_hooks(raw_hooks: list | None) -> list:
     return raw_hooks
 
 
+def validate_memory(raw_memory: object) -> dict:
+    """校验 memory 配置段，返回标准化配置。"""
+    defaults = {
+        "enabled": True,
+        "providers": [
+            {
+                "name": "markdown",
+                "type": "builtin.markdown",
+                "enabled": True,
+                "config": {},
+                "module": "",
+                "class": "",
+            }
+        ],
+    }
+    if raw_memory is None:
+        return defaults
+    if not isinstance(raw_memory, dict):
+        raise ConfigError("'memory' must be a mapping")
+
+    enabled = raw_memory.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ConfigError("'memory.enabled' must be a boolean")
+
+    raw_providers = raw_memory.get("providers", defaults["providers"])
+    if raw_providers is None:
+        raw_providers = []
+    if not isinstance(raw_providers, list):
+        raise ConfigError("'memory.providers' must be a list")
+
+    providers: list[dict] = []
+    for i, entry in enumerate(raw_providers):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"Memory provider #{i + 1}: must be a mapping")
+        name = str(entry.get("name") or "").strip()
+        provider_type = str(entry.get("type") or "").strip()
+        if not name:
+            raise ConfigError(f"Memory provider #{i + 1}: missing 'name'")
+        if not provider_type:
+            raise ConfigError(f"Memory provider '{name}': missing 'type'")
+        provider_enabled = entry.get("enabled", True)
+        if not isinstance(provider_enabled, bool):
+            raise ConfigError(f"Memory provider '{name}': 'enabled' must be a boolean")
+        provider_config = entry.get("config", {})
+        if not isinstance(provider_config, dict):
+            raise ConfigError(f"Memory provider '{name}': 'config' must be a mapping")
+
+        providers.append(
+            {
+                "name": name,
+                "type": provider_type,
+                "enabled": provider_enabled,
+                "config": provider_config,
+                "module": str(entry.get("module") or "").strip(),
+                "class": str(entry.get("class") or entry.get("class_name") or "").strip(),
+            }
+        )
+
+    return {"enabled": enabled, "providers": providers}
+
+
 def validate_bool_field(value: object, field_name: str) -> bool:
     """校验一个布尔类型的配置字段。"""
     if not isinstance(value, bool):
@@ -229,6 +290,7 @@ def validate_config_structure(raw: object) -> dict:
         "permission_mode": validate_permission_mode(raw.get("permission_mode", "default")),
         "mcp_servers": validate_mcp_servers(raw.get("mcp_servers")),
         "hooks": validate_hooks(raw.get("hooks")),
+        "memory": validate_memory(raw.get("memory")),
         "enable_fork": validate_bool_field(raw.get("enable_fork", False), "enable_fork"),
         "enable_verification_agent": validate_bool_field(
             raw.get("enable_verification_agent", False), "enable_verification_agent"

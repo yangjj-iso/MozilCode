@@ -1,7 +1,9 @@
 import pytest
+from starlette.testclient import TestClient
 
-from mozilcode.config import AppConfig, ProviderConfig
+from mozilcode.config import AppConfig, MemoryConfig, MemoryProviderConfig, ProviderConfig
 from mozilcode.daemon.server import _config_from_gui_payload
+from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import _public_qqbot_status
 from mozilcode.daemon.server import _public_telegrambot_status
 from mozilcode.daemon.server import _qqbot_settings_from_payload
@@ -157,6 +159,45 @@ def test_telegrambot_payload_preserves_existing_token_when_blank():
     assert settings["bot_token"] == "old-token"
     assert settings["allowed_users"] == "42\n7"
     assert settings["allowed_chats"] == "-100\n-200"
+
+
+def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    config = AppConfig(
+        providers=[provider],
+        memory=MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="vector",
+                    type="python",
+                    module="custom.memory",
+                    class_name="VectorMemory",
+                    config={"secret": "not-returned"},
+                )
+            ]
+        ),
+    )
+
+    app = create_app(config, str(tmp_path))
+
+    with TestClient(app) as client:
+        data = client.get("/api/settings/memory").json()
+
+    assert data["enabled"] is True
+    assert data["providers"] == [
+        {
+            "name": "vector",
+            "type": "python",
+            "enabled": True,
+            "module": "custom.memory",
+            "class": "VectorMemory",
+        }
+    ]
 
 
 @pytest.mark.asyncio

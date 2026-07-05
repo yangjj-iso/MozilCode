@@ -56,6 +56,7 @@ from mozilcode.tools.team_create import TeamCreateTool
 from mozilcode.tools.team_delete import TeamDeleteTool
 from mozilcode.worktree import WorktreeManager
 from mozilcode.memory.instructions import load_instructions
+from mozilcode.memory.providers import build_memory_hub
 from mozilcode.hooks import HookEngine, load_hooks
 from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 
@@ -418,6 +419,7 @@ async def create_agent_from_config(
     )
 
     instructions = load_instructions(work_dir)
+    memory_hub = build_memory_hub(config.memory, work_dir)
     registry = create_default_registry()
     registry.register(ToolSearchTool(registry, protocol=provider.protocol))
     registry.register(AskUserTool())
@@ -433,6 +435,7 @@ async def create_agent_from_config(
         permission_checker=checker,
         context_window=provider.get_context_window(),
         instructions_content=instructions,
+        memory_hub=memory_hub,
         hook_engine=hook_engine,
     )
 
@@ -1408,6 +1411,26 @@ async def mcp_toggle(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+async def memory_settings_get(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    cfg = server.config.memory if server.config is not None else None
+    if cfg is None:
+        return JSONResponse({"enabled": False, "providers": []})
+    return JSONResponse({
+        "enabled": cfg.enabled,
+        "providers": [
+            {
+                "name": p.name,
+                "type": p.type,
+                "enabled": p.enabled,
+                "module": p.module,
+                "class": p.class_name,
+            }
+            for p in cfg.providers
+        ],
+    })
+
+
 async def skills_list(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     disabled = set(_load_gui_settings().get("disabled_skills", []))
@@ -1694,6 +1717,7 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         Route("/api/settings/mcp", mcp_add, methods=["POST"]),
         Route("/api/settings/mcp/{name}/toggle", mcp_toggle, methods=["POST"]),
         Route("/api/settings/mcp/{name}", mcp_delete, methods=["DELETE"]),
+        Route("/api/settings/memory", memory_settings_get, methods=["GET"]),
         Route("/api/skills", skills_list, methods=["GET"]),
         Route("/api/skills", skill_create, methods=["POST"]),
         Route("/api/skills/{name}/toggle", skill_toggle, methods=["POST"]),

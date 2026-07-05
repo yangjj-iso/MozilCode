@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from mozilcode.config import ConfigError, MemoryConfig, MemoryProviderConfig, load_config
 from mozilcode.conversation import (
     ConversationManager,
     Message,
@@ -32,6 +33,15 @@ from mozilcode.memory.session import (
     records_to_messages,
     validate_message_chain,
 )
+from mozilcode.memory.providers import (
+    BaseMemoryProvider,
+    MemoryEvent,
+    MemoryHub,
+    MemoryItem,
+    MemoryScope,
+    build_memory_hub,
+)
+from mozilcode.validator import validate_memory
 
 # =========================================================================
 # A. 指令文件（MOZILCODE.md）
@@ -715,3 +725,206 @@ class TestMemoryExtraction:
         assert "项目知识" in MEMORY_EXTRACTION_PROMPT
         assert "参考资料" in MEMORY_EXTRACTION_PROMPT
         assert "不要重复添加" in MEMORY_EXTRACTION_PROMPT
+
+
+# =========================================================================
+# J. 记忆插件 MemoryHub / Provider
+# =========================================================================
+
+class _StaticMemoryProvider(BaseMemoryProvider):
+    name = "static"
+    kind = "test.static"
+    version = "1.0"
+
+    def __init__(self) -> None:
+        self.initialized = False
+        self.events: list[str] = []
+        self.writes: list[str] = []
+
+    async def initialize(self) -> None:
+        self.initialized = True
+
+    async def load_context(self, query: str, scope: MemoryScope) -> str:
+        return f"query={query}; project={scope.project_root}"
+
+    async def observe(self, event: MemoryEvent) -> None:
+        self.events.append(event.type)
+
+    async def search(self, query: str, limit: int = 5) -> list[MemoryItem]:
+        return [MemoryItem(content=f"{query}-{i}") for i in range(limit)]
+
+    async def write(self, item: MemoryItem) -> None:
+        self.writes.append(item.content)
+
+
+class _FailingMemoryProvider(BaseMemoryProvider):
+    name = "failing"
+    kind = "test.failing"
+    version = "1.0"
+
+    async def load_context(self, query: str, scope: MemoryScope) -> str:
+        raise RuntimeError("boom")
+
+
+class TestMemoryProviders:
+    @pytest.mark.asyncio
+    async def test_memory_hub_loads_observes_searches_and_writes(self, tmp_path: Path) -> None:
+        provider = _StaticMemoryProvider()
+        hub = MemoryHub(providers=[provider])
+
+        scope = MemoryScope(query="hello", project_root=str(tmp_path))
+        context = await hub.load_context("hello", scope)
+        await hub.observe(MemoryEvent(type="turn_committed"))
+        items = await hub.search("needle", limit=2)
+        await hub.write(MemoryItem(content="remember this"))
+
+        assert provider.initialized is True
+        assert "## static" in context
+        assert "query=hello" in context
+        assert provider.events == ["turn_committed"]
+        assert [item.content for item in items] == ["needle-0", "needle-1"]
+        assert provider.writes == ["remember this"]
+
+    @pytest.mark.asyncio
+    async def test_memory_hub_isolates_provider_failures(self, tmp_path: Path) -> None:
+        hub = MemoryHub(
+            providers=[_FailingMemoryProvider(), _StaticMemoryProvider()],
+            load_timeout=0.1,
+        )
+
+        context = await hub.load_context("hello", MemoryScope(project_root=str(tmp_path)))
+        status = hub.status()
+
+        assert "## static" in context
+        failing = next(p for p in status["providers"] if p["name"] == "failing")
+        assert "RuntimeError" in failing["last_error"]
+
+    @pytest.mark.asyncio
+    async def test_default_memory_hub_wraps_markdown_memory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+        project = tmp_path / "project"
+        user_mem = fake_home / ".mozilcode" / "memories.md"
+        project_mem = project / ".mozilcode" / "memories.md"
+        user_mem.parent.mkdir(parents=True)
+        project_mem.parent.mkdir(parents=True)
+        user_mem.write_text("### 用户偏好\n- prefer tests", encoding="utf-8")
+        project_mem.write_text("### 项目知识\n- has plugin memory", encoding="utf-8")
+
+        hub = build_memory_hub(None, str(project))
+        assert hub is not None
+
+        context = await hub.load_context("", MemoryScope(project_root=str(project)))
+
+        assert "## markdown" in context
+        assert "prefer tests" in context
+        assert "has plugin memory" in context
+
+    def test_disabled_memory_builds_no_hub(self, tmp_path: Path) -> None:
+        hub = build_memory_hub(MemoryConfig(enabled=False), str(tmp_path))
+        assert hub is None
+
+    @pytest.mark.asyncio
+    async def test_python_provider_can_be_loaded_from_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "custom_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class CustomProvider(BaseMemoryProvider):\n"
+            "    kind = 'python.custom'\n"
+            "    version = '0.1'\n"
+            "    def __init__(self, project_root, config):\n"
+            "        self.name = config['name']\n"
+            "        self.project_root = project_root\n"
+            "    async def load_context(self, query, scope):\n"
+            "        return f'{self.name}:{self.project_root}:{query}'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="custom",
+                    type="python",
+                    module=module_name,
+                    class_name="CustomProvider",
+                    config={"name": "loaded"},
+                )
+            ]
+        )
+
+        hub = build_memory_hub(cfg, str(tmp_path))
+        assert hub is not None
+
+        context = await hub.load_context("q", MemoryScope(project_root=str(tmp_path)))
+
+        assert "## loaded" in context
+        assert "loaded:" in context
+
+    def test_validate_memory_defaults_and_python_provider(self) -> None:
+        defaults = validate_memory(None)
+        assert defaults["enabled"] is True
+        assert defaults["providers"][0]["type"] == "builtin.markdown"
+
+        cleaned = validate_memory({
+            "enabled": True,
+            "providers": [
+                {
+                    "name": "vector",
+                    "type": "python",
+                    "module": "my_memory.provider",
+                    "class_name": "VectorMemory",
+                    "config": {"top_k": 8},
+                }
+            ],
+        })
+
+        assert cleaned["providers"][0]["class"] == "VectorMemory"
+        assert cleaned["providers"][0]["config"] == {"top_k": 8}
+
+    def test_validate_memory_rejects_bad_config_shape(self) -> None:
+        with pytest.raises(ConfigError):
+            validate_memory({"providers": [{"name": "bad", "type": "python", "config": []}]})
+
+
+class TestMemoryConfig:
+    def test_project_config_without_memory_does_not_override_home_memory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        project = tmp_path / "project"
+        home_cfg = home / ".mozilcode" / "config.yaml"
+        project_cfg = project / ".mozilcode" / "config.yaml"
+        home_cfg.parent.mkdir(parents=True)
+        project_cfg.parent.mkdir(parents=True)
+        home_cfg.write_text(
+            "providers:\n"
+            "  - name: home\n"
+            "    protocol: openai\n"
+            "    base_url: http://home.local/v1\n"
+            "    model: gpt-home\n"
+            "memory:\n"
+            "  enabled: false\n",
+            encoding="utf-8",
+        )
+        project_cfg.write_text(
+            "providers:\n"
+            "  - name: project\n"
+            "    protocol: openai\n"
+            "    base_url: http://project.local/v1\n"
+            "    model: gpt-project\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+        monkeypatch.chdir(project)
+
+        cfg = load_config()
+
+        assert cfg.providers[0].name == "project"
+        assert cfg.memory.enabled is False
