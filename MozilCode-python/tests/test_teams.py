@@ -23,7 +23,11 @@ from mozilcode.teams.models import (
 from mozilcode.teams.shared_task import SharedTask, SharedTaskStore
 from mozilcode.teams.mailbox import Mailbox, MailboxMessage, create_message
 from mozilcode.teams.registry import AgentNameRegistry
-from mozilcode.teams.backend_detect import BackendDetectionError, detect_backend
+from mozilcode.teams.backend_detect import (
+    BackendDetectionError,
+    detect_backend,
+    detect_pane_backend,
+)
 from mozilcode.teams.coordinator import (
     get_coordinator_system_prompt,
     get_coordinator_user_context,
@@ -344,8 +348,8 @@ class TestBackendDetect:
 
     def test_tmux_session(self):
         with patch.dict(os.environ, {"TMUX": "/tmp/tmux-1234/default,12345,0"}):
-            result = detect_backend()
-            assert result == BackendType.TMUX
+            assert detect_backend() == BackendType.IN_PROCESS
+            assert detect_pane_backend() == BackendType.TMUX
 
     def test_iterm2_with_it2(self):
         env = {"TERM_PROGRAM": "iTerm.app"}
@@ -360,8 +364,8 @@ class TestBackendDetect:
                 mock_which.side_effect = which_side_effect
                 with patch.dict(os.environ, {"TMUX": ""}, clear=False):
                     os.environ.pop("TMUX", None)
-                    result = detect_backend()
-                    assert result == BackendType.ITERM2
+                    assert detect_backend() == BackendType.IN_PROCESS
+                    assert detect_pane_backend() == BackendType.ITERM2
 
     def test_tmux_installed_not_in_session(self):
         with patch.dict(os.environ, {}, clear=False):
@@ -369,16 +373,17 @@ class TestBackendDetect:
             os.environ.pop("TERM_PROGRAM", None)
             with patch("mozilcode.teams.backend_detect.shutil.which") as mock_which:
                 mock_which.return_value = "/usr/bin/tmux"
-                result = detect_backend()
-                assert result == BackendType.TMUX
+                assert detect_backend() == BackendType.IN_PROCESS
+                assert detect_pane_backend() == BackendType.TMUX
 
     def test_no_backend_raises(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TMUX", None)
             os.environ.pop("TERM_PROGRAM", None)
             with patch("mozilcode.teams.backend_detect.shutil.which", return_value=None):
+                assert detect_backend() == BackendType.IN_PROCESS
                 with pytest.raises(BackendDetectionError):
-                    detect_backend()
+                    detect_pane_backend()
 
 # =====================================================================
 # 6. Tool Filtering（工具过滤）
@@ -553,9 +558,10 @@ class TestTranscript:
 
 class TestAgentCoordinatorIntegration:
     def test_normal_prompt(self):
-        from mozilcode.prompts import build_system_prompt, BASE_PERSONA
+        from mozilcode.prompts import build_system_prompt
         prompt = build_system_prompt()
-        assert BASE_PERSONA in prompt
+        assert "You are MozilCode" in prompt
+        assert "# System" in prompt
 
     def test_coordinator_prompt(self):
         from mozilcode.prompts import build_system_prompt
@@ -565,7 +571,7 @@ class TestAgentCoordinatorIntegration:
         assert "Synthesis" in prompt
 
     def test_coordinator_overrides_plan(self):
-        from mozilcode.prompts import build_system_prompt, PLAN_MODE_INSTRUCTIONS
-        prompt = build_system_prompt(plan_mode=True, coordinator_mode=True)
-        assert PLAN_MODE_INSTRUCTIONS not in prompt
+        from mozilcode.prompts import build_system_prompt
+        prompt = build_system_prompt(coordinator_mode=True)
+        assert "# System" not in prompt
         assert "coordinator" in prompt.lower()

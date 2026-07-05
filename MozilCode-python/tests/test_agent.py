@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import pytest
@@ -120,6 +121,9 @@ async def test_single_step_tool_call():
 @pytest.mark.asyncio
 async def test_multi_step_autonomous():
     """Agent 先 WriteFile 再 ReadFile 然后停止 —— 端到端的多步流程。"""
+    test_file = Path("/tmp/mozilcode_test_hello.txt")
+    test_file.unlink(missing_ok=True)
+
     client = MockLLMClient([
         # 第 1 轮：WriteFile
         [
@@ -310,12 +314,15 @@ async def test_message_splicing():
 
     # 检查对话历史
     msgs = build_anthropic_messages(conv.get_messages())
-    # env_context(user) + user_message + assistant(text+2 个 tool_use) + user(2 个 tool_result) + assistant(最终响应)
-    assert len(msgs) == 5
-    assistant_msg = msgs[2]
+    # env_context 会合并进首条 user 消息，然后是 assistant/tool_result/最终 assistant。
+    assert len(msgs) == 4
+    assert msgs[0]["role"] == "user"
+    assert "Current working directory:" in msgs[0]["content"]
+    assert "Read both files" in msgs[0]["content"]
+    assistant_msg = msgs[1]
     assert assistant_msg["role"] == "assistant"
     assert len(assistant_msg["content"]) == 3  # text + 2 个 tool_use
-    tool_results_msg = msgs[3]
+    tool_results_msg = msgs[2]
     assert tool_results_msg["role"] == "user"
     assert len(tool_results_msg["content"]) == 2  # 2 个 tool_result
     assert tool_results_msg["content"][0]["tool_use_id"] == "t1"

@@ -231,18 +231,19 @@ def git_repo(tmp_path):
 
 @pytest.fixture
 def manager(git_repo):
-    cache = FileCache()
     return WorktreeManager(
         repo_root=str(git_repo),
-        file_cache=cache,
         symlink_directories=[],
     )
 
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
 class TestWorktreeManager:
     def test_create(self, manager, git_repo):
-        wt = asyncio.get_event_loop().run_until_complete(
-            manager.create("test-feature")
-        )
+        wt = _run(manager.create("test-feature"))
         assert wt.name == "test-feature"
         assert wt.branch == "worktree-test-feature"
         assert Path(wt.path).exists()
@@ -250,86 +251,67 @@ class TestWorktreeManager:
 
     def test_create_invalid_slug(self, manager):
         with pytest.raises(WorktreeError, match="must not contain"):
-            asyncio.get_event_loop().run_until_complete(
-                manager.create("../escape")
-            )
+            _run(manager.create("../escape"))
 
     def test_create_duplicate(self, manager):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(manager.create("dup"))
+        _run(manager.create("dup"))
         with pytest.raises(WorktreeError, match="already exists"):
-            loop.run_until_complete(manager.create("dup"))
+            _run(manager.create("dup"))
 
     def test_create_nested_slug(self, manager):
-        wt = asyncio.get_event_loop().run_until_complete(
-            manager.create("team/alice")
-        )
+        wt = _run(manager.create("team/alice"))
         assert wt.branch == "worktree-team+alice"
         assert Path(wt.path).exists()
 
     def test_fast_recovery(self, manager):
-        loop = asyncio.get_event_loop()
-        wt1 = loop.run_until_complete(manager.create("recover"))
+        wt1 = _run(manager.create("recover"))
         path = wt1.path
         manager.active.clear()
-        wt2 = loop.run_until_complete(manager.create("recover"))
+        wt2 = _run(manager.create("recover"))
         assert wt2.path == path
         assert wt2.head_commit == wt1.head_commit
 
     def test_enter_and_session(self, manager):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(manager.create("enter-test"))
-        session = loop.run_until_complete(manager.enter("enter-test"))
+        _run(manager.create("enter-test"))
+        session = _run(manager.enter("enter-test"))
         assert session.worktree_name == "enter-test"
         assert manager.current_session is not None
 
-    def test_enter_clears_cache(self, manager):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(manager.create("cache-test"))
-        manager.file_cache.put("/some/file", "old content")
-        loop.run_until_complete(manager.enter("cache-test"))
-        assert manager.file_cache.get("/some/file") is None
+    def test_enter_sets_current_session(self, manager):
+        _run(manager.create("cache-test"))
+        session = _run(manager.enter("cache-test"))
+        assert manager.current_session == session
 
     def test_exit_keep(self, manager):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(manager.create("exit-keep"))
-        loop.run_until_complete(manager.enter("exit-keep"))
-        loop.run_until_complete(manager.exit("exit-keep", action="keep"))
+        _run(manager.create("exit-keep"))
+        _run(manager.enter("exit-keep"))
+        _run(manager.exit("exit-keep", action="keep"))
         assert manager.current_session is None
         assert "exit-keep" in manager.active
 
     def test_exit_remove_clean(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("exit-rm"))
-        loop.run_until_complete(manager.enter("exit-rm"))
-        loop.run_until_complete(
-            manager.exit("exit-rm", action="remove", discard_changes=True)
-        )
+        wt = _run(manager.create("exit-rm"))
+        _run(manager.enter("exit-rm"))
+        _run(manager.exit("exit-rm", action="remove", discard_changes=True))
         assert "exit-rm" not in manager.active
 
     def test_exit_remove_with_changes_blocked(self, manager, git_repo):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("exit-protect"))
+        wt = _run(manager.create("exit-protect"))
         (Path(wt.path) / "new_file.txt").write_text("changes")
-        loop.run_until_complete(manager.enter("exit-protect"))
+        _run(manager.enter("exit-protect"))
         with pytest.raises(WorktreeError, match="has changes"):
-            loop.run_until_complete(
-                manager.exit("exit-protect", action="remove", discard_changes=False)
-            )
+            _run(manager.exit("exit-protect", action="remove", discard_changes=False))
 
     def test_list_worktrees(self, manager):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(manager.create("list-a"))
-        loop.run_until_complete(manager.create("list-b"))
+        _run(manager.create("list-a"))
+        _run(manager.create("list-b"))
         wts = manager.list_worktrees()
         names = {wt.name for wt in wts}
         assert names == {"list-a", "list-b"}
 
     def test_enter_nonexistent(self, manager):
         with pytest.raises(WorktreeError, match="not found"):
-            asyncio.get_event_loop().run_until_complete(
-                manager.enter("nope")
-            )
+            _run(manager.enter("nope"))
 
 # =========================================================================
 # F. 变更检测与自动清理
@@ -337,19 +319,16 @@ class TestWorktreeManager:
 
 class TestChangeDetection:
     def test_clean_worktree(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("clean-wt"))
+        wt = _run(manager.create("clean-wt"))
         assert not has_worktree_changes(wt.path, wt.head_commit)
 
     def test_uncommitted_changes(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("dirty-wt"))
+        wt = _run(manager.create("dirty-wt"))
         (Path(wt.path) / "dirty.txt").write_text("new")
         assert has_worktree_changes(wt.path, wt.head_commit)
 
     def test_new_commits(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("commit-wt"))
+        wt = _run(manager.create("commit-wt"))
         assert wt.head_commit, "head_commit should not be empty after create"
         (Path(wt.path) / "committed.txt").write_text("new")
         subprocess.run(["git", "add", "."], cwd=wt.path, capture_output=True, check=True)
@@ -363,21 +342,15 @@ class TestChangeDetection:
         assert changes.new_commits > 0
 
     def test_auto_cleanup_removes_clean(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("auto-clean"))
-        result = loop.run_until_complete(
-            manager.auto_cleanup("auto-clean", wt.head_commit)
-        )
+        wt = _run(manager.create("auto-clean"))
+        result = _run(manager.auto_cleanup("auto-clean", wt.head_commit))
         assert not result.kept
         assert "auto-clean" not in manager.active
 
     def test_auto_cleanup_keeps_dirty(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("auto-dirty"))
+        wt = _run(manager.create("auto-dirty"))
         (Path(wt.path) / "file.txt").write_text("content")
-        result = loop.run_until_complete(
-            manager.auto_cleanup("auto-dirty", wt.head_commit)
-        )
+        result = _run(manager.auto_cleanup("auto-dirty", wt.head_commit))
         assert result.kept
         assert result.path == wt.path
         assert "auto-dirty" in manager.active
@@ -388,8 +361,7 @@ class TestChangeDetection:
 
 class TestReadWorktreeHeadSha:
     def test_valid_worktree(self, manager):
-        loop = asyncio.get_event_loop()
-        wt = loop.run_until_complete(manager.create("sha-test"))
+        wt = _run(manager.create("sha-test"))
         sha = WorktreeManager.read_worktree_head_sha(wt.path)
         assert sha is not None
         assert len(sha) == 40

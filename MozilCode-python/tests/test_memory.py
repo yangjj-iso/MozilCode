@@ -972,6 +972,32 @@ class TestMemoryProviders:
         assert ("/session/end", {"session_key": "mc:s1"}) in calls
 
     @pytest.mark.asyncio
+    async def test_tencentdb_provider_ignores_no_match_search_response(self, tmp_path: Path) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json={"status": "ok"})
+            if request.url.path == "/search/memories":
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": "No matching memories found.",
+                        "total": 0,
+                        "strategy": "fts",
+                    },
+                )
+            return httpx.Response(404, json={})
+
+        client = TencentDBGatewayClient(
+            "http://tdai.local",
+            transport=httpx.MockTransport(handler),
+        )
+        provider = TencentDBMemoryProvider(str(tmp_path), client=client)
+
+        await provider.initialize()
+
+        assert await provider.search("missing") == []
+
+    @pytest.mark.asyncio
     async def test_builtin_tencentdb_provider_can_be_loaded_from_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

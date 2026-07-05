@@ -261,8 +261,8 @@ class TestPermissionMode:
 
     def test_plan_mode(self) -> None:
         assert mode_decide(PermissionMode.PLAN, "read") == "allow"
-        assert mode_decide(PermissionMode.PLAN, "write") == "deny"
-        assert mode_decide(PermissionMode.PLAN, "command") == "deny"
+        assert mode_decide(PermissionMode.PLAN, "write") == "ask"
+        assert mode_decide(PermissionMode.PLAN, "command") == "ask"
 
     def test_bypass_mode(self) -> None:
         assert mode_decide(PermissionMode.BYPASS, "read") == "allow"
@@ -322,12 +322,12 @@ class TestPermissionChecker:
         d = self.checker.check(tool, {"command": "npm test"})
         assert d.effect == "ask"
 
-    def test_plan_mode_denies_write(self) -> None:
+    def test_plan_mode_asks_for_write(self) -> None:
         from mozilcode.tools.write_file import WriteFile
         self.checker.mode = PermissionMode.PLAN
         tool = WriteFile()
         d = self.checker.check(tool, {"file_path": str(self.tmpdir / "x.txt"), "content": "hi"})
-        assert d.effect == "deny"
+        assert d.effect == "ask"
 
     def test_bypass_mode_allows_all(self) -> None:
         from mozilcode.tools.bash import Bash
@@ -571,15 +571,21 @@ async def test_e2e_bypass_mode_allows_all():
 
     client = MockLLMClient([
         [
-            ToolCallComplete("t1", "WriteFile", {
+            ToolCallComplete("t1", "ReadFile", {
                 "file_path": str(test_file),
-                "content": "modified",
             }),
             StreamEnd("end_turn", input_tokens=10, output_tokens=20),
         ],
         [
-            TextDelta("Done."),
+            ToolCallComplete("t2", "WriteFile", {
+                "file_path": str(test_file),
+                "content": "modified",
+            }),
             StreamEnd("end_turn", input_tokens=30, output_tokens=10),
+        ],
+        [
+            TextDelta("Done."),
+            StreamEnd("end_turn", input_tokens=40, output_tokens=10),
         ],
     ])
     registry = create_default_registry()
@@ -599,8 +605,9 @@ async def test_e2e_bypass_mode_allows_all():
 
     c = _collect(events)
     assert len(c["permission"]) == 0
-    assert len(c["tool_result"]) == 1
+    assert len(c["tool_result"]) == 2
     assert not c["tool_result"][0].is_error
+    assert not c["tool_result"][1].is_error
     assert test_file.read_text() == "modified"
 
 @pytest.mark.asyncio

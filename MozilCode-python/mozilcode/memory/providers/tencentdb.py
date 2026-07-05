@@ -203,6 +203,11 @@ class TencentDBMemoryProvider(BaseMemoryProvider):
         text = result.get("results", "")
         if not isinstance(text, str) or not text.strip():
             return []
+        total = result.get("total")
+        if isinstance(total, (int, float)) and total <= 0:
+            return []
+        if text.strip().lower() == "no matching memories found.":
+            return []
         return [
             MemoryItem(
                 content=text.strip(),
