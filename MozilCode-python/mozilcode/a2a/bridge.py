@@ -111,7 +111,10 @@ class A2ABridge:
             "metadata": {
                 "work_dir": getattr(self._server, "work_dir", ""),
                 "model": model,
-                "qqWebhook": "/api/qq/onebot",
+                "officialBots": {
+                    "qq": "/api/settings/qqbot",
+                    "telegram": "/api/settings/telegrambot",
+                },
             },
         }
 

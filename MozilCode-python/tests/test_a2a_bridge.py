@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from mozilcode.a2a.bridge import A2ABridge, TASK_COMPLETED
-from mozilcode.a2a.qq import OneBotConfig, OneBotQQAdapter
 from mozilcode.a2a.qq_official import OfficialQQAdapter, OfficialQQConfig
+from mozilcode.a2a.telegram_official import TelegramBotAdapter, TelegramBotConfig
 from mozilcode.config import AppConfig, ProviderConfig
 
 
@@ -111,39 +111,13 @@ class _StubOfficialQQApi:
         return {"id": "reply-1"}
 
 
-@pytest.mark.asyncio
-async def test_onebot_quick_reply_strips_private_prefix():
-    adapter = OneBotQQAdapter(
-        _StubBridge(),
-        OneBotConfig(reply_mode="quick", command_prefix="/mew", timeout=1),
-    )
+class _StubTelegramApi:
+    def __init__(self) -> None:
+        self.messages = []
 
-    result = await adapter.handle_event({
-        "post_type": "message",
-        "message_type": "private",
-        "user_id": 10001,
-        "raw_message": "/mew 你好",
-    })
-
-    assert result == {"reply": "ok: 你好", "auto_escape": True}
-
-
-@pytest.mark.asyncio
-async def test_onebot_group_requires_prefix():
-    adapter = OneBotQQAdapter(
-        _StubBridge(),
-        OneBotConfig(reply_mode="quick", command_prefix="/mew", timeout=1),
-    )
-
-    result = await adapter.handle_event({
-        "post_type": "message",
-        "message_type": "group",
-        "user_id": 10001,
-        "group_id": 20002,
-        "raw_message": "你好",
-    })
-
-    assert result == {"status": "ignored"}
+    async def send_message(self, chat_id, text, *, reply_to_message_id=None):
+        self.messages.append((chat_id, text, reply_to_message_id))
+        return {"result": {"message_id": 10}}
 
 
 @pytest.mark.asyncio
@@ -223,3 +197,83 @@ async def test_official_qq_group_full_message_requires_prefix():
 
     assert result == {"status": "ignored"}
     assert api.posts == []
+
+
+@pytest.mark.asyncio
+async def test_telegram_private_strips_command_prefix():
+    api = _StubTelegramApi()
+    adapter = TelegramBotAdapter(
+        _StubBridge(),
+        api=api,
+        config=TelegramBotConfig(command_prefix="/mew", timeout=1),
+    )
+
+    result = await adapter.handle_update(
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 11,
+                "chat": {"id": 42, "type": "private"},
+                "from": {"id": 42, "username": "alice"},
+                "text": "/mew 你好",
+            },
+        },
+        background=False,
+    )
+
+    assert result == {"status": "accepted"}
+    assert api.messages == [("42", "ok: 你好", 11)]
+
+
+@pytest.mark.asyncio
+async def test_telegram_group_requires_prefix():
+    api = _StubTelegramApi()
+    adapter = TelegramBotAdapter(
+        _StubBridge(),
+        api=api,
+        config=TelegramBotConfig(command_prefix="/mew", timeout=1),
+        bot_username="mozil_bot",
+    )
+
+    result = await adapter.handle_update(
+        {
+            "update_id": 2,
+            "message": {
+                "message_id": 12,
+                "chat": {"id": -100, "type": "supergroup"},
+                "from": {"id": 42},
+                "text": "你好",
+            },
+        },
+        background=False,
+    )
+
+    assert result == {"status": "ignored"}
+    assert api.messages == []
+
+
+@pytest.mark.asyncio
+async def test_telegram_group_accepts_bot_command_mention():
+    api = _StubTelegramApi()
+    adapter = TelegramBotAdapter(
+        _StubBridge(),
+        api=api,
+        config=TelegramBotConfig(command_prefix="/mew", timeout=1),
+        bot_username="mozil_bot",
+    )
+
+    result = await adapter.handle_update(
+        {
+            "update_id": 3,
+            "message": {
+                "message_id": 13,
+                "chat": {"id": -100, "type": "group"},
+                "from": {"id": 42},
+                "text": "/mew@mozil_bot 你好",
+            },
+        },
+        background=False,
+    )
+
+    assert result == {"status": "accepted"}
+    assert api.messages == [("-100", "ok: 你好", 13)]

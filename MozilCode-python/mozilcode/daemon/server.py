@@ -62,8 +62,8 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.a2a.bridge import A2ABridge, A2AError
-from mozilcode.a2a.qq import OneBotQQAdapter
 from mozilcode.a2a.qq_official import DEFAULT_INTENTS, OfficialQQConfig, create_official_qq_gateway
+from mozilcode.a2a.telegram_official import TelegramBotConfig, create_telegram_bot_runner
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ _GUI_SETTINGS_FILE = Path.home() / ".mozilcode" / "gui_settings.json"
 _USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 
 _QQBOT_PROVIDER = "official"
+_TELEGRAMBOT_PROVIDER = "telegram-official"
 
 
 def _session_dir(sid: str) -> Path:
@@ -92,10 +93,11 @@ def _load_gui_settings() -> dict:
             d.setdefault("mcp_servers", [])
             d.setdefault("disabled_skills", [])
             d.setdefault("qqbot", {})
+            d.setdefault("telegrambot", {})
             return d
     except Exception:
         pass
-    return {"mcp_servers": [], "disabled_skills": [], "qqbot": {}}
+    return {"mcp_servers": [], "disabled_skills": [], "qqbot": {}, "telegrambot": {}}
 
 
 def _save_gui_settings(data: dict) -> None:
@@ -215,6 +217,69 @@ def _public_qqbot_status(app: Starlette | None = None, settings: dict | None = N
         "allowed_groups": _id_list_text(cfg.allowed_groups),
         "intents": cfg.intents,
         "shard": [cfg.shard_id, cfg.shard_count],
+        "config_path": str(_GUI_SETTINGS_FILE),
+        **status,
+    }
+
+
+def _normalize_telegrambot_settings(raw: dict | None) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "provider": _TELEGRAMBOT_PROVIDER,
+        "enabled": _coerce_bool(raw.get("enabled"), False),
+        "bot_token": str(raw.get("bot_token") or "").strip(),
+        "command_prefix": str(raw.get("command_prefix") or "/mew").strip(),
+        "allowed_users": _id_list_text(raw.get("allowed_users")),
+        "allowed_chats": _id_list_text(raw.get("allowed_chats")),
+    }
+
+
+def _telegrambot_settings_from_payload(body: dict, current: dict | None = None) -> dict:
+    current = current if isinstance(current, dict) else {}
+    merged = {**current, **(body or {})}
+    token = body.get("bot_token") if isinstance(body, dict) else None
+    if token is None or not str(token).strip():
+        merged["bot_token"] = str(current.get("bot_token") or "").strip()
+    return _normalize_telegrambot_settings(merged)
+
+
+def _resolve_telegrambot_config(settings: dict | None = None) -> tuple[bool, TelegramBotConfig, dict]:
+    data = settings if isinstance(settings, dict) else _load_gui_settings()
+    raw = data.get("telegrambot") if isinstance(data, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    saved = bool(raw)
+    normalized = _normalize_telegrambot_settings(raw)
+    env_cfg = TelegramBotConfig.from_env()
+    enabled = _coerce_bool(raw.get("enabled"), False) if saved else TelegramBotConfig.enabled_from_env()
+
+    cfg = TelegramBotConfig.from_env()
+    cfg.bot_token = normalized["bot_token"] or env_cfg.bot_token
+    if saved and "command_prefix" in raw:
+        cfg.command_prefix = normalized["command_prefix"]
+    if saved and "allowed_users" in raw:
+        cfg.allowed_users = _split_id_list(normalized["allowed_users"])
+    if saved and "allowed_chats" in raw:
+        cfg.allowed_chats = _split_id_list(normalized["allowed_chats"])
+    return enabled, cfg, normalized
+
+
+def _public_telegrambot_status(app: Starlette | None = None, settings: dict | None = None) -> dict:
+    enabled, cfg, _normalized = _resolve_telegrambot_config(settings)
+    gateway = getattr(app.state, "telegram_bot_runner", None) if app is not None else None
+    status = gateway.status() if gateway is not None else {}
+    return {
+        "provider": _TELEGRAMBOT_PROVIDER,
+        "enabled": enabled,
+        "configured": cfg.is_configured(),
+        "running": False,
+        "session_ready": False,
+        "bot_username": "",
+        "last_update_id": None,
+        "last_error": "",
+        "bot_token_set": bool(cfg.bot_token),
+        "command_prefix": cfg.command_prefix,
+        "allowed_users": _id_list_text(cfg.allowed_users),
+        "allowed_chats": _id_list_text(cfg.allowed_chats),
         "config_path": str(_GUI_SETTINGS_FILE),
         **status,
     }
@@ -1461,22 +1526,6 @@ async def a2a_task_cancel(request: Request) -> JSONResponse:
     return JSONResponse(bridge.task_to_a2a(task))
 
 
-async def qq_onebot_webhook(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    raw = await request.body()
-    try:
-        event = json.loads(raw.decode("utf-8") or "{}")
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "invalid JSON"}, status_code=400)
-    adapter = OneBotQQAdapter(bridge)
-    result = await adapter.handle_event(
-        event,
-        headers=dict(request.headers),
-        raw_body=raw,
-    )
-    return JSONResponse(result)
-
-
 async def qq_official_status(request: Request) -> JSONResponse:
     return JSONResponse(_public_qqbot_status(request.app))
 
@@ -1524,6 +1573,53 @@ async def qqbot_settings_save(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, **_public_qqbot_status(request.app)})
 
 
+async def telegrambot_status(request: Request) -> JSONResponse:
+    return JSONResponse(_public_telegrambot_status(request.app))
+
+
+async def _apply_telegram_bot_runner(app: Starlette, bridge: A2ABridge, *, restart: bool = False) -> None:
+    runner = getattr(app.state, "telegram_bot_runner", None)
+    enabled, cfg, _settings = _resolve_telegrambot_config()
+
+    if runner is not None and (restart or not enabled or not cfg.is_configured()):
+        await runner.stop()
+        app.state.telegram_bot_runner = None
+        runner = None
+
+    if not enabled:
+        return
+    if not cfg.is_configured():
+        log.warning("Telegram Bot requested but Bot token is not configured")
+        return
+    if runner is not None:
+        return
+
+    runner = create_telegram_bot_runner(bridge, cfg)
+    app.state.telegram_bot_runner = runner
+    await runner.start()
+    log.info("Telegram Bot adapter enabled")
+
+
+async def telegrambot_settings_get(request: Request) -> JSONResponse:
+    return JSONResponse(_public_telegrambot_status(request.app))
+
+
+async def telegrambot_settings_save(request: Request) -> JSONResponse:
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "JSON object is required"}, status_code=400)
+
+    data = _load_gui_settings()
+    data["telegrambot"] = _telegrambot_settings_from_payload(body, data.get("telegrambot"))
+    enabled, cfg, _settings = _resolve_telegrambot_config(data)
+    if enabled and not cfg.is_configured():
+        return JSONResponse({"error": "启用 Telegram Bot 需要 Bot Token"}, status_code=400)
+
+    _save_gui_settings(data)
+    await _apply_telegram_bot_runner(request.app, request.app.state.a2a_bridge, restart=True)
+    return JSONResponse({"ok": True, **_public_telegrambot_status(request.app)})
+
+
 async def serve_gui(request: Request) -> JSONResponse:
     """Serve the embedded GUI HTML at /."""
     from pathlib import Path
@@ -1546,13 +1642,18 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
     @asynccontextmanager
     async def lifespan(app: Starlette):
         app.state.qq_official_gateway = None
+        app.state.telegram_bot_runner = None
         await _apply_qq_official_gateway(app, a2a_bridge)
+        await _apply_telegram_bot_runner(app, a2a_bridge)
         try:
             yield
         finally:
             gateway = getattr(app.state, "qq_official_gateway", None)
             if gateway is not None:
                 await gateway.stop()
+            runner = getattr(app.state, "telegram_bot_runner", None)
+            if runner is not None:
+                await runner.stop()
 
     routes = [
         Route("/", serve_gui, methods=["GET"]),
@@ -1562,10 +1663,12 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         Route("/a2a/message:send", a2a_message_send, methods=["POST"]),
         Route("/a2a/tasks/{task_id}", a2a_task_get, methods=["GET"]),
         Route("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, methods=["POST"]),
-        Route("/api/qq/onebot", qq_onebot_webhook, methods=["POST"]),
         Route("/api/qq/official/status", qq_official_status, methods=["GET"]),
+        Route("/api/telegram/status", telegrambot_status, methods=["GET"]),
         Route("/api/settings/qqbot", qqbot_settings_get, methods=["GET"]),
         Route("/api/settings/qqbot", qqbot_settings_save, methods=["POST"]),
+        Route("/api/settings/telegrambot", telegrambot_settings_get, methods=["GET"]),
+        Route("/api/settings/telegrambot", telegrambot_settings_save, methods=["POST"]),
         Route("/api/health", health, methods=["GET"]),
         Route("/api/config", config_status, methods=["GET"]),
         Route("/api/config", save_config, methods=["POST"]),

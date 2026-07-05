@@ -3,8 +3,11 @@ import pytest
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import _config_from_gui_payload
 from mozilcode.daemon.server import _public_qqbot_status
+from mozilcode.daemon.server import _public_telegrambot_status
 from mozilcode.daemon.server import _qqbot_settings_from_payload
 from mozilcode.daemon.server import _resolve_qqbot_config
+from mozilcode.daemon.server import _resolve_telegrambot_config
+from mozilcode.daemon.server import _telegrambot_settings_from_payload
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.permissions.modes import PermissionMode
 
@@ -114,6 +117,46 @@ def test_qqbot_payload_preserves_existing_secret_when_blank():
     assert settings["app_secret"] == "old-secret"
     assert settings["allowed_users"] == "u1\nu2"
     assert settings["allowed_groups"] == "g1\ng2"
+
+
+def test_telegrambot_public_status_uses_env_fallback_and_masks_token(monkeypatch):
+    monkeypatch.setenv("MOZILCODE_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("MOZILCODE_TELEGRAM_COMMAND_PREFIX", "/mew")
+
+    status = _public_telegrambot_status(settings={"telegrambot": {}})
+
+    assert status["enabled"] is True
+    assert status["configured"] is True
+    assert status["bot_token_set"] is True
+    assert "bot_token" not in status
+
+
+def test_telegrambot_saved_disabled_overrides_env_enabled(monkeypatch):
+    monkeypatch.setenv("MOZILCODE_TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
+
+    enabled, cfg, _settings = _resolve_telegrambot_config({"telegrambot": {"enabled": False}})
+
+    assert enabled is False
+    assert cfg.is_configured() is True
+
+
+def test_telegrambot_payload_preserves_existing_token_when_blank():
+    settings = _telegrambot_settings_from_payload(
+        {
+            "enabled": True,
+            "bot_token": "",
+            "command_prefix": "/mc",
+            "allowed_users": "42, 7",
+            "allowed_chats": "-100\n-200",
+        },
+        {"bot_token": "old-token"},
+    )
+
+    assert settings["bot_token"] == "old-token"
+    assert settings["allowed_users"] == "42\n7"
+    assert settings["allowed_chats"] == "-100\n-200"
 
 
 @pytest.mark.asyncio

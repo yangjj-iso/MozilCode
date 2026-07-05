@@ -342,6 +342,10 @@
         <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v7A3.5 3.5 0 0 1 16.5 16H10l-4.6 4.1A.85.85 0 0 1 4 19.45V16.1A3.5 3.5 0 0 1 1 12.65V5.5zM7.5 4A1.5 1.5 0 0 0 6 5.5v9.05l3.05-2.7H16.5A1.5 1.5 0 0 0 18 10.35V5.5A1.5 1.5 0 0 0 16.5 4z"/></svg>
         QQ Bot
       </button>
+      <button class="set-item" :class="{ active: setTab === 'telegrambot' }" @click="setSettingsTab('telegrambot')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M21.9 4.1 18.7 19c-.2 1-1 1.2-1.8.7l-5-3.7-2.4 2.3c-.3.3-.5.5-1 .5l.4-5.1 9.3-8.4c.4-.4-.1-.6-.6-.2L6.1 12.3 1.1 10.7c-1-.3-1-1 .2-1.5L20.6 1.8c.9-.3 1.7.2 1.3 2.3z"/></svg>
+        Telegram Bot
+      </button>
     </div>
     <div class="set-main">
       <div v-if="setTab === 'model'" class="set-pane">
@@ -432,7 +436,7 @@
             <textarea v-model="qqBotConfig.allowed_users" rows="4" placeholder="允许用户 OpenID（可选，每行一个）"></textarea>
             <textarea v-model="qqBotConfig.allowed_groups" rows="4" placeholder="允许群 OpenID（可选，每行一个）"></textarea>
           </div>
-          <div class="qq-status">
+          <div class="bot-status">
             <div><span>启用</span><b>{{ qqBotStatus.enabled ? '是' : '否' }}</b></div>
             <div><span>配置</span><b>{{ qqBotStatus.configured ? '完整' : '缺失' }}</b></div>
             <div><span>连接</span><b>{{ qqBotStatus.running ? '运行中' : '未运行' }}</b></div>
@@ -445,6 +449,36 @@
             <button class="set-save" @click="saveQqBot">保存并应用</button>
           </div>
           <div class="set-note mono">配置文件: {{ qqBotStatus.config_path || '—' }}</div>
+        </div>
+      </div>
+
+      <div v-else-if="setTab === 'telegrambot'" class="set-pane">
+        <h2>Telegram Bot</h2>
+        <p class="set-desc">官方 Telegram Bot API 的 A2A 接入配置。</p>
+        <div class="set-form model-form qqbot-form">
+          <label class="check-row"><input type="checkbox" v-model="telegramBotConfig.enabled" /> 启用 Telegram Bot</label>
+          <div class="secret-row">
+            <input v-model="telegramBotConfig.bot_token" type="password" placeholder="Bot Token（留空保持不变）" autocomplete="off" />
+            <span v-if="telegramBotConfig.bot_token_set" class="set-tag">已设置</span>
+          </div>
+          <input v-model="telegramBotConfig.command_prefix" placeholder="命令前缀，例如 /mew" />
+          <div class="set-grid2">
+            <textarea v-model="telegramBotConfig.allowed_users" rows="4" placeholder="允许用户 ID（可选，每行一个）"></textarea>
+            <textarea v-model="telegramBotConfig.allowed_chats" rows="4" placeholder="允许 Chat ID（可选，每行一个）"></textarea>
+          </div>
+          <div class="bot-status">
+            <div><span>启用</span><b>{{ telegramBotStatus.enabled ? '是' : '否' }}</b></div>
+            <div><span>配置</span><b>{{ telegramBotStatus.configured ? '完整' : '缺失' }}</b></div>
+            <div><span>轮询</span><b>{{ telegramBotStatus.running ? '运行中' : '未运行' }}</b></div>
+            <div><span>会话</span><b>{{ telegramBotStatus.session_ready ? '已就绪' : '未就绪' }}</b></div>
+            <div><span>账号</span><b>{{ telegramBotStatus.bot_username || '—' }}</b></div>
+            <div><span>错误</span><b>{{ telegramBotStatus.last_error || '—' }}</b></div>
+          </div>
+          <div class="set-form-acts">
+            <button class="set-cancel" @click="loadTelegramBot">刷新状态</button>
+            <button class="set-save" @click="saveTelegramBot">保存并应用</button>
+          </div>
+          <div class="set-note mono">配置文件: {{ telegramBotStatus.config_path || '—' }}</div>
         </div>
       </div>
     </div>
@@ -873,6 +907,23 @@ const qqBotConfig = ref({
   allowed_groups: '',
 });
 const qqBotStatus = ref({
+  enabled: false,
+  configured: false,
+  running: false,
+  session_ready: false,
+  bot_username: '',
+  last_error: '',
+  config_path: '',
+});
+const telegramBotConfig = ref({
+  enabled: false,
+  bot_token: '',
+  bot_token_set: false,
+  command_prefix: '/mew',
+  allowed_users: '',
+  allowed_chats: '',
+});
+const telegramBotStatus = ref({
   enabled: false,
   configured: false,
   running: false,
@@ -1508,6 +1559,7 @@ function setSettingsTab(t) {
   else if (t === 'skills') loadSkills();
   else if (t === 'mcp') loadMcp();
   else if (t === 'qqbot') loadQqBot();
+  else if (t === 'telegrambot') loadTelegramBot();
 }
 async function loadSkills() {
   try {
@@ -1617,6 +1669,57 @@ async function saveQqBot() {
     toast('QQ Bot 配置已应用', 'ok');
   } catch (e) {
     toast('QQ Bot 配置保存失败: ' + e.message, 'err');
+  }
+}
+function applyTelegramBotPayload(d) {
+  telegramBotStatus.value = {
+    enabled: Boolean(d.enabled),
+    configured: Boolean(d.configured),
+    running: Boolean(d.running),
+    session_ready: Boolean(d.session_ready),
+    bot_username: d.bot_username || '',
+    last_error: d.last_error || '',
+    config_path: d.config_path || '',
+  };
+  telegramBotConfig.value = {
+    enabled: Boolean(d.enabled),
+    bot_token: '',
+    bot_token_set: Boolean(d.bot_token_set),
+    command_prefix: d.command_prefix || '/mew',
+    allowed_users: d.allowed_users || '',
+    allowed_chats: d.allowed_chats || '',
+  };
+}
+async function loadTelegramBot() {
+  try {
+    const r = await fetch(`${API}/api/settings/telegrambot`);
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'Telegram Bot 状态读取失败', 'err'); return; }
+    applyTelegramBotPayload(d);
+  } catch (e) {
+    toast('Telegram Bot 状态读取失败: ' + e.message, 'err');
+  }
+}
+async function saveTelegramBot() {
+  if (telegramBotConfig.value.enabled && !telegramBotConfig.value.bot_token_set && !String(telegramBotConfig.value.bot_token || '').trim()) {
+    toast('启用 Telegram Bot 需要 Bot Token', 'err');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/settings/telegrambot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(telegramBotConfig.value),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || 'Telegram Bot 配置保存失败', 'err');
+      return;
+    }
+    applyTelegramBotPayload(d);
+    toast('Telegram Bot 配置已应用', 'ok');
+  } catch (e) {
+    toast('Telegram Bot 配置保存失败: ' + e.message, 'err');
   }
 }
 function openInfo() {
@@ -2221,10 +2324,10 @@ onUnmounted(() => {
 .qqbot-form { gap: 10px; }
 .secret-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .secret-row input { flex: 1; min-width: 0; }
-.qq-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
-.qq-status div { min-width: 0; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-.qq-status span { display: block; color: var(--dim); font-size: 11px; margin-bottom: 3px; }
-.qq-status b { display: block; color: var(--text); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+.bot-status div { min-width: 0; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.bot-status span { display: block; color: var(--dim); font-size: 11px; margin-bottom: 3px; }
+.bot-status b { display: block; color: var(--text); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-form-acts { display: flex; gap: 8px; justify-content: flex-end; }
 .set-save { padding: 6px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; }
 .set-cancel { padding: 6px 16px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
@@ -2425,7 +2528,7 @@ onUnmounted(() => {
   .rightbar { width: 270px; }
   .set-nav { width: 190px; }
   .set-main { padding: 24px; }
-  .set-grid2, .qq-status { grid-template-columns: 1fr; }
+  .set-grid2, .bot-status { grid-template-columns: 1fr; }
   .input-area { padding: 8px 12px 12px; }
   .composer { min-height: 92px; border-radius: 16px; padding: 11px 10px 9px 12px; }
   .composer-input { font-size: 14px; min-height: 34px; }
