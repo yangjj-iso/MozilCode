@@ -219,6 +219,8 @@ class DaemonServer:
         self._event_logs: dict[str, list[dict | None]] = {}
         # Active agent task tracking: session_id → asyncio.Task
         self._tasks: dict[str, asyncio.Task] = {}
+        self._active_task_ids: dict[str, str] = {}
+        self._pre_plan_modes: dict[str, PermissionMode] = {}
         # Per-session metadata (work_dir/created_at/title), for live and
         # disk-loaded sessions alike.
         self._session_meta: dict[str, dict] = {}
@@ -403,6 +405,13 @@ class DaemonServer:
                     self._emit(sid, msg)
 
                 self._emit(sid, {"type": "LoopComplete", "task_id": task_id, "data": {}})
+            except asyncio.CancelledError:
+                self._emit(sid, {
+                    "type": "TaskCancelled",
+                    "task_id": task_id,
+                    "data": {"message": "Task cancelled"},
+                })
+                self._emit(sid, {"type": "LoopComplete", "task_id": task_id, "data": {}})
             except Exception as e:
                 log.exception("Agent task %s failed", task_id)
                 self._emit(sid, {
@@ -411,13 +420,86 @@ class DaemonServer:
                     "data": {"message": str(e)},
                 })
             finally:
+                current = self._tasks.get(sid)
+                task = asyncio.current_task()
+                if current is task:
+                    self._tasks.pop(sid, None)
+                    self._active_task_ids.pop(sid, None)
                 # Flush this turn's events to disk so the conversation survives a
                 # daemon restart.
                 self._persist_events(sid)
 
         task = asyncio.create_task(run_agent(), name=f"agent-{sid}-{task_id}")
         self._tasks[sid] = task
+        self._active_task_ids[sid] = task_id
         return task_id
+
+    async def set_permission_mode(self, sid: str, mode: str) -> dict:
+        """Switch a session's permission mode and return fresh status."""
+        await self.ensure_agent(sid)
+        agent = self.get_agent(sid)
+        if agent is None:
+            raise ValueError(f"Session {sid} not found")
+
+        if mode == "do":
+            next_mode = self._pre_plan_modes.pop(sid, None) or PermissionMode.DEFAULT
+        else:
+            next_mode = PermissionMode(mode)
+            if next_mode == PermissionMode.PLAN and agent.permission_mode != PermissionMode.PLAN:
+                self._pre_plan_modes[sid] = agent.permission_mode
+
+        agent.set_permission_mode(next_mode)
+        self._emit(sid, {"type": "ModeChanged", "data": {"mode": next_mode.value}})
+        return self.status(sid)
+
+    def status(self, sid: str) -> dict:
+        agent = self.get_agent(sid)
+        deps = self.get_deps(sid)
+        meta = self._session_meta.get(sid, {})
+        task = self._tasks.get(sid)
+        running = bool(task and not task.done())
+
+        enabled_tools: list[str] = []
+        if agent is not None:
+            enabled_tools = [
+                t.name for t in agent.registry.list_tools()
+                if agent.registry.is_enabled(t.name)
+            ]
+
+        provider = deps.provider if deps is not None else (self.config.providers[0] if self.config.providers else None)
+        context_window = agent.context_window if agent is not None else (provider.get_context_window() if provider else 0)
+        input_tokens = agent.total_input_tokens if agent is not None else 0
+        output_tokens = agent.total_output_tokens if agent is not None else 0
+
+        return {
+            "id": sid,
+            "work_dir": meta.get("work_dir", self.work_dir),
+            "title": meta.get("title", ""),
+            "permission_mode": agent.permission_mode.value if agent else self.config.permission_mode,
+            "plan_mode": bool(agent.plan_mode) if agent else False,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "context_window": context_window,
+            "token_percent": int(input_tokens / context_window * 100) if context_window else 0,
+            "tool_count": len(enabled_tools),
+            "tools": enabled_tools,
+            "active_task": {
+                "id": self._active_task_ids.get(sid, ""),
+                "running": running,
+            },
+            "provider": {
+                "name": provider.name if provider else "",
+                "protocol": provider.protocol if provider else "",
+                "model": provider.model if provider else "",
+            },
+        }
+
+    def cancel_active_task(self, sid: str) -> bool:
+        task = self._tasks.get(sid)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
 
     async def resolve_permission(
         self, sid: str, request_id: str, response: str
@@ -468,6 +550,8 @@ class DaemonServer:
         self._agents.pop(sid, None)
         self._session_meta.pop(sid, None)
         self._persisted_count.pop(sid, None)
+        self._active_task_ids.pop(sid, None)
+        self._pre_plan_modes.pop(sid, None)
         # Remove the on-disk record so a deleted conversation stays deleted.
         try:
             import shutil
@@ -514,6 +598,179 @@ async def session_info(request: Request) -> JSONResponse:
     if sid not in server._event_logs:
         return JSONResponse({"error": "session not found"}, status_code=404)
     return JSONResponse(server.session_info(sid))
+
+
+async def session_status(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    return JSONResponse(server.status(sid))
+
+
+async def set_session_mode(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    body = await request.json()
+    mode = (body.get("mode") or "").strip()
+    if not mode:
+        return JSONResponse({"error": "mode is required"}, status_code=400)
+    try:
+        status = await server.set_permission_mode(sid, mode)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse(status)
+
+
+async def cancel_active_task(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    if sid not in server._event_logs:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    cancelled = server.cancel_active_task(sid)
+    return JSONResponse({"cancelled": cancelled})
+
+
+def _task_to_dict(task: Any) -> dict:
+    elapsed = (task.end_time or time.monotonic()) - task.start_time
+    return {
+        "id": task.id,
+        "name": task.name,
+        "task": task.task,
+        "status": task.status,
+        "result": task.result,
+        "elapsed": elapsed,
+        "input_tokens": task.progress.input_tokens,
+        "output_tokens": task.progress.output_tokens,
+        "tool_call_count": task.progress.tool_call_count,
+        "last_activity": task.progress.last_activity,
+    }
+
+
+async def list_background_tasks(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    tasks = deps.task_manager.list_tasks() if deps else []
+    return JSONResponse({"tasks": [_task_to_dict(t) for t in tasks]})
+
+
+async def cancel_background_task(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    task_id = request.path_params["task_id"]
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    if deps is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    return JSONResponse({"cancelled": deps.task_manager.cancel(task_id)})
+
+
+def _worktree_to_dict(wt: Any, current_name: str | None = None) -> dict:
+    return {
+        "name": wt.name,
+        "path": wt.path,
+        "branch": wt.branch,
+        "based_on": wt.based_on,
+        "head_commit": wt.head_commit,
+        "created": wt.created.isoformat() if getattr(wt, "created", None) else "",
+        "current": wt.name == current_name,
+    }
+
+
+async def list_worktrees(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    if deps is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    manager = deps.worktree_manager
+    session = manager.get_current_session()
+    current_name = session.worktree_name if session else None
+    return JSONResponse({
+        "current": current_name,
+        "worktrees": [_worktree_to_dict(wt, current_name) for wt in manager.list_worktrees()],
+    })
+
+
+async def create_worktree(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    base_branch = (body.get("base_branch") or "HEAD").strip()
+    if not name:
+        return JSONResponse({"error": "name is required"}, status_code=400)
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    agent = server.get_agent(sid)
+    if deps is None or agent is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    try:
+        wt = await deps.worktree_manager.create(name, base_branch)
+        session = await deps.worktree_manager.enter(name)
+        agent.work_dir = session.worktree_path
+        server._session_meta.setdefault(sid, {})["work_dir"] = session.worktree_path
+        server._persist_meta(sid)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"worktree": _worktree_to_dict(wt, name), "status": server.status(sid)})
+
+
+async def enter_worktree(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    name = request.path_params["name"]
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    agent = server.get_agent(sid)
+    if deps is None or agent is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    try:
+        session = await deps.worktree_manager.enter(name)
+        agent.work_dir = session.worktree_path
+        server._session_meta.setdefault(sid, {})["work_dir"] = session.worktree_path
+        server._persist_meta(sid)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"entered": True, "status": server.status(sid)})
+
+
+async def exit_worktree(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    sid = request.path_params["sid"]
+    body = await request.json()
+    remove = bool(body.get("remove", False))
+    discard = bool(body.get("discard", False))
+    if not await server.ensure_agent(sid):
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    deps = server.get_deps(sid)
+    agent = server.get_agent(sid)
+    if deps is None or agent is None:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+    manager = deps.worktree_manager
+    session = manager.get_current_session()
+    if session is None:
+        return JSONResponse({"error": "not in a worktree"}, status_code=400)
+    try:
+        await manager.exit(
+            session.worktree_name,
+            action="remove" if remove else "keep",
+            discard_changes=discard,
+        )
+        agent.work_dir = session.original_cwd
+        server._session_meta.setdefault(sid, {})["work_dir"] = session.original_cwd
+        server._persist_meta(sid)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"exited": True, "status": server.status(sid)})
 
 
 async def list_files(request: Request) -> JSONResponse:
@@ -588,11 +845,14 @@ async def resolve_askuser(request: Request) -> JSONResponse:
 async def manual_compact(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     sid = request.path_params["sid"]
+    await server.ensure_agent(sid)
     agent = server.get_agent(sid)
     conv = server.get_conversation(sid)
     if agent is None or conv is None:
         return JSONResponse({"error": "session not found"}, status_code=404)
     result = await agent.manual_compact(conv)
+    server._emit(sid, {"type": "CompactNotification", "data": {"message": "Manual compact completed"}})
+    server._persist_events(sid)
     return JSONResponse({
         "type": type(result).__name__,
         "data": str(result),
@@ -835,6 +1095,15 @@ def create_app(config: AppConfig, work_dir: str, hook_engine: HookEngine | None 
         Route("/api/session", create_session, methods=["POST"]),
         Route("/api/sessions", list_sessions, methods=["GET"]),
         Route("/api/task", start_task, methods=["POST"]),
+        Route("/api/session/{sid}/status", session_status, methods=["GET"]),
+        Route("/api/session/{sid}/mode", set_session_mode, methods=["POST"]),
+        Route("/api/session/{sid}/cancel", cancel_active_task, methods=["POST"]),
+        Route("/api/session/{sid}/tasks", list_background_tasks, methods=["GET"]),
+        Route("/api/session/{sid}/tasks/{task_id}/cancel", cancel_background_task, methods=["POST"]),
+        Route("/api/session/{sid}/worktrees", list_worktrees, methods=["GET"]),
+        Route("/api/session/{sid}/worktrees", create_worktree, methods=["POST"]),
+        Route("/api/session/{sid}/worktrees/{name}/enter", enter_worktree, methods=["POST"]),
+        Route("/api/session/{sid}/worktrees/exit", exit_worktree, methods=["POST"]),
         Route("/api/permission/{sid}", resolve_permission, methods=["POST"]),
         Route("/api/askuser/{sid}", resolve_askuser, methods=["POST"]),
         Route("/api/compact/{sid}", manual_compact, methods=["POST"]),

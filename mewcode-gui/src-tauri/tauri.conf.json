@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "MewCode",
+  "productName": "MozilCode",
   "version": "0.1.0",
   "identifier": "com.mewcode.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "MewCode",
+        "title": "MozilCode",
         "width": 1000,
         "height": 700,
         "minWidth": 600,

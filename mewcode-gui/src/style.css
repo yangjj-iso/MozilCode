@@ -1,10 +1,9 @@
 :root {
-  /* Kraft paper theme — warm tans & espresso ink */
-  --bg: #e6d7b8; --bg2: #f1e7d0; --bg3: #dccbaa;
-  --border: #c7b189; --text: #3b2f21; --muted: #7c6a4f; --dim: #a89577;
-  --accent: #a2542a; --accent-dim: #cfae7e;
-  --green: #5c7a34; --red: #a13a2e; --yellow: #9c7a16;
-  --cyan: #3f6f63; --r: 8px;
+  --bg: #f6f7f4; --bg2: #ffffff; --bg3: #ecefeb;
+  --border: #d8ddd5; --text: #202421; --muted: #626a63; --dim: #969f96;
+  --accent: #2f7d5b; --accent-dim: #dcefe5;
+  --green: #1f8a5b; --red: #c2413b; --yellow: #9a6a00;
+  --cyan: #2f66b3; --r: 8px;
   --mono: 'Cascadia Code','Fira Code','Consolas',monospace;
   --sans: -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
 }
@@ -13,8 +12,6 @@ html, body { height: 100%; overflow: hidden; }
 body {
   font-family: var(--sans); font-size: 14px; color: var(--text);
   background-color: var(--bg);
-  /* subtle paper grain */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
 }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

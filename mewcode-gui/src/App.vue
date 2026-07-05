@@ -3,7 +3,7 @@
     <!-- Sidebar -->
     <div class="sidebar">
       <div class="sb-h">
-        <h1><svg class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg>{{ APP_NAME }}</h1>
+        <h1><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>{{ APP_NAME }}</h1>
       </div>
       <div class="sb-btns">
         <button class="btn-new" @click="createSession()">＋ 新对话</button>
@@ -35,12 +35,28 @@
     <div class="main">
       <div class="topbar">
         <div class="tb-ws" :title="currentWorkDir"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ currentWorkShort || '未选择工作区' }}</div>
-        <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
+        <div class="tb-mid">
+          <div class="mode-seg" title="同步 TUI 的 Plan / 执行模式">
+            <button :class="{ active: sessionStatus.plan_mode }" @click="setMode('plan')" :disabled="!activeSessionId">计划</button>
+            <button :class="{ active: !sessionStatus.plan_mode }" @click="setMode('do')" :disabled="!activeSessionId">执行</button>
+          </div>
+          <span class="tb-chip" :title="sessionStatus.provider.model || ''">{{ sessionStatus.provider.model || '未加载模型' }}</span>
+          <span class="tb-chip">Token {{ tokenPercent }}%</span>
+        </div>
+        <div class="tb-actions">
+          <button class="tb-icon" @click="manualCompact" :disabled="!activeSessionId" title="压缩上下文">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 7h16v2H4zm3 4h10v2H7zm3 4h4v2h-4z"/></svg>
+          </button>
+          <button class="tb-icon danger" @click="cancelActive" :disabled="!canStop" title="停止当前任务">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
+          </button>
+          <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
+        </div>
       </div>
       <div class="chat" ref="chatEl">
         <div class="thread">
         <div v-if="messages.length === 0" class="empty">
-          <div class="ic"><svg class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg></div>
+          <div class="ic"><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg></div>
           <div class="empty-title">{{ APP_NAME }}</div>
           <p>输入消息开始对话</p>
           <p class="empty-sub">Agent 可以读写文件、运行命令、搜索代码</p>
@@ -50,7 +66,7 @@
           <div class="msg-head">
             <span class="avatar" :class="msg.role">
               <template v-if="msg.role === 'user'">你</template>
-              <svg v-else class="cat" viewBox="0 0 512 512" fill="currentColor"><path d="M256 112c-38 0-72 15-98 39L92 104l-12 132c0 97 79 172 176 172s176-75 176-172L420 104l-66 47c-26-24-60-39-98-39z"/></svg>
+              <svg v-else class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>
             </span>
             <span class="who">{{ msg.role === 'user' ? '你' : APP_NAME }}</span>
             <button v-if="msg.role === 'assistant' && msg.content" class="msg-copy" type="button" @click="copyMsg(msg)">复制</button>
@@ -131,6 +147,8 @@
     <div v-if="showInfo" class="rightbar">
       <div class="rb-tabs">
         <button class="rb-tab" :class="{ active: rightTab === 'files' }" @click="selectTab('files')">文件</button>
+        <button class="rb-tab" :class="{ active: rightTab === 'run' }" @click="selectTab('run')">运行</button>
+        <button class="rb-tab" :class="{ active: rightTab === 'worktrees' }" @click="selectTab('worktrees')">工作树</button>
         <button class="rb-tab" :class="{ active: rightTab === 'info' }" @click="selectTab('info')">详情</button>
       </div>
 
@@ -151,10 +169,72 @@
         </div>
       </div>
 
+      <div v-show="rightTab === 'run'" class="rb-run">
+        <div class="metric-grid">
+          <div class="metric"><span>模式</span><strong>{{ sessionStatus.permission_mode || '—' }}</strong></div>
+          <div class="metric"><span>工具</span><strong>{{ sessionStatus.tool_count || 0 }}</strong></div>
+          <div class="metric"><span>输入</span><strong>{{ sessionStatus.input_tokens || 0 }}</strong></div>
+          <div class="metric"><span>输出</span><strong>{{ sessionStatus.output_tokens || 0 }}</strong></div>
+        </div>
+        <div class="run-block">
+          <div class="run-title">权限模式</div>
+          <select class="rb-select" v-model="selectedMode" @change="setMode(selectedMode)">
+            <option v-for="m in modeOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+        </div>
+        <div class="run-actions">
+          <button class="rb-btn" @click="manualCompact" :disabled="!activeSessionId">压缩上下文</button>
+          <button class="rb-btn danger" @click="cancelActive" :disabled="!canStop">停止任务</button>
+        </div>
+        <div class="run-block">
+          <div class="run-title">
+            后台任务
+            <button class="inline-refresh" @click="loadTasks" title="刷新">⟳</button>
+          </div>
+          <div v-if="tasks.length === 0" class="rb-files-empty">没有后台任务</div>
+          <div v-for="t in tasks" :key="t.id" class="task-row">
+            <div class="task-main">
+              <span class="task-name">{{ t.name }}</span>
+              <span class="task-meta">{{ t.status }} · {{ fmtElapsed(t.elapsed) }}</span>
+            </div>
+            <button v-if="t.status === 'running'" class="task-stop" @click="cancelTask(t.id)" title="取消">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-show="rightTab === 'worktrees'" class="rb-worktrees">
+        <div class="rb-files-h">
+          <span class="rb-files-root">当前: {{ worktreeState.current || '主工作区' }}</span>
+          <button class="rb-refresh" @click="loadWorktrees" title="刷新">⟳</button>
+        </div>
+        <div class="wt-form">
+          <input class="rb-input" v-model="newWorktree.name" placeholder="worktree 名称" spellcheck="false" />
+          <input class="rb-input" v-model="newWorktree.base_branch" placeholder="基准分支，默认 HEAD" spellcheck="false" />
+          <button class="rb-btn" @click="createWorktree" :disabled="!newWorktree.name.trim()">创建并进入</button>
+        </div>
+        <div v-if="worktrees.length === 0" class="rb-files-empty">没有活跃 worktree</div>
+        <div v-for="wt in worktrees" :key="wt.name" class="wt-row" :class="{ current: wt.current }">
+          <div class="wt-title">{{ wt.name }} <span v-if="wt.current">当前</span></div>
+          <div class="wt-path mono">{{ wt.path }}</div>
+          <div class="wt-branch">{{ wt.branch }}</div>
+          <div class="wt-actions">
+            <button @click="enterWorktree(wt.name)" :disabled="wt.current">进入</button>
+          </div>
+        </div>
+        <div class="run-actions">
+          <button class="rb-btn" @click="exitWorktree(false)" :disabled="!worktreeState.current">退出</button>
+          <button class="rb-btn danger" @click="exitWorktree(true)" :disabled="!worktreeState.current">退出并删除</button>
+        </div>
+      </div>
+
       <div v-show="rightTab === 'info'" class="rb-info">
         <div class="rb-item"><span class="rb-k">工作区</span><div class="rb-v mono">{{ currentWorkDir || '—' }}</div></div>
         <div class="rb-item"><span class="rb-k">会话 ID</span><div class="rb-v mono">{{ activeSessionId || '—' }}</div></div>
-        <div class="rb-item"><span class="rb-k">Tokens</span><div class="rb-v">↑{{ tokenInfo.input }} ↓{{ tokenInfo.output }}</div></div>
+        <div class="rb-item"><span class="rb-k">模型</span><div class="rb-v mono">{{ sessionStatus.provider.model || '—' }}</div></div>
+        <div class="rb-item"><span class="rb-k">Tokens</span><div class="rb-v">↑{{ sessionStatus.input_tokens || tokenInfo.input }} ↓{{ sessionStatus.output_tokens || tokenInfo.output }}</div></div>
+        <div class="rb-item"><span class="rb-k">Context</span><div class="rb-v">{{ sessionStatus.context_window || '—' }}</div></div>
         <div class="rb-sep"></div>
         <div class="rb-sec">在指定工作区新建会话</div>
         <div class="rb-row">
@@ -238,7 +318,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
@@ -359,7 +439,7 @@ function toolBody(tool) {
   return html;
 }
 
-const APP_NAME = 'MewCode';
+const APP_NAME = 'MozilCode';
 const DEFAULT_DAEMON_HTTP = 'http://127.0.0.1:7800';
 
 function stripTrailingSlash(value) {
@@ -384,6 +464,29 @@ const inputEl = ref(null);
 const perm = ref(null);
 const ask = ref(null);
 const tokenInfo = ref({ input: 0, output: 0 });
+const sessionStatus = ref({
+  permission_mode: '',
+  plan_mode: false,
+  input_tokens: 0,
+  output_tokens: 0,
+  context_window: 0,
+  token_percent: 0,
+  tool_count: 0,
+  active_task: { id: '', running: false },
+  provider: { name: '', protocol: '', model: '' },
+});
+const selectedMode = ref('default');
+const modeOptions = [
+  { value: 'default', label: 'Default' },
+  { value: 'acceptEdits', label: 'Accept Edits' },
+  { value: 'plan', label: 'Plan' },
+  { value: 'bypassPermissions', label: 'Bypass' },
+  { value: 'custom', label: 'Custom' },
+  { value: 'dontAsk', label: 'Don’t Ask' },
+];
+const tasks = ref([]);
+const worktreeState = ref({ current: '', worktrees: [] });
+const newWorktree = ref({ name: '', base_branch: 'HEAD' });
 const defaultWorkDir = ref('');
 const newWorkspace = ref('');
 const showInfo = ref(false);
@@ -406,6 +509,9 @@ const currentWorkShort = computed(() => {
   return parts.length ? parts[parts.length - 1] : w;
 });
 const collapsedGroups = ref({});
+const tokenPercent = computed(() => sessionStatus.value.token_percent || 0);
+const canStop = computed(() => busy.value || Boolean(sessionStatus.value.active_task && sessionStatus.value.active_task.running));
+const worktrees = computed(() => worktreeState.value.worktrees || []);
 // Group sessions by their workspace, folder-style.
 const sessionGroups = computed(() => {
   const map = new Map();
@@ -446,6 +552,89 @@ async function refreshSessions() {
     // Sessions are now objects: { id, work_dir, title }.
     sessions.value = (d.sessions || []).map((s) => (typeof s === 'string' ? { id: s, work_dir: '', title: '' } : s));
   } catch {}
+}
+
+function applySessionStatus(data) {
+  sessionStatus.value = {
+    ...sessionStatus.value,
+    ...data,
+    active_task: data.active_task || { id: '', running: false },
+    provider: data.provider || { name: '', protocol: '', model: '' },
+  };
+  selectedMode.value = sessionStatus.value.permission_mode || 'default';
+  tokenInfo.value = {
+    input: sessionStatus.value.input_tokens || 0,
+    output: sessionStatus.value.output_tokens || 0,
+  };
+  if (activeSessionId.value && data.work_dir) {
+    const s = sessions.value.find((x) => x.id === activeSessionId.value);
+    if (s) {
+      s.work_dir = data.work_dir;
+      if (data.title !== undefined) s.title = data.title;
+    }
+  }
+}
+
+async function loadStatus() {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/status`);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '状态获取失败');
+    applySessionStatus(d);
+  } catch {}
+}
+
+async function setMode(mode) {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || '模式切换失败', 'err');
+      return;
+    }
+    applySessionStatus(d);
+    toast(d.plan_mode ? '已进入计划模式' : '已进入执行模式', 'ok');
+  } catch (e) {
+    toast('模式切换失败: ' + e.message, 'err');
+  }
+}
+
+async function manualCompact() {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/compact/${activeSessionId.value}`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || '压缩失败', 'err');
+      return;
+    }
+    toast('上下文已压缩', 'ok');
+    await loadStatus();
+  } catch (e) {
+    toast('压缩失败: ' + e.message, 'err');
+  }
+}
+
+async function cancelActive() {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/cancel`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.cancelled) {
+      toast(d.error || '没有正在运行的任务', 'err');
+      return;
+    }
+    busy.value = false;
+    await loadStatus();
+  } catch (e) {
+    toast('停止失败: ' + e.message, 'err');
+  }
 }
 
 // Create a session in the given workspace (defaults to the daemon's work_dir).
@@ -532,6 +721,108 @@ async function toggleNode(node) {
 function selectTab(t) {
   rightTab.value = t;
   if (t === 'files' && fileTree.value.length === 0) loadFiles();
+  if (t === 'run') {
+    loadStatus();
+    loadTasks();
+  }
+  if (t === 'worktrees') loadWorktrees();
+}
+
+async function loadTasks() {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/tasks`);
+    const d = await r.json();
+    tasks.value = d.tasks || [];
+  } catch {
+    tasks.value = [];
+  }
+}
+
+async function cancelTask(taskId) {
+  if (!activeSessionId.value) return;
+  try {
+    await fetch(`${API}/api/session/${activeSessionId.value}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+    await loadTasks();
+  } catch {}
+}
+
+async function loadWorktrees() {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees`);
+    const d = await r.json();
+    worktreeState.value = { current: d.current || '', worktrees: d.worktrees || [] };
+  } catch {
+    worktreeState.value = { current: '', worktrees: [] };
+  }
+}
+
+async function createWorktree() {
+  if (!activeSessionId.value) return;
+  const name = newWorktree.value.name.trim();
+  if (!name) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, base_branch: newWorktree.value.base_branch.trim() || 'HEAD' }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || '创建 worktree 失败', 'err');
+      return;
+    }
+    newWorktree.value = { name: '', base_branch: 'HEAD' };
+    if (d.status) applySessionStatus(d.status);
+    await refreshSessions();
+    await loadWorktrees();
+    await loadFiles();
+    toast('已创建并进入 worktree', 'ok');
+  } catch (e) {
+    toast('创建 worktree 失败: ' + e.message, 'err');
+  }
+}
+
+async function enterWorktree(name) {
+  if (!activeSessionId.value) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees/${encodeURIComponent(name)}/enter`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || '进入 worktree 失败', 'err');
+      return;
+    }
+    if (d.status) applySessionStatus(d.status);
+    await refreshSessions();
+    await loadWorktrees();
+    await loadFiles();
+  } catch (e) {
+    toast('进入 worktree 失败: ' + e.message, 'err');
+  }
+}
+
+async function exitWorktree(remove) {
+  if (!activeSessionId.value) return;
+  if (remove && !window.confirm('退出并删除当前 worktree？有未提交改动时后端会阻止删除。')) return;
+  try {
+    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees/exit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ remove, discard: false }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || '退出 worktree 失败', 'err');
+      return;
+    }
+    if (d.status) applySessionStatus(d.status);
+    await refreshSessions();
+    await loadWorktrees();
+    await loadFiles();
+  } catch (e) {
+    toast('退出 worktree 失败: ' + e.message, 'err');
+  }
 }
 
 // ---- Settings / personal center ----
@@ -628,7 +919,19 @@ async function selectSession(sid) {
   activeSessionId.value = sid;
   messages.value = [];
   tokenInfo.value = { input: 0, output: 0 };
+  sessionStatus.value = {
+    ...sessionStatus.value,
+    permission_mode: '',
+    plan_mode: false,
+    input_tokens: 0,
+    output_tokens: 0,
+    token_percent: 0,
+    active_task: { id: '', running: false },
+  };
   connectWS(sid);
+  await loadStatus();
+  if (rightTab.value === 'run') await loadTasks();
+  if (rightTab.value === 'worktrees') await loadWorktrees();
   if (showInfo.value && rightTab.value === 'files') loadFiles();
 }
 
@@ -767,15 +1070,30 @@ function handleEvent(data) {
     if (ask.value && ask.value.request_id === d.request_id) ask.value = null;
   } else if (t === 'UsageEvent') {
     tokenInfo.value = { input: d.input_tokens || 0, output: d.output_tokens || 0 };
+    sessionStatus.value.input_tokens = d.input_tokens || 0;
+    sessionStatus.value.output_tokens = d.output_tokens || 0;
+    if (sessionStatus.value.context_window) {
+      sessionStatus.value.token_percent = Math.floor((sessionStatus.value.input_tokens / sessionStatus.value.context_window) * 100);
+    }
   } else if (t === 'LoopComplete') {
     finalizeAssistant();
     busy.value = false;
+    loadStatus();
+    if (rightTab.value === 'run') loadTasks();
+  } else if (t === 'TaskCancelled') {
+    finalizeAssistant();
+    busy.value = false;
+    toast('任务已停止', 'ok');
   } else if (t === 'ErrorEvent') {
     finalizeAssistant();
     busy.value = false;
     toast(d.message || 'Error', 'err');
   } else if (t === 'CompactNotification') {
     toast('上下文已压缩', 'ok');
+  } else if (t === 'ModeChanged') {
+    sessionStatus.value.permission_mode = d.mode || sessionStatus.value.permission_mode;
+    sessionStatus.value.plan_mode = d.mode === 'plan';
+    selectedMode.value = sessionStatus.value.permission_mode;
   }
 }
 
@@ -796,6 +1114,7 @@ async function send() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: activeSessionId.value, prompt: text }),
     });
+    await loadStatus();
   } catch (e) {
     toast('发送失败: ' + e.message, 'err');
     busy.value = false;
@@ -876,6 +1195,11 @@ function fmtArgs(tool) {
 function fmtRes(r) {
   return !r ? '' : r.length > 500 ? r.substring(0, 500) + '\n...' : r;
 }
+function fmtElapsed(seconds) {
+  const n = Number(seconds || 0);
+  if (n >= 60) return (n / 60).toFixed(1) + 'm';
+  return Math.max(0, Math.round(n)) + 's';
+}
 function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -889,12 +1213,28 @@ function autoGrow() {
   }
 }
 
+let _statusTimer = null;
+
 onMounted(async () => {
   await checkHealth();
   await refreshSessions();
   if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
   else await createSession();
   if (inputEl.value) inputEl.value.focus();
+  _statusTimer = setInterval(() => {
+    checkHealth();
+    if (activeSessionId.value) loadStatus();
+    if (rightTab.value === 'run') loadTasks();
+  }, 5000);
+});
+
+onUnmounted(() => {
+  if (_statusTimer) clearInterval(_statusTimer);
+  if (_reconnectTimer) clearTimeout(_reconnectTimer);
+  if (ws) {
+    ws._dead = true;
+    ws.close();
+  }
 });
 </script>
 
@@ -904,12 +1244,12 @@ onMounted(async () => {
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .sb-h { padding: 16px; border-bottom: 1px solid var(--border); }
 .sb-h h1 { font-size: 18px; font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 8px; }
-.sb-h h1 .cat { width: 20px; height: 20px; }
-.avatar .cat { width: 15px; height: 15px; color: #fff; }
+.sb-h h1 .logo { width: 20px; height: 20px; }
+.avatar .logo { width: 15px; height: 15px; color: #fff; }
 .sb-h .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .sb-btns { display: flex; gap: 6px; margin: 12px 16px; }
 .btn-new { flex: 1; padding: 10px; background: var(--accent-dim); border: none; border-radius: var(--r); color: var(--text); font-size: 13px; cursor: pointer; }
-.btn-new:hover { background: var(--accent); }
+.btn-new:hover { background: var(--accent); color: #fff; }
 .btn-open { padding: 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); color: var(--text); font-size: 12px; cursor: pointer; white-space: nowrap; }
 .btn-open:hover { border-color: var(--accent); }
 .slist { flex: 1; overflow-y: auto; padding: 8px; }
@@ -934,12 +1274,24 @@ onMounted(async () => {
 .sitem:hover .sdel { opacity: 1; }
 .sdel:hover { background: var(--bg2); color: var(--red); }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
-.topbar .tb-ws { font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .tb-ws { min-width: 120px; max-width: 32%; font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-mid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.tb-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .topbar .tb-btn { padding: 4px 10px; font-size: 12px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; white-space: nowrap; }
 .topbar .tb-btn:hover { border-color: var(--accent); }
+.mode-seg { display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); flex-shrink: 0; }
+.mode-seg button { min-width: 48px; height: 26px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.mode-seg button.active { background: var(--accent); color: #fff; }
+.mode-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.tb-chip { max-width: 220px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bg); }
+.tb-icon { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg3); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.tb-icon svg { width: 15px; height: 15px; }
+.tb-icon:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.tb-icon.danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.tb-icon:disabled { opacity: 0.45; cursor: not-allowed; }
 .rightbar { width: 300px; background: var(--bg2); border-left: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
 .rb-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-.rb-tab { flex: 1; padding: 10px; background: transparent; border: none; color: var(--muted); font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
+.rb-tab { flex: 1; min-width: 0; padding: 10px 4px; background: transparent; border: none; color: var(--muted); font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .rb-tab:hover { color: var(--text); }
 .rb-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .rb-files { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -968,8 +1320,37 @@ onMounted(async () => {
 .rb-pick { padding: 8px 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; }
 .rb-pick:hover { border-color: var(--accent); }
 .rb-btn { padding: 8px 10px; background: var(--accent-dim); border: none; border-radius: var(--r); color: var(--text); font-size: 13px; cursor: pointer; }
-.rb-btn:hover { background: var(--accent); }
+.rb-btn:hover { background: var(--accent); color: #fff; }
+.rb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rb-btn.danger { background: rgba(194, 65, 59, 0.12); color: var(--red); }
+.rb-btn.danger:hover:not(:disabled) { background: var(--red); color: #fff; }
 .rb-hint { font-size: 11px; color: var(--dim); line-height: 1.5; margin-top: 4px; }
+.rb-run, .rb-worktrees { padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.metric { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); padding: 10px; min-width: 0; }
+.metric span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.metric strong { display: block; color: var(--text); font-size: 17px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-block { display: flex; flex-direction: column; gap: 8px; }
+.run-title { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; font-weight: 600; }
+.rb-select { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); color: var(--text); padding: 8px 10px; font-size: 12px; outline: none; }
+.run-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.inline-refresh { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 14px; }
+.task-row, .wt-row { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); padding: 9px 10px; display: flex; gap: 8px; align-items: center; }
+.task-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.task-name { color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-meta { color: var(--muted); font-size: 11px; }
+.task-stop { width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg3); color: var(--red); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.task-stop svg { width: 13px; height: 13px; }
+.wt-form { display: flex; flex-direction: column; gap: 8px; }
+.wt-row { align-items: stretch; flex-direction: column; }
+.wt-row.current { border-color: var(--accent); }
+.wt-title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; gap: 6px; align-items: center; }
+.wt-title span { padding: 1px 6px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); font-size: 10px; font-weight: 600; }
+.wt-path { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-branch { color: var(--dim); font-size: 11px; font-family: var(--mono); }
+.wt-actions { display: flex; justify-content: flex-end; }
+.wt-actions button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg3); color: var(--text); cursor: pointer; }
+.wt-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 .sb-f { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); font-size: 13px; color: var(--muted); cursor: pointer; }
 .sb-f:hover { background: var(--bg3); color: var(--text); }
 .sb-f .gear { width: 16px; height: 16px; flex-shrink: 0; }
@@ -1130,7 +1511,13 @@ onMounted(async () => {
 .hide { display: none !important; }
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 62vh; color: var(--muted); }
 .empty .ic { margin-bottom: 16px; }
-.empty .ic .cat { width: 44px; height: 44px; color: var(--accent); opacity: 0.9; }
+.empty .ic .logo { width: 44px; height: 44px; color: var(--accent); opacity: 0.9; }
 .empty-title { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
 .empty-sub { font-size: 12px; margin-top: 6px; color: var(--dim); }
+@media (max-width: 900px) {
+  .sidebar { width: 220px; }
+  .tb-chip { display: none; }
+  .topbar .tb-ws { max-width: 42%; }
+  .rightbar { width: 270px; }
+}
 </style>
