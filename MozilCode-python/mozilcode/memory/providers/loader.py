@@ -7,11 +7,17 @@ from mozilcode.config import MemoryConfig, MemoryProviderConfig
 from mozilcode.memory.auto_memory import MemoryManager
 from mozilcode.memory.providers.base import MemoryProvider
 from mozilcode.memory.providers.hub import MemoryHub
-from mozilcode.memory.providers.markdown import MarkdownMemoryProvider
 
 
 class MemoryProviderLoadError(Exception):
     pass
+
+
+BUILTIN_MEMORY_PROVIDERS = {
+    "builtin.markdown": "mozilcode.memory.providers.markdown:MarkdownMemoryProvider",
+    "builtin.tencentdb": "mozilcode.memory.providers.tencentdb:TencentDBMemoryProvider",
+    "builtin.tencentdb-agent-memory": "mozilcode.memory.providers.tencentdb:TencentDBMemoryProvider",
+}
 
 
 def build_memory_hub(
@@ -43,9 +49,15 @@ def _load_provider(
     legacy_manager: MemoryManager | None = None,
 ) -> MemoryProvider:
     config = provider_config.config or {}
-    if provider_config.type == "builtin.markdown":
-        provider = MarkdownMemoryProvider(project_root, config, manager=legacy_manager)
-        provider.name = provider_config.name or provider.name
+    if provider_config.type in BUILTIN_MEMORY_PROVIDERS:
+        provider = _load_class_provider(
+            BUILTIN_MEMORY_PROVIDERS[provider_config.type],
+            project_root,
+            config,
+            legacy_manager=legacy_manager,
+        )
+        if provider_config.name:
+            provider.name = provider_config.name
         return provider
     if provider_config.type == "python":
         return _load_python_provider(provider_config, project_root)
@@ -57,12 +69,35 @@ def _load_python_provider(provider_config: MemoryProviderConfig, project_root: s
     class_name = provider_config.class_name
     if not module_name or not class_name:
         raise MemoryProviderLoadError("Python memory provider requires module and class")
-    module = importlib.import_module(module_name)
-    cls = getattr(module, class_name)
-    try:
-        provider = cls(project_root=project_root, config=provider_config.config)
-    except TypeError:
-        provider = cls(provider_config.config)
+    provider = _load_class_provider(
+        f"{module_name}:{class_name}",
+        project_root,
+        provider_config.config,
+    )
     if not getattr(provider, "name", ""):
         provider.name = provider_config.name
     return provider
+
+
+def _load_class_provider(
+    target: str,
+    project_root: str,
+    config: dict[str, Any],
+    *,
+    legacy_manager: MemoryManager | None = None,
+) -> MemoryProvider:
+    module_name, _, class_name = target.partition(":")
+    if not module_name or not class_name:
+        raise MemoryProviderLoadError(f"Invalid memory provider target: {target}")
+    module = importlib.import_module(module_name)
+    cls = getattr(module, class_name)
+    kwargs = {"project_root": project_root, "config": config}
+    if legacy_manager is not None:
+        kwargs["manager"] = legacy_manager
+    try:
+        return cls(**kwargs)
+    except TypeError:
+        try:
+            return cls(project_root=project_root, config=config)
+        except TypeError:
+            return cls(config)

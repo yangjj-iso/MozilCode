@@ -1844,10 +1844,11 @@ class MozilCodeApp(App):
         async def _cleanup() -> None:
             tasks: list[asyncio.Task] = []
 
-            if self.agent and self.agent.memory_manager:
+            if self.agent and self.agent.memory_hub:
                 tasks.append(asyncio.create_task(
                     self.agent._extract_memories(self.conversation)
                 ))
+                tasks.append(asyncio.create_task(self.agent.memory_hub.shutdown()))
             if self.hook_engine:
                 tasks.append(asyncio.create_task(
                     self.hook_engine.run_hooks(

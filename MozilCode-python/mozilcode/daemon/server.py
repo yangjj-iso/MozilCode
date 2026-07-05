@@ -601,6 +601,7 @@ class DaemonServer:
         agent, deps = await create_agent_from_config(
             self.config, wd, mode, self.hook_engine
         )
+        agent.session_id = sid
         conv = ConversationManager()
         self._agents[sid] = (agent, deps, conv)
         self._event_logs[sid] = []
@@ -628,6 +629,7 @@ class DaemonServer:
         agent, deps = await create_agent_from_config(
             self.config, wd, mode, self.hook_engine
         )
+        agent.session_id = sid
         conv = ConversationManager()
         self._agents[sid] = (agent, deps, conv)
         if sid not in self._event_logs:
@@ -876,7 +878,9 @@ class DaemonServer:
             task = self._tasks.get(sid)
             if task and not task.done():
                 continue
-            self._agents.pop(sid, None)
+            entry = self._agents.pop(sid, None)
+            if entry is not None and entry[0].memory_hub is not None:
+                await entry[0].memory_hub.shutdown()
             await self.session_mgr.close_session(sid)
             self._pre_plan_modes.pop(sid, None)
 
@@ -898,7 +902,9 @@ class DaemonServer:
             log_list.append(None)
 
         await self.session_mgr.close_session(sid)
-        self._agents.pop(sid, None)
+        entry = self._agents.pop(sid, None)
+        if entry is not None and entry[0].memory_hub is not None:
+            await entry[0].memory_hub.shutdown()
         self._session_meta.pop(sid, None)
         self._persisted_count.pop(sid, None)
         self._active_task_ids.pop(sid, None)

@@ -32,7 +32,14 @@ from mozilcode.context import (
 from mozilcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mozilcode.memory.auto_memory import MemoryManager
-from mozilcode.memory.providers import MemoryEvent, MemoryHub, MemoryScope, MarkdownMemoryProvider
+from mozilcode.memory.providers import (
+    MEMORY_EVENT_TURN_COMMITTED,
+    MEMORY_EVENT_TURN_COMPLETED,
+    MemoryEvent,
+    MemoryHub,
+    MemoryScope,
+    MarkdownMemoryProvider,
+)
 from mozilcode.permissions import (
     Decision,
     PermissionChecker,
@@ -474,6 +481,21 @@ class Agent:
         )
         return await self.memory_hub.load_context(query, scope)
 
+    @staticmethod
+    def _latest_user_query(conversation: ConversationManager) -> str:
+        for message in reversed(conversation.history):
+            if message.role != "user" or message.tool_results:
+                continue
+            content = message.content.strip()
+            if not content:
+                continue
+            if content.startswith("<system-reminder>"):
+                continue
+            if content.startswith("Current working directory:"):
+                continue
+            return content
+        return ""
+
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
         self._current_conversation = conversation
         env_context = build_environment_context(
@@ -481,7 +503,7 @@ class Agent:
         )
         conversation.inject_environment(env_context)
 
-        memory_content = await self._load_memory_context()
+        memory_content = await self._load_memory_context(self._latest_user_query(conversation))
         conversation.inject_long_term_memory(self.instructions_content, memory_content)
 
         if self.hook_engine:
@@ -684,6 +706,10 @@ class Agent:
                 conversation.add_assistant_message(
                     response.text, thinking_blocks=conv_thinking
                 )
+                if self.memory_hub:
+                    asyncio.ensure_future(
+                        self._observe_memories(conversation, MEMORY_EVENT_TURN_COMPLETED)
+                    )
                 self._loop_count += 1
                 if (
                     self._loop_count % MEMORY_EXTRACTION_INTERVAL == 0
@@ -1206,11 +1232,26 @@ class Agent:
             return
         self._extracting = True
         try:
+            await self._observe_memories(conversation, MEMORY_EVENT_TURN_COMMITTED)
+        except Exception as e:
+            log.debug("Memory extraction failed: %s", e)
+        finally:
+            self._extracting = False
+
+    async def _observe_memories(
+        self,
+        conversation: ConversationManager,
+        event_type: str,
+    ) -> None:
+        if not self.memory_hub:
+            return
+        try:
             await self.memory_hub.observe(
                 MemoryEvent(
-                    type="turn_committed",
+                    type=event_type,
                     source="agent",
                     session_id=self.session_id,
+                    query=self._latest_user_query(conversation),
                     conversation=conversation,
                     client=self.client,
                     protocol=self.protocol,
@@ -1218,9 +1259,7 @@ class Agent:
                 )
             )
         except Exception as e:
-            log.debug("Memory extraction failed: %s", e)
-        finally:
-            self._extracting = False
+            log.debug("Memory observe failed for %s: %s", event_type, e)
 
     async def manual_compact(
         self, conversation: ConversationManager
@@ -1383,6 +1422,7 @@ class Agent:
 
             if not response.tool_calls:
                 conversation.add_assistant_message(response.text)
+                await self._observe_memories(conversation, MEMORY_EVENT_TURN_COMPLETED)
                 if self.file_history is not None:
                     summary = response.text[:60] + "..." if len(response.text) > 60 else response.text
                     self.file_history.make_snapshot(len(conversation.history), summary)

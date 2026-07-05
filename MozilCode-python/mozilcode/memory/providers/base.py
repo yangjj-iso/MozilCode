@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+MEMORY_EVENT_TURN_COMPLETED = "turn_completed"
+MEMORY_EVENT_TURN_COMMITTED = "turn_committed"
+MEMORY_EVENT_SESSION_END = "session_end"
+
 
 @dataclass
 class MemoryScope:

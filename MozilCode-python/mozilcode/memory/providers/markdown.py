@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from mozilcode.memory.auto_memory import MemoryManager
-from mozilcode.memory.providers.base import BaseMemoryProvider, MemoryEvent, MemoryScope
+from mozilcode.memory.providers.base import (
+    MEMORY_EVENT_TURN_COMMITTED,
+    BaseMemoryProvider,
+    MemoryEvent,
+    MemoryScope,
+)
 
 
 class MarkdownMemoryProvider(BaseMemoryProvider):
@@ -24,7 +29,7 @@ class MarkdownMemoryProvider(BaseMemoryProvider):
         return self.manager.load()
 
     async def observe(self, event: MemoryEvent) -> None:
-        if event.type != "turn_committed":
+        if event.type != MEMORY_EVENT_TURN_COMMITTED:
             return
         if event.client is None or event.conversation is None or not event.protocol:
             return

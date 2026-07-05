@@ -190,6 +190,8 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     print(last_result, flush=True)
 
     if not team_manager._teams:
+        if agent.memory_hub:
+            await agent.memory_hub.shutdown()
         return
 
     import sys
@@ -211,6 +213,9 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             "Teammate notifications received. Process them and continue.", conv
         )
         print(last_result, flush=True)
+
+    if agent.memory_hub:
+        await agent.memory_hub.shutdown()
 
 
 if __name__ == "__main__":

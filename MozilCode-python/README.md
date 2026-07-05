@@ -51,4 +51,18 @@ Private chats can send either `/mew <prompt>` or plain text. Group chats require
 
 Long-term memory is routed through `MemoryHub`, with the legacy Markdown memory kept as the default provider. Custom memory systems can be added with `memory.providers` in `config.yaml` using `type: python`, `module`, and `class`.
 
-See `mozilcode/docs/memory-plugins.md` for the provider protocol, configuration examples, and guidance for adapting external memory projects such as Tencent agent-memory.
+TencentDB Agent Memory can be connected through its local Gateway:
+
+```yaml
+memory:
+  enabled: true
+  providers:
+    - name: markdown
+      type: builtin.markdown
+    - name: tencentdb
+      type: builtin.tencentdb
+      config:
+        base_url: http://127.0.0.1:8420
+```
+
+See `mozilcode/docs/memory-plugins.md` for the provider protocol, configuration examples, and TencentDB Gateway setup notes.

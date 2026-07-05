@@ -8,6 +8,9 @@ from mozilcode.memory.recall import (
 )
 from mozilcode.memory.providers import (
     BaseMemoryProvider,
+    MEMORY_EVENT_SESSION_END,
+    MEMORY_EVENT_TURN_COMMITTED,
+    MEMORY_EVENT_TURN_COMPLETED,
     MemoryEvent,
     MemoryHub,
     MemoryItem,
@@ -15,6 +18,9 @@ from mozilcode.memory.providers import (
     MemoryProviderLoadError,
     MemoryScope,
     MarkdownMemoryProvider,
+    TencentDBGatewayClient,
+    TencentDBGatewayError,
+    TencentDBMemoryProvider,
     build_memory_hub,
 )
 from mozilcode.memory.session import (
@@ -33,6 +39,9 @@ from mozilcode.memory.session import (
 __all__ = [
     "MemoryManager",
     "BaseMemoryProvider",
+    "MEMORY_EVENT_SESSION_END",
+    "MEMORY_EVENT_TURN_COMMITTED",
+    "MEMORY_EVENT_TURN_COMPLETED",
     "MemoryEvent",
     "MemoryHub",
     "MemoryItem",
@@ -40,6 +49,9 @@ __all__ = [
     "MemoryProviderLoadError",
     "MemoryScope",
     "MarkdownMemoryProvider",
+    "TencentDBGatewayClient",
+    "TencentDBGatewayError",
+    "TencentDBMemoryProvider",
     "RelevantMemory",
     "build_memory_hub",
     "ResumeResult",
