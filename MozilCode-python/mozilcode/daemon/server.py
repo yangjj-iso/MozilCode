@@ -330,40 +330,79 @@ def _public_config(config: AppConfig | None, error: str = "") -> dict:
     }
 
 
-def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> dict:
-    protocol = (body.get("protocol") or "openai").strip()
+def _provider_from_gui_entry(
+    entry: dict,
+    current_by_name: dict[str, Any],
+    fallback: Any | None = None,
+) -> dict:
+    if not isinstance(entry, dict):
+        raise ConfigError("Provider entries must be mappings")
+    protocol = str(entry.get("protocol") or "openai").strip()
     base_url = _normalize_base_url(
         protocol,
-        (body.get("base_url") or _default_base_url(protocol)).strip(),
+        str(entry.get("base_url") or _default_base_url(protocol)).strip(),
     )
-    model = (body.get("model") or "").strip()
-    name = (body.get("name") or protocol or "default").strip()
-    api_key = (body.get("api_key") or "").strip()
-    if not api_key and current is not None and current.providers:
-        api_key = current.providers[0].api_key
+    model = str(entry.get("model") or "").strip()
+    name = str(entry.get("name") or protocol or model or "default").strip()
+    api_key = str(entry.get("api_key") or "").strip()
+    previous_name = str(entry.get("previous_name") or entry.get("_previous_name") or "").strip()
+    current_provider = current_by_name.get(name)
+    if current_provider is None and previous_name:
+        current_provider = current_by_name.get(previous_name)
+    if not api_key and current_provider is not None:
+        api_key = current_provider.api_key
+    elif not api_key and fallback is not None:
+        api_key = fallback.api_key
 
-    raw = {
-        "providers": [{
-            "name": name,
-            "protocol": protocol,
-            "base_url": base_url,
-            "model": model,
-            "api_key": api_key,
-            "thinking": bool(body.get("thinking", False)),
-            "context_window": int(body.get("context_window") or 0),
-            "max_output_tokens": int(body.get("max_output_tokens") or 0),
-        }],
-        "permission_mode": (body.get("permission_mode") or "default").strip(),
+    return {
+        "name": name,
+        "protocol": protocol,
+        "base_url": base_url,
+        "model": model,
+        "api_key": api_key,
+        "thinking": _coerce_bool(entry.get("thinking"), False),
+        "context_window": int(entry.get("context_window") or 0),
+        "max_output_tokens": int(entry.get("max_output_tokens") or 0),
+    }
+
+
+def _providers_from_gui_payload(body: dict, current: AppConfig | None = None) -> list[dict]:
+    current_providers = current.providers if current is not None else []
+    current_by_name = {provider.name: provider for provider in current_providers}
+    fallback = current_providers[0] if current_providers else None
+    raw_providers = body.get("providers")
+    if raw_providers is None:
+        providers = [_provider_from_gui_entry(body, current_by_name, fallback)]
+    else:
+        if not isinstance(raw_providers, list):
+            raise ConfigError("'providers' must be a list")
+        providers = [
+            _provider_from_gui_entry(entry, current_by_name)
+            for entry in raw_providers
+        ]
+
+    names = [provider["name"] for provider in providers]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ConfigError(f"Duplicate provider names: {', '.join(duplicates)}")
+    return providers
+
+
+def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> dict:
+    providers = _providers_from_gui_payload(body, current)
+    raw = _app_config_to_raw(current) if current is not None else {
+        "providers": [],
+        "permission_mode": "default",
         "mcp_servers": [],
         "hooks": [],
-        "enable_fork": bool(body.get("enable_fork", False)),
-        "enable_verification_agent": bool(body.get("enable_verification_agent", False)),
+        "enable_fork": False,
+        "enable_verification_agent": False,
         "worktree": {
             "symlink_directories": ["node_modules", ".venv", "vendor"],
             "stale_cleanup_interval": 3600,
             "stale_cutoff_hours": 24,
         },
-        "memory": _memory_config_to_raw(current.memory) if current is not None else {
+        "memory": {
             "enabled": True,
             "providers": [
                 {
@@ -377,8 +416,16 @@ def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> di
             ],
         },
         "teammate_mode": "",
-        "enable_coordinator_mode": bool(body.get("enable_coordinator_mode", False)),
+        "enable_coordinator_mode": False,
     }
+    raw["providers"] = providers
+    raw["permission_mode"] = str(body.get("permission_mode") or raw.get("permission_mode") or "default").strip()
+    if "enable_fork" in body:
+        raw["enable_fork"] = _coerce_bool(body.get("enable_fork"), False)
+    if "enable_verification_agent" in body:
+        raw["enable_verification_agent"] = _coerce_bool(body.get("enable_verification_agent"), False)
+    if "enable_coordinator_mode" in body:
+        raw["enable_coordinator_mode"] = _coerce_bool(body.get("enable_coordinator_mode"), False)
     validate_config_structure(raw)
     return raw
 

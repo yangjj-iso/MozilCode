@@ -1,17 +1,22 @@
 :root {
-  --bg: #f6f7f4; --bg2: #ffffff; --bg3: #ecefeb;
-  --border: #d8ddd5; --text: #202421; --muted: #626a63; --dim: #969f96;
-  --accent: #2f7d5b; --accent-dim: #dcefe5;
-  --green: #1f8a5b; --red: #c2413b; --yellow: #9a6a00;
-  --cyan: #2f66b3; --r: 8px;
+  --bg: #e7dcc8; --bg2: #fbf4e6; --bg3: #eadcc6;
+  --border: #b99a63; --text: #2b1d16; --muted: #6e5842; --dim: #9a7f5c;
+  --accent: #7d2430; --accent-dim: #edd3c5;
+  --green: #2f6f4d; --red: #9b2d28; --yellow: #9c6a22;
+  --cyan: #285d66; --gold: #b98932; --wood: #291812; --wood2: #3a2118;
+  --paper: #fff8ea; --ink: #20140f; --r: 8px;
   --mono: 'Cascadia Code','Fira Code','Consolas',monospace;
-  --sans: -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+  --sans: 'Georgia','Times New Roman','Noto Serif SC','Songti SC',serif;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; }
 body {
   font-family: var(--sans); font-size: 14px; color: var(--text);
-  background-color: var(--bg);
+  background:
+    linear-gradient(90deg, rgba(71, 38, 23, 0.045) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(71, 38, 23, 0.035) 1px, transparent 1px),
+    var(--bg);
+  background-size: 28px 28px, 28px 28px, auto;
 }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

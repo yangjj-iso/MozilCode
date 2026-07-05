@@ -78,9 +78,100 @@ def test_gui_config_preserves_existing_api_key_when_submitted_blank():
     assert raw["providers"][0]["api_key"] == "existing-key"
 
 
+def test_gui_config_accepts_multiple_providers_and_preserves_secrets_by_name():
+    current = AppConfig(providers=[
+        ProviderConfig(
+            name="openai",
+            protocol="openai",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4.1",
+            api_key="openai-key",
+        ),
+        ProviderConfig(
+            name="anthropic",
+            protocol="anthropic",
+            base_url="https://api.anthropic.com",
+            model="claude-sonnet-4-5",
+            api_key="anthropic-key",
+        ),
+    ])
+
+    raw = _config_from_gui_payload({
+        "providers": [
+            {
+                "name": "anthropic",
+                "protocol": "anthropic",
+                "base_url": "https://api.anthropic.com",
+                "model": "claude-sonnet-4-5",
+                "api_key": "",
+            },
+            {
+                "name": "local",
+                "protocol": "openai-compat",
+                "base_url": "http://127.0.0.1:8080",
+                "model": "gpt-local",
+                "api_key": "local-key",
+            },
+        ],
+    }, current)
+
+    assert [provider["name"] for provider in raw["providers"]] == ["anthropic", "local"]
+    assert raw["providers"][0]["api_key"] == "anthropic-key"
+    assert raw["providers"][1]["api_key"] == "local-key"
+    assert raw["providers"][1]["base_url"] == "http://127.0.0.1:8080/v1"
+
+
+def test_gui_config_preserves_existing_api_key_when_provider_is_renamed():
+    current = AppConfig(providers=[
+        ProviderConfig(
+            name="openai",
+            protocol="openai",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4.1",
+            api_key="openai-key",
+        ),
+    ])
+
+    raw = _config_from_gui_payload({
+        "providers": [
+            {
+                "previous_name": "openai",
+                "name": "official-openai",
+                "protocol": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4.1",
+                "api_key": "",
+            },
+        ],
+    }, current)
+
+    assert raw["providers"][0]["name"] == "official-openai"
+    assert raw["providers"][0]["api_key"] == "openai-key"
+
+
+def test_gui_config_rejects_duplicate_provider_names():
+    with pytest.raises(daemon_server.ConfigError, match="Duplicate provider names"):
+        _config_from_gui_payload({
+            "providers": [
+                {
+                    "name": "openai",
+                    "protocol": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-4.1",
+                },
+                {
+                    "name": "openai",
+                    "protocol": "openai",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-5.1",
+                },
+            ],
+        })
+
+
 def test_qqbot_public_status_uses_env_fallback_and_masks_secret(monkeypatch):
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1905055007")
+    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1234567890")
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
     monkeypatch.setenv("MOZILCODE_QQ_COMMAND_PREFIX", "/mew")
 
@@ -88,14 +179,14 @@ def test_qqbot_public_status_uses_env_fallback_and_masks_secret(monkeypatch):
 
     assert status["enabled"] is True
     assert status["configured"] is True
-    assert status["app_id"] == "1905055007"
+    assert status["app_id"] == "1234567890"
     assert status["app_secret_set"] is True
     assert "app_secret" not in status
 
 
 def test_qqbot_saved_disabled_overrides_env_enabled(monkeypatch):
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1905055007")
+    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1234567890")
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
 
     enabled, cfg, _settings = _resolve_qqbot_config({"qqbot": {"enabled": False}})
@@ -108,7 +199,7 @@ def test_qqbot_payload_preserves_existing_secret_when_blank():
     settings = _qqbot_settings_from_payload(
         {
             "enabled": True,
-            "app_id": "1905055007",
+            "app_id": "1234567890",
             "app_secret": "",
             "command_prefix": "/mc",
             "allowed_users": "u2, u1",

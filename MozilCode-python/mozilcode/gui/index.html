@@ -14,7 +14,7 @@
     --green: #5c7a34; --red: #a13a2e; --yellow: #9c7a16;
     --cyan: #3f6f63; --r: 8px;
     --mono: 'Cascadia Code','Fira Code','Consolas',monospace;
-    --sans: -apple-system,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+    --sans: 'Georgia','Times New Roman','Noto Serif SC','Songti SC',serif;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{height:100%;overflow:hidden}
@@ -52,9 +52,9 @@
   .sdel{opacity:0;flex-shrink:0;width:18px;height:18px;line-height:1;text-align:center;border:none;background:transparent;color:var(--dim);font-size:16px;cursor:pointer;border-radius:4px}
   .sitem:hover .sdel{opacity:1}
   .sdel:hover{background:var(--bg2);color:var(--red)}
-  .topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
-  .topbar .tb-ws{font-size:12px;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .topbar .tb-btn{padding:4px 10px;font-size:12px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;white-space:nowrap}
+  .topbar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+  .topbar .tb-ws{grid-column:2;justify-self:center;min-width:0;max-width:min(460px,100%);display:inline-flex;align-items:center;font-size:16px;line-height:1;color:var(--text);font-family:var(--sans);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar .tb-btn{grid-column:3;justify-self:end;padding:4px 10px;font-size:12px;background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;white-space:nowrap}
   .topbar .tb-btn:hover{border-color:var(--accent)}
   .rightbar{width:300px;background:var(--bg2);border-left:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;overflow:hidden}
   .rb-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
@@ -280,7 +280,7 @@
     <!-- Main -->
     <div class="main">
       <div class="topbar">
-        <div class="tb-ws" :title="currentWorkDir"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ currentWorkShort || '未选择工作区' }}</div>
+        <div class="tb-ws" :title="currentWorkDir">{{ currentWorkShort || '未选择工作区' }}</div>
         <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
       </div>
       <div class="chat" ref="chatEl">

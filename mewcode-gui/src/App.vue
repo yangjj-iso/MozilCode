@@ -31,7 +31,7 @@
     <!-- Main -->
     <div class="main">
       <div class="topbar">
-        <div class="tb-ws" :title="currentWorkDir"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ currentWorkShort || '未选择工作区' }}</div>
+        <div class="tb-ws" :title="currentWorkDir">{{ currentWorkShort || '未选择工作区' }}</div>
         <div class="tb-actions">
           <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
         </div>
@@ -68,7 +68,7 @@
             <template v-if="msg.parts && msg.parts.length">
               <template v-for="part in msg.parts" :key="part.id">
                 <div v-if="part.type === 'text' && part.text" class="md" @click="onMdClick">
-                  <span v-html="part.html"></span><span v-if="isActiveTextPart(msg, part)" class="cursor"></span>
+                  <span v-html="part.html"></span>
                 </div>
                 <div v-else-if="part.type === 'tool'" class="tc">
                   <div class="tc-h" @click="part.tool.expanded = !part.tool.expanded">
@@ -111,9 +111,10 @@
                 </div>
               </div>
               <div v-if="msg.content" class="md" @click="onMdClick">
-                <span v-html="msg.html"></span><span v-if="msg.streaming" class="cursor"></span>
+                <span v-html="msg.html"></span>
               </div>
             </template>
+            <span v-if="showMessageCursor(msg)" class="cursor message-cursor"></span>
             <button v-if="msg.content" class="msg-copy" type="button" @click="copyMsg(msg)">复制</button>
           </div>
         </div>
@@ -174,13 +175,18 @@
               <button class="composer-tool add" type="button" @click="focusComposer" :disabled="!activeSessionId" title="添加上下文">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
               </button>
-              <label class="composer-mode" title="命令接受状态">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5.5 5.5v5.8c0 4.1 2.7 7.8 6.5 9.1 3.8-1.3 6.5-5 6.5-9.1V5.5L12 3Z"/><path d="M12 8v4"/></svg>
-                <span class="composer-mode-text">{{ selectedModeLabel }}</span>
-                <select v-model="selectedMode" @change="setCommandAcceptanceMode(selectedMode)" :disabled="!activeSessionId || busy">
-                  <option v-for="m in modeOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
-                </select>
-              </label>
+              <div class="composer-choice" @click.stop>
+                <button class="composer-mode" type="button" title="命令接受状态" :disabled="!activeSessionId || busy" @click="toggleModeMenu">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5.5 5.5v5.8c0 4.1 2.7 7.8 6.5 9.1 3.8-1.3 6.5-5 6.5-9.1V5.5L12 3Z"/><path d="M12 8v4"/></svg>
+                  <span class="composer-mode-text">{{ selectedModeLabel }}</span>
+                </button>
+                <div v-if="modeMenuOpen" class="choice-menu choice-menu-left">
+                  <button v-for="m in modeOptions" :key="m.value" type="button" class="choice-item" :class="{ active: selectedMode === m.value }" @click="chooseMode(m.value)">
+                    <span>{{ m.label }}</span>
+                    <small>{{ m.value }}</small>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="composer-right">
               <button
@@ -191,14 +197,20 @@
                 :title="contextWindowTitle"
                 @click="openContextInfo"
               ></button>
-              <label class="composer-model" :title="sessionStatus.provider.model || '选择模型'">
-                <span>{{ composerModelLabel }}</span>
-                <span v-if="composerEffortLabel" class="composer-effort">{{ composerEffortLabel }}</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                <select v-model="modelConfig.model" @change="changeComposerModel" :disabled="busy || !configStatus.configured">
-                  <option v-for="m in composerModelOptions" :key="m" :value="m">{{ modelOptionLabel(m) }}</option>
-                </select>
-              </label>
+              <div class="composer-choice" @click.stop>
+                <button class="composer-model" type="button" :title="composerModelTitle" :disabled="busy || !hasConfiguredModels" @click="toggleModelMenu">
+                  <span>{{ composerModelLabel }}</span>
+                  <span v-if="composerEffortLabel" class="composer-effort">{{ composerEffortLabel }}</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div v-if="modelMenuOpen" class="choice-menu choice-menu-right">
+                  <button v-for="p in composerModelOptions" :key="providerKey(p)" type="button" class="choice-item" :class="{ active: providerKey(p) === activeProviderKey }" @click="chooseComposerModel(p)">
+                    <span>{{ modelOptionLabel(p) }}</span>
+                    <small>{{ modelProviderMeta(p) }}</small>
+                  </button>
+                  <div v-if="composerModelOptions.length === 0" class="slash-empty">请先在模型配置中添加模型</div>
+                </div>
+              </div>
               <button v-if="busy" class="composer-send stop" @click="cancelActive" :disabled="!canStop" title="停止当前任务">
                 <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
               </button>
@@ -354,24 +366,49 @@
     <div class="set-main">
       <div v-if="setTab === 'model'" class="set-pane">
         <h2>模型配置</h2>
-        <p class="set-desc">配置完成后，GUI 会使用同一个 daemon 创建会话。</p>
-        <div class="set-form model-form">
+        <p class="set-desc">底部模型列表只显示这里配置好的模型。排在第一位的是默认模型，新建会话会优先使用它。</p>
+        <div class="official-model-card">
+          <div class="set-row-l">
+            <div class="set-row-title">MozilCode 官方模型</div>
+            <div class="set-row-desc">登录后将可直接使用官方提供的模型，无需手动配置第三方 API Key。</div>
+          </div>
+          <button class="set-cancel" @click="openOfficialLogin">登录</button>
+        </div>
+        <div class="set-row-h">
+          <span>已配置模型</span>
+          <button class="set-add" @click="startAddModel">{{ showModelForm ? '收起表单' : '＋ 添加模型' }}</button>
+        </div>
+        <div v-if="configuredModelProviders.length === 0" class="set-empty">还没有配置模型</div>
+        <div v-for="(p, idx) in configuredModelProviders" :key="providerKey(p)" class="set-row model-row" :class="{ active: idx === 0 }">
+          <div class="set-row-l">
+            <div class="set-row-title">{{ p.model }} <span class="set-tag">{{ idx === 0 ? '默认' : modelProtocolLabel(p.protocol) }}</span></div>
+            <div class="set-row-desc mono">{{ p.name }} · {{ p.base_url || '—' }}</div>
+            <div class="set-row-desc">{{ p.api_key_set ? 'API Key 已设置' : '使用环境变量或无需密钥' }} · {{ p.thinking ? 'thinking 开启' : 'thinking 关闭' }}</div>
+          </div>
+          <div class="set-row-r">
+            <button v-if="idx !== 0" class="set-del" @click="activateModelProvider(p.name)">设为默认</button>
+            <button class="set-del" @click="startEditModel(p)">编辑</button>
+            <button class="set-del" @click="deleteModelProvider(p.name)">删除</button>
+          </div>
+        </div>
+        <div v-if="showModelForm" class="set-form model-form">
           <select v-model="modelConfig.protocol" @change="applyProtocolDefaults" class="set-select">
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
             <option value="openai-compat">OpenAI Compatible</option>
           </select>
-          <input v-model="modelConfig.name" placeholder="Provider 名称" />
+          <input v-model="modelConfig.name" placeholder="Provider 名称，如 openai / claude / local" />
           <input v-model="modelConfig.base_url" placeholder="Base URL" />
           <input v-model="modelConfig.model" placeholder="模型名称，例如 gpt-4.1 / claude-sonnet-4-5" />
-          <input v-model="modelConfig.api_key" type="password" placeholder="API Key（留空则使用环境变量）" autocomplete="off" />
+          <input v-model="modelConfig.api_key" type="password" :placeholder="editingProviderName ? 'API Key（留空保持不变）' : 'API Key（留空则使用环境变量）'" autocomplete="off" />
           <div class="set-grid2">
             <input v-model.number="modelConfig.context_window" type="number" min="0" placeholder="Context window（0 自动）" />
             <input v-model.number="modelConfig.max_output_tokens" type="number" min="0" placeholder="Max output tokens（0 自动）" />
           </div>
           <label class="check-row"><input type="checkbox" v-model="modelConfig.thinking" /> 启用 thinking</label>
           <div class="set-form-acts">
-            <button class="set-save" @click="saveModelConfig">保存并启用</button>
+            <button class="set-cancel" @click="cancelModelEdit">取消</button>
+            <button class="set-save" @click="saveModelConfig">{{ editingProviderName ? '保存模型' : '保存并设为默认' }}</button>
           </div>
           <div class="set-note mono">配置文件: {{ configStatus.config_path || '—' }}</div>
         </div>
@@ -591,16 +628,22 @@ function renderMarkdown(text) {
   return html;
 }
 
+function renderStreamingText(text) {
+  return escapeHtml(text || '').replace(/\r?\n/g, '<br>');
+}
+
 // requestAnimationFrame-coalesced live render: many token updates within a single
-// frame collapse into ONE markdown parse, so streaming stays smooth even at high
-// token rates (avoids the per-token O(n²) blowup).
+// frame collapse into one cheap text render. Full Markdown is parsed once when
+// the assistant turn completes; parsing Markdown on every frame makes long
+// answers feel like they are typing slowly.
 function scheduleRender(m) {
   if (m._renderScheduled) return;
   m._renderScheduled = true;
   requestAnimationFrame(() => {
     m._renderScheduled = false;
+    if (m._finalized) return;
     const source = m.text !== undefined ? m.text : m.content;
-    if (source) m.html = renderMarkdown(source);
+    if (source) m.html = renderStreamingText(source);
   });
 }
 
@@ -794,13 +837,8 @@ function findToolById(toolId) {
   return null;
 }
 
-function isActiveTextPart(msg, part) {
-  if (!msg || !msg.streaming || !part || part.type !== 'text') return false;
-  const parts = msg.parts || [];
-  for (let i = parts.length - 1; i >= 0; i--) {
-    if (parts[i].type === 'text') return parts[i] === part;
-  }
-  return false;
+function showMessageCursor(msg) {
+  return Boolean(msg && msg.role === 'assistant' && msg.streaming && msg.content);
 }
 
 function escapeHtml(s) {
@@ -911,6 +949,8 @@ const modeOptions = [
   { value: 'acceptEdits', label: '自动接受' },
   { value: 'bypassPermissions', label: '完全访问' },
 ];
+const modeMenuOpen = ref(false);
+const modelMenuOpen = ref(false);
 const slashMenuOpen = ref(false);
 const selectedSlashIndex = ref(0);
 const slashCommands = [
@@ -1002,6 +1042,8 @@ const telegramBotStatus = ref({
 });
 const configLoaded = ref(false);
 const configStatus = ref({ configured: false, config_path: '', error: '', providers: [] });
+const showModelForm = ref(false);
+const editingProviderName = ref('');
 const modelConfig = ref({
   protocol: 'openai',
   name: 'openai',
@@ -1060,27 +1102,34 @@ const contextRingClass = computed(() => ({
   warn: contextCompactState.value === 'warn',
   danger: contextCompactState.value === 'danger',
 }));
+const configuredModelProviders = computed(() => configStatus.value.providers || []);
+const activeConfiguredProvider = computed(() => configuredModelProviders.value[0] || null);
+const composerModelOptions = computed(() => configuredModelProviders.value.filter((p) => (p.model || '').trim()));
+const hasConfiguredModels = computed(() => composerModelOptions.value.length > 0);
+const selectedComposerProvider = computed(() => {
+  const sessionProviderName = sessionStatus.value.provider?.name || '';
+  if (sessionProviderName) {
+    const matched = configuredModelProviders.value.find((p) => p.name === sessionProviderName);
+    if (matched) return matched;
+  }
+  return activeConfiguredProvider.value;
+});
+const activeProviderKey = computed(() => providerKey(selectedComposerProvider.value || {}));
 const composerModelLabel = computed(() => {
-  const model = sessionStatus.value.provider.model || modelConfig.value.model || '';
-  if (!model) return '模型';
+  const model = selectedComposerProvider.value?.model || '';
+  if (!model) return '配置模型';
   return model;
 });
+const composerModelTitle = computed(() => {
+  const provider = selectedComposerProvider.value;
+  if (!provider) return '请先在模型配置中添加模型';
+  return `${provider.model} · ${provider.name}`;
+});
 const composerEffortLabel = computed(() => {
-  if (modelConfig.value.thinking) return '超高';
+  if (selectedComposerProvider.value?.thinking) return '超高';
   return '';
 });
 const selectedModeLabel = computed(() => modeOptions.find((m) => m.value === selectedMode.value)?.label || '默认');
-const composerModelOptions = computed(() => {
-  const current = modelConfig.value.model || sessionStatus.value.provider.model || '';
-  const common = [
-    current,
-    'gpt-5.5',
-    'gpt-5.1',
-    'gpt-4.1',
-    'claude-sonnet-4-5',
-  ];
-  return Array.from(new Set(common.map((m) => (m || '').trim()).filter(Boolean)));
-});
 const slashQuery = computed(() => {
   const raw = inputText.value || '';
   if (!raw.startsWith('/') || raw.includes('\n')) return null;
@@ -1154,19 +1203,90 @@ function applyProtocolDefaults() {
   }
 }
 
-function loadConfigIntoForm(data) {
-  const p = data.providers && data.providers[0];
-  if (!p) return;
-  modelConfig.value = {
+function emptyModelConfig(protocol = 'openai') {
+  return {
+    protocol,
+    name: protocol === 'anthropic' ? 'anthropic' : protocol === 'openai-compat' ? 'compat' : 'openai',
+    base_url: protocol === 'anthropic' ? 'https://api.anthropic.com' : protocol === 'openai' ? 'https://api.openai.com/v1' : '',
+    model: protocol === 'anthropic' ? 'claude-sonnet-4-5' : 'gpt-4.1',
+    api_key: '',
+    permission_mode: selectedMode.value || 'default',
+    context_window: 0,
+    max_output_tokens: 0,
+    thinking: false,
+  };
+}
+
+function normalizeModelProvider(p) {
+  return {
+    name: p.name || '',
     protocol: p.protocol || 'openai',
-    name: p.name || p.protocol || 'openai',
     base_url: p.base_url || '',
     model: p.model || '',
+    api_key: p.api_key || '',
+    api_key_set: Boolean(p.api_key_set),
+    thinking: Boolean(p.thinking),
+    context_window: Number(p.context_window || 0),
+    max_output_tokens: Number(p.max_output_tokens || 0),
+  };
+}
+
+function providerKey(p) {
+  if (!p) return '';
+  return p.name || `${p.protocol || ''}:${p.base_url || ''}:${p.model || ''}`;
+}
+
+function modelProtocolLabel(protocol) {
+  if (protocol === 'openai') return 'OpenAI';
+  if (protocol === 'anthropic') return 'Anthropic';
+  if (protocol === 'openai-compat') return '兼容接口';
+  return protocol || 'Provider';
+}
+
+function modelProviderMeta(p) {
+  if (!p) return '';
+  return `${p.name || '未命名'} · ${modelProtocolLabel(p.protocol)}`;
+}
+
+function modelProviderPayload(p, previousName = '') {
+  const normalized = normalizeModelProvider(p);
+  const payload = {
+    name: normalized.name,
+    protocol: normalized.protocol,
+    base_url: normalized.base_url,
+    model: normalized.model,
+    api_key: normalized.api_key || '',
+    thinking: normalized.thinking,
+    context_window: normalized.context_window || 0,
+    max_output_tokens: normalized.max_output_tokens || 0,
+  };
+  if (previousName) payload.previous_name = previousName;
+  return payload;
+}
+
+function applyConfigPayload(d) {
+  configStatus.value = {
+    configured: Boolean(d.configured),
+    config_path: d.config_path || '',
+    error: d.error || '',
+    providers: (d.providers || []).map(normalizeModelProvider),
+  };
+}
+
+function loadConfigIntoForm(data, provider = null) {
+  const p = provider || (data.providers && data.providers[0]);
+  if (!p) return;
+  const normalized = normalizeModelProvider(p);
+  modelConfig.value = {
+    protocol: normalized.protocol,
+    name: normalized.name || normalized.protocol || 'openai',
+    base_url: normalized.base_url || '',
+    model: normalized.model || '',
     api_key: '',
     permission_mode: data.permission_mode || 'default',
-    context_window: p.context_window || 0,
-    max_output_tokens: p.max_output_tokens || 0,
-    thinking: Boolean(p.thinking),
+    context_window: normalized.context_window || 0,
+    max_output_tokens: normalized.max_output_tokens || 0,
+    thinking: Boolean(normalized.thinking),
   };
 }
 
@@ -1174,13 +1294,9 @@ async function loadConfig() {
   try {
     const r = await fetch(`${API}/api/config`);
     const d = await r.json();
-    configStatus.value = {
-      configured: Boolean(d.configured),
-      config_path: d.config_path || '',
-      error: d.error || '',
-      providers: d.providers || [],
-    };
+    applyConfigPayload(d);
     loadConfigIntoForm(d);
+    showModelForm.value = configStatus.value.providers.length === 0;
   } catch (e) {
     configStatus.value = { ...configStatus.value, configured: false, error: e.message || '配置读取失败' };
   } finally {
@@ -1188,49 +1304,152 @@ async function loadConfig() {
   }
 }
 
+async function saveProviderList(providers, message = '模型配置已保存') {
+  const r = await fetch(`${API}/api/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      providers,
+      permission_mode: modelConfig.value.permission_mode || selectedMode.value || 'default',
+    }),
+  });
+  const d = await r.json();
+  if (!r.ok) {
+    configStatus.value = { ...configStatus.value, error: d.error || '配置保存失败' };
+    toast(d.error || '配置保存失败', 'err');
+    return false;
+  }
+  applyConfigPayload(d);
+  loadConfigIntoForm(d);
+  toast(message, 'ok');
+  await refreshSessions();
+  if (!activeSessionId.value && configStatus.value.configured) {
+    if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
+    else await createSession();
+  } else if (activeSessionId.value) {
+    await loadStatus();
+  }
+  return true;
+}
+
 async function saveModelConfig() {
   if (!modelConfig.value.model.trim()) { toast('请填写模型名称', 'err'); return; }
   if (!modelConfig.value.base_url.trim()) { toast('请填写 Base URL', 'err'); return; }
+  if (!modelConfig.value.name.trim()) { toast('请填写 Provider 名称', 'err'); return; }
+  const candidate = modelProviderPayload(modelConfig.value, editingProviderName.value);
+  const providers = configuredModelProviders.value;
+  const nameExists = providers.some((p) => p.name === candidate.name && p.name !== editingProviderName.value);
+  if (nameExists) { toast('Provider 名称已存在', 'err'); return; }
   try {
-    const r = await fetch(`${API}/api/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(modelConfig.value),
-    });
-    const d = await r.json();
-    if (!r.ok) {
-      configStatus.value = { ...configStatus.value, error: d.error || '配置保存失败' };
-      toast(d.error || '配置保存失败', 'err');
-      return;
+    let nextProviders;
+    if (editingProviderName.value) {
+      nextProviders = providers.map((p) => (
+        p.name === editingProviderName.value ? candidate : modelProviderPayload(p)
+      ));
+    } else {
+      nextProviders = [
+        candidate,
+        ...providers
+          .filter((p) => p.name !== candidate.name)
+          .map(modelProviderPayload),
+      ];
     }
-    configStatus.value = {
-      configured: Boolean(d.configured),
-      config_path: d.config_path || '',
-      error: '',
-      providers: d.providers || [],
-    };
-    toast('模型配置已保存', 'ok');
-    await refreshSessions();
-    if (!activeSessionId.value && configStatus.value.configured) {
-      if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
-      else await createSession();
-    } else if (activeSessionId.value) {
-      await loadStatus();
+    if (await saveProviderList(nextProviders, editingProviderName.value ? '模型已保存' : '模型已添加并设为默认')) {
+      editingProviderName.value = '';
+      showModelForm.value = false;
     }
   } catch (e) {
     toast('配置保存失败: ' + e.message, 'err');
   }
 }
 
-function modelOptionLabel(model) {
-  if (!model) return '模型';
-  return model;
+function modelOptionLabel(provider) {
+  if (!provider) return '模型';
+  return provider.model || '模型';
 }
 
-async function changeComposerModel() {
-  if (!modelConfig.value.model.trim()) return;
-  await saveModelConfig();
-  await loadStatus();
+function startAddModel() {
+  if (showModelForm.value && !editingProviderName.value) {
+    showModelForm.value = false;
+    return;
+  }
+  editingProviderName.value = '';
+  modelConfig.value = emptyModelConfig('openai');
+  showModelForm.value = true;
+}
+
+function startEditModel(provider) {
+  const normalized = normalizeModelProvider(provider);
+  editingProviderName.value = normalized.name;
+  modelConfig.value = {
+    ...normalized,
+    api_key: '',
+    permission_mode: selectedMode.value || 'default',
+  };
+  showModelForm.value = true;
+}
+
+function cancelModelEdit() {
+  editingProviderName.value = '';
+  showModelForm.value = configuredModelProviders.value.length === 0;
+  loadConfigIntoForm({ permission_mode: selectedMode.value, providers: configuredModelProviders.value });
+}
+
+async function activateModelProvider(name) {
+  const providers = configuredModelProviders.value;
+  const idx = providers.findIndex((p) => p.name === name);
+  if (idx <= 0) return;
+  const target = providers[idx];
+  const nextProviders = [
+    modelProviderPayload(target),
+    ...providers.filter((p) => p.name !== name).map(modelProviderPayload),
+  ];
+  await saveProviderList(nextProviders, '默认模型已切换');
+}
+
+async function deleteModelProvider(name) {
+  const providers = configuredModelProviders.value;
+  if (providers.length <= 1) { toast('至少保留一个模型', 'err'); return; }
+  if (!window.confirm(`删除模型配置 “${name}”？`)) return;
+  const nextProviders = providers
+    .filter((p) => p.name !== name)
+    .map(modelProviderPayload);
+  if (await saveProviderList(nextProviders, '模型已删除')) {
+    if (editingProviderName.value === name) cancelModelEdit();
+  }
+}
+
+function closeChoiceMenus() {
+  modeMenuOpen.value = false;
+  modelMenuOpen.value = false;
+}
+
+function toggleModeMenu() {
+  if (!activeSessionId.value || busy.value) return;
+  modelMenuOpen.value = false;
+  modeMenuOpen.value = !modeMenuOpen.value;
+}
+
+function toggleModelMenu() {
+  if (busy.value || !hasConfiguredModels.value) return;
+  modeMenuOpen.value = false;
+  modelMenuOpen.value = !modelMenuOpen.value;
+}
+
+async function chooseMode(mode) {
+  modeMenuOpen.value = false;
+  selectedMode.value = mode;
+  await setCommandAcceptanceMode(mode);
+}
+
+async function chooseComposerModel(provider) {
+  modelMenuOpen.value = false;
+  if (!provider || !provider.name) return;
+  await activateModelProvider(provider.name);
+}
+
+function openOfficialLogin() {
+  toast('官方模型登录入口已预留，接入账号服务后会自动同步官方模型', 'ok');
 }
 
 function openContextInfo() {
@@ -2084,9 +2303,13 @@ function finalizeAssistant() {
     normalizeAssistantMessage(last);
     last.streaming = false;
     last.statusText = '';
+    last._finalized = true;
     if (last.content) last.html = renderMarkdown(last.content);
     for (const part of last.parts) {
-      if (part.type === 'text' && part.text) part.html = renderMarkdown(part.text);
+      if (part.type === 'text' && part.text) {
+        part._finalized = true;
+        part.html = renderMarkdown(part.text);
+      }
     }
     if (last.thinking) last.thinkCollapsed = true;
   }
@@ -2123,7 +2346,7 @@ function handleEvent(data) {
     const text = d.text || '';
     m.content += text;
     part.text += text;
-    scheduleRender(part); // 流式期间实时渲染 Markdown（rAF 合帧节流）
+    scheduleRender(part); // 流式期间轻量渲染，结束时再完整解析 Markdown。
     scrollDown();
   } else if (t === 'ThinkingText') {
     const m = ensureAssistant();
@@ -2189,8 +2412,10 @@ function handleEvent(data) {
     const errorText = `模型请求失败：${msg}`;
     const part = ensureTextPart(m);
     part.text += errorText;
+    part._finalized = true;
     part.html = renderMarkdown(part.text);
     m.content += errorText;
+    m._finalized = true;
     m.html = renderMarkdown(m.content);
     m.streaming = false;
     m.error = true;
@@ -2246,8 +2471,10 @@ async function send() {
     const errorText = `发送失败：${e.message}`;
     const part = ensureTextPart(m);
     part.text += errorText;
+    part._finalized = true;
     part.html = renderMarkdown(part.text);
     m.content += errorText;
+    m._finalized = true;
     m.html = renderMarkdown(m.content);
     m.streaming = false;
     m.statusText = '';
@@ -2386,6 +2613,7 @@ function autoGrow() {
 let _statusTimer = null;
 
 onMounted(async () => {
+  document.addEventListener('click', closeChoiceMenus);
   await checkHealth();
   await loadConfig();
   await refreshSessions();
@@ -2402,6 +2630,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener('click', closeChoiceMenus);
   if (_statusTimer) clearInterval(_statusTimer);
   if (_reconnectTimer) clearTimeout(_reconnectTimer);
   if (ws) {
@@ -2446,9 +2675,9 @@ onUnmounted(() => {
 .sdel { opacity: 0; flex-shrink: 0; width: 18px; height: 18px; line-height: 1; text-align: center; border: none; background: transparent; color: var(--dim); font-size: 16px; cursor: pointer; border-radius: 4px; }
 .sitem:hover .sdel { opacity: 1; }
 .sdel:hover { background: var(--bg2); color: var(--red); }
-.topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
-.topbar .tb-ws { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tb-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+.topbar .tb-ws { grid-column: 2; justify-self: center; min-width: 0; max-width: min(460px, 100%); display: inline-flex; align-items: center; font-size: 16px; line-height: 1; color: var(--text); font-family: var(--sans); font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-actions { grid-column: 3; justify-self: end; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .topbar .tb-btn { padding: 4px 10px; font-size: 12px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; white-space: nowrap; }
 .topbar .tb-btn:hover { border-color: var(--accent); }
 .rightbar { width: 300px; background: var(--bg2); border-left: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -2523,7 +2752,7 @@ onUnmounted(() => {
 .set-back { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: none; color: var(--muted); font-size: 13px; cursor: pointer; border-radius: 6px; margin-bottom: 10px; }
 .set-back svg { width: 18px; height: 18px; }
 .set-back:hover { background: var(--bg3); color: var(--text); }
-.set-group { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 10px 4px; }
+.set-group { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0; padding: 8px 10px 4px; }
 .set-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: none; color: var(--muted); font-size: 13px; cursor: pointer; border-radius: 6px; text-align: left; }
 .set-item .si { width: 16px; height: 16px; flex-shrink: 0; }
 .set-item:hover { background: var(--bg3); color: var(--text); }
@@ -2536,7 +2765,10 @@ onUnmounted(() => {
 .set-row-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: var(--muted); font-size: 13px; }
 .set-add { padding: 6px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
 .set-add:hover { border-color: var(--accent); }
-.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+.set-row,
+.official-model-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+.official-model-card { margin-bottom: 18px; }
+.model-row.active { border-color: var(--accent); background: var(--accent-dim); }
 .set-row-l { min-width: 0; }
 .set-row-title { font-size: 14px; color: var(--text); font-weight: 500; }
 .set-tag { font-size: 11px; color: var(--dim); background: var(--bg3); padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 400; }
@@ -2598,7 +2830,7 @@ onUnmounted(() => {
 .who { font-size: 12.5px; color: var(--text); font-weight: 600; }
 .msg.user { display: flex; justify-content: flex-end; }
 .user-line { display: flex; justify-content: flex-end; width: 100%; }
-.msg-content { line-height: 1.7; max-width: 100%; }
+.msg-content { display: flex; flex-direction: column; align-items: stretch; line-height: 1.7; max-width: 100%; }
 .assistant-status { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--muted); font-size: 13px; }
 .status-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: sp 0.7s linear infinite; flex-shrink: 0; }
 .think { border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); margin: 2px 0 10px; overflow: hidden; }
@@ -2646,7 +2878,7 @@ onUnmounted(() => {
 .md :deep(.copy-btn) { position: absolute; top: 6px; right: 6px; padding: 2px 8px; font-size: 11px; background: var(--bg3); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
 .md :deep(pre:hover .copy-btn) { opacity: 1; }
 .md :deep(.copy-btn:hover) { color: var(--text); border-color: var(--accent); }
-.msg-copy { margin-top: 6px; padding: 0 6px; font-size: 11px; background: transparent; color: var(--dim); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.msg-copy { order: 999; align-self: flex-start; margin-top: 6px; padding: 0 6px; font-size: 11px; background: transparent; color: var(--dim); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
 .msg-copy:hover { color: var(--text); border-color: var(--accent); }
 .term { font-family: var(--mono); font-size: 12px; }
 .term-cmd { color: var(--green); margin-bottom: 6px; white-space: pre-wrap; word-break: break-all; }
@@ -2672,6 +2904,7 @@ onUnmounted(() => {
 .tc-b { padding: 8px 10px; border-top: 1px solid var(--border); background: var(--bg); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto; color: var(--muted); }
 .tc-b.hide { display: none; }
 .cursor { display: inline-block; width: 8px; height: 16px; background: var(--accent); animation: bk 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
+.message-cursor { order: 998; align-self: flex-start; margin-top: 6px; margin-left: 0; }
 @keyframes bk { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 .input-area { padding: 10px 24px 16px; background: var(--bg); }
 .composer { position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; width: min(780px, 100%); min-height: 98px; margin: 0 auto; background: var(--bg2); border: 1px solid var(--border); border-radius: 18px; padding: 12px 12px 10px 14px; color: var(--text); box-shadow: 0 8px 24px rgba(32, 36, 33, 0.07); transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
@@ -2685,13 +2918,13 @@ onUnmounted(() => {
 .composer-tool svg { width: 21px; height: 21px; }
 .composer-tool:hover:not(:disabled) { color: var(--text); background: var(--bg3); }
 .composer-tool:disabled { opacity: 0.45; cursor: not-allowed; }
-.composer-mode { border: none; background: transparent; font-family: var(--sans); position: relative; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 13px; font-weight: 650; white-space: nowrap; padding: 4px 18px 4px 6px; cursor: pointer; border-radius: 999px; }
+.composer-mode { border: none; background: transparent; font-family: var(--sans); position: relative; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; padding: 4px 8px 4px 6px; cursor: pointer; border-radius: 999px; }
 .composer-mode svg { width: 17px; height: 17px; flex-shrink: 0; }
 .composer-mode-text { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 .composer-mode select { position: absolute; inset: 0; width: 100%; height: 100%; appearance: none; border: none; background: transparent; color: currentColor; font: inherit; outline: none; cursor: pointer; opacity: 0; }
 .composer-mode select:disabled { cursor: not-allowed; }
 .composer-mode:hover { background: var(--accent-dim); }
-.composer-mode::after { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); position: absolute; right: 5px; top: 9px; pointer-events: none; }
+.composer-mode::after { content: ''; position: static; display: block; flex: 0 0 auto; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; margin-top: -3px; transform: rotate(45deg); pointer-events: none; }
 .composer-mode option { color: var(--text); background: var(--bg2); }
 .composer-context { --ctx: 0deg; --ctx-color: var(--accent); width: 15px; height: 15px; border: none; border-radius: 50%; background: conic-gradient(var(--ctx-color) var(--ctx), var(--border) 0); cursor: pointer; flex-shrink: 0; position: relative; }
 .composer-context::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg2); }
@@ -2775,5 +3008,1045 @@ onUnmounted(() => {
   .composer-model span:first-child { max-width: 62px; }
   .composer-effort { display: none; }
   .slash-menu { left: 10px; right: 10px; }
+}
+
+/* Classical redesign override */
+.app {
+  display: flex;
+  height: 100vh;
+  color: var(--text);
+  background:
+    linear-gradient(90deg, rgba(43, 24, 18, 0.1), transparent 16%, transparent 84%, rgba(43, 24, 18, 0.08)),
+    var(--bg);
+}
+.sidebar {
+  width: 286px;
+  flex: 0 0 286px;
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 231, 174, 0.08), transparent 26%),
+    linear-gradient(90deg, #21110d, var(--wood) 34%, var(--wood2));
+  border-right: 1px solid rgba(185, 137, 50, 0.55);
+  box-shadow: inset -10px 0 28px rgba(0, 0, 0, 0.24), 10px 0 32px rgba(43, 24, 18, 0.18);
+}
+.sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,0.05), transparent 12%, transparent 86%, rgba(0,0,0,0.22)),
+    repeating-linear-gradient(90deg, transparent 0 38px, rgba(255,255,255,0.035) 39px 40px);
+}
+.main {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 239, 0.76), rgba(231, 220, 200, 0.92)),
+    var(--bg);
+}
+.main::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(125, 36, 48, 0.08), transparent 14%, transparent 86%, rgba(41, 24, 18, 0.08)),
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(83, 53, 32, 0.035) 32px);
+}
+.topbar,
+.chat,
+.input-area,
+.rightbar {
+  position: relative;
+  z-index: 1;
+}
+.sb-btns {
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid rgba(185, 137, 50, 0.34);
+  background: rgba(20, 11, 8, 0.18);
+}
+.btn-new,
+.btn-open,
+.tb-btn,
+.rb-btn,
+.rb-pick,
+.set-add,
+.set-save,
+.set-cancel,
+.approve-acts button,
+.approve-opt,
+.modal .acts button,
+.wt-actions button,
+.task-stop,
+.msg-copy {
+  border-radius: 8px;
+  font-family: var(--sans);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.btn-new {
+  min-height: 46px;
+  color: #fff8e8;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14), transparent 45%),
+    linear-gradient(135deg, #9e2f3d, #671b25);
+  border: 1px solid rgba(233, 192, 107, 0.72);
+  box-shadow: inset 0 1px rgba(255,255,255,0.18), 0 10px 20px rgba(20, 10, 8, 0.24);
+}
+.btn-new:hover {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18), transparent 45%),
+    linear-gradient(135deg, #b23a49, #771f2a);
+  border-color: var(--gold);
+  transform: translateY(-2px);
+}
+.btn-open {
+  min-height: 42px;
+  color: #f1dfbd;
+  background: rgba(255, 248, 232, 0.07);
+  border: 1px solid rgba(185, 137, 50, 0.45);
+}
+.btn-open:hover {
+  color: #fff8e8;
+  background: rgba(185, 137, 50, 0.14);
+  border-color: rgba(233, 192, 107, 0.82);
+  transform: translateY(-2px);
+}
+.btn-open .ficon,
+.sg-name .ficon {
+  color: #d9ae5a;
+}
+.btn-ic {
+  color: #fff8e8;
+}
+.slist {
+  padding: 12px 10px;
+}
+.sgroup {
+  margin-bottom: 10px;
+}
+.sg-h {
+  color: #c7a974;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.sg-h:hover {
+  background: rgba(255, 248, 232, 0.08);
+}
+.sg-name {
+  color: #efdfbf;
+  font-weight: 650;
+}
+.sg-count,
+.sg-caret {
+  color: #a98a52;
+}
+.sg-items {
+  padding-left: 8px;
+  border-left: 1px solid rgba(185, 137, 50, 0.28);
+  margin-left: 8px;
+}
+.sitem {
+  min-height: 34px;
+  border-radius: 8px;
+  margin: 2px 0;
+  color: #d8c19a;
+}
+.sitem:hover {
+  background: rgba(255, 248, 232, 0.08);
+}
+.sitem.active {
+  background:
+    linear-gradient(90deg, rgba(185, 137, 50, 0.25), rgba(255, 248, 232, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(185, 137, 50, 0.32);
+}
+.sitem.active::before {
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--gold);
+  box-shadow: 0 0 12px rgba(185, 137, 50, 0.62);
+}
+.stitle,
+.sitem:hover .stitle,
+.sitem.active .stitle {
+  color: #f4e8d1;
+}
+.sdel {
+  color: #c7a974;
+}
+.sdel:hover {
+  color: #fff8e8;
+  background: rgba(125, 36, 48, 0.72);
+}
+.sb-f {
+  border-top: 1px solid rgba(185, 137, 50, 0.4);
+  color: #dbc08d;
+  background: rgba(20, 11, 8, 0.24);
+}
+.sb-f:hover {
+  background: rgba(185, 137, 50, 0.12);
+  color: #fff8e8;
+}
+.sb-f .gear {
+  color: var(--gold);
+}
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  min-height: 50px;
+  padding: 10px 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 232, 0.92), rgba(237, 211, 181, 0.72));
+  border-bottom: 1px solid rgba(185, 154, 99, 0.74);
+  box-shadow: 0 8px 24px rgba(67, 39, 23, 0.08);
+}
+.topbar .tb-ws {
+  grid-column: 2;
+  justify-self: center;
+  max-width: min(520px, 100%);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 650;
+}
+.topbar .tb-actions {
+  grid-column: 3;
+  justify-self: end;
+}
+.topbar .tb-btn {
+  padding: 7px 14px;
+  color: var(--accent);
+  background: var(--paper);
+  border: 1px solid rgba(185, 137, 50, 0.58);
+  box-shadow: inset 0 1px rgba(255,255,255,0.65);
+}
+.topbar .tb-btn:hover {
+  color: #fff8e8;
+  background: var(--accent);
+  border-color: var(--gold);
+  transform: translateY(-1px);
+}
+.rightbar {
+  width: 322px;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 232, 0.92), rgba(234, 220, 198, 0.94));
+  border-left: 1px solid rgba(185, 137, 50, 0.64);
+  box-shadow: -12px 0 30px rgba(67, 39, 23, 0.12);
+  animation: panelSlide 0.24s ease both;
+}
+.rb-tabs {
+  padding: 8px;
+  gap: 5px;
+  border-bottom: 1px solid rgba(185, 154, 99, 0.56);
+}
+.rb-tab {
+  border: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 4px;
+  color: var(--muted);
+}
+.rb-tab:hover {
+  color: var(--accent);
+  background: rgba(255, 248, 232, 0.62);
+}
+.rb-tab.active {
+  color: #fff8e8;
+  background: linear-gradient(180deg, #8d2d39, #68202a);
+  border-color: rgba(185, 137, 50, 0.66);
+}
+.rb-files-h,
+.rb-row,
+.run-block {
+  border-color: rgba(185, 154, 99, 0.44);
+}
+.rb-files-root,
+.rb-k,
+.run-title,
+.task-meta,
+.wt-branch,
+.rb-hint {
+  color: var(--muted);
+}
+.rb-refresh,
+.inline-refresh {
+  color: var(--accent);
+  border-radius: 6px;
+  transition: transform 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+.rb-refresh:hover,
+.inline-refresh:hover {
+  color: var(--gold);
+  background: rgba(185, 137, 50, 0.12);
+  transform: rotate(12deg);
+}
+.fnode {
+  border-radius: 6px;
+  margin: 1px 6px;
+  color: var(--muted);
+}
+.fnode:hover {
+  color: var(--text);
+  background: rgba(255, 248, 232, 0.78);
+}
+.metric,
+.task-row,
+.wt-row,
+.rb-input,
+.rb-select,
+.rb-pick,
+.rb-btn {
+  background: rgba(255, 248, 232, 0.72);
+  border: 1px solid rgba(185, 154, 99, 0.58);
+}
+.metric,
+.task-row,
+.wt-row {
+  border-radius: 8px;
+  box-shadow: inset 0 1px rgba(255,255,255,0.58);
+}
+.metric strong {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+.rb-input,
+.rb-select {
+  color: var(--text);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 4px rgba(73, 45, 27, 0.08);
+}
+.rb-input:focus,
+.rb-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 36, 48, 0.1);
+}
+.rb-btn {
+  color: var(--accent);
+  font-weight: 650;
+}
+.rb-btn:hover:not(:disabled),
+.rb-pick:hover {
+  color: #fff8e8;
+  background: var(--accent);
+  border-color: var(--gold);
+  transform: translateY(-1px);
+}
+.rb-btn.danger {
+  color: var(--red);
+  background: rgba(155, 45, 40, 0.08);
+  border: 1px solid rgba(155, 45, 40, 0.28);
+}
+.rb-btn.danger:hover:not(:disabled) {
+  color: #fff8e8;
+  background: var(--red);
+}
+.wt-row.current {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(185, 137, 50, 0.24);
+}
+.chat {
+  padding: 28px 28px 52px;
+}
+.thread {
+  max-width: 860px;
+}
+.empty {
+  min-height: 60vh;
+  color: var(--muted);
+  animation: pageIn 0.35s ease both;
+}
+.empty .ic {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(185, 137, 50, 0.58);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 18px 45px rgba(67, 39, 23, 0.12), inset 0 0 0 6px rgba(185, 137, 50, 0.08);
+}
+.empty .ic .logo {
+  color: var(--accent);
+}
+.empty-title {
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 700;
+}
+.msg {
+  animation: pageIn 0.24s ease both;
+}
+.msg-content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  color: var(--text);
+  line-height: 1.78;
+}
+.msg.assistant .msg-content {
+  padding-left: 16px;
+  border-left: 3px double rgba(185, 137, 50, 0.46);
+}
+.bubble {
+  border-radius: 8px;
+  color: #fff8e8;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.1), transparent 44%),
+    linear-gradient(135deg, #7d2430, #4c171f);
+  border: 1px solid rgba(185, 137, 50, 0.58);
+  box-shadow: 0 12px 28px rgba(43, 24, 18, 0.16);
+}
+.think,
+.compact-card,
+.tc {
+  border-radius: 8px;
+  border: 1px solid rgba(185, 154, 99, 0.58);
+  background: rgba(255, 248, 232, 0.78);
+  box-shadow: inset 0 1px rgba(255,255,255,0.64);
+}
+.think-h {
+  color: var(--muted);
+  background: linear-gradient(180deg, rgba(255,248,232,0.72), rgba(234,220,198,0.48));
+}
+.think-h:hover,
+.tc-h:hover {
+  background: rgba(185, 137, 50, 0.12);
+  color: var(--text);
+}
+.think-ic,
+.think-h .ti,
+.tc-h .tn {
+  color: var(--accent);
+}
+.think-live,
+.compact-ic,
+.set-tag,
+.wt-title span {
+  border-radius: 6px;
+  color: var(--accent);
+  background: rgba(185, 137, 50, 0.16);
+  border: 1px solid rgba(185, 137, 50, 0.24);
+}
+.think-b,
+.tc-b,
+.term-out,
+.approve-desc,
+.modal .desc {
+  background:
+    linear-gradient(180deg, rgba(255, 248, 232, 0.86), rgba(236, 224, 204, 0.86));
+  color: var(--muted);
+}
+.term-cmd,
+.term-prompt {
+  color: var(--green);
+}
+.tc-b :deep(.code-block),
+.tc-b :deep(.code-block code) {
+  color: var(--ink);
+}
+.md :deep(pre),
+.md :deep(th) {
+  background: rgba(255, 248, 232, 0.86);
+  border-color: rgba(185, 154, 99, 0.55);
+}
+.md :deep(:not(pre) > code) {
+  color: var(--accent);
+  background: rgba(185, 137, 50, 0.15);
+  border: 1px solid rgba(185, 137, 50, 0.2);
+}
+.md :deep(a) {
+  color: var(--accent);
+}
+.md :deep(blockquote) {
+  border-left: 3px double var(--gold);
+  color: var(--muted);
+}
+.md :deep(.copy-btn),
+.msg-copy {
+  background: rgba(255, 248, 232, 0.74);
+  color: var(--muted);
+  border-color: rgba(185, 154, 99, 0.55);
+}
+.md :deep(.copy-btn:hover),
+.msg-copy:hover {
+  color: var(--accent);
+  border-color: var(--gold);
+  background: var(--paper);
+}
+.input-area {
+  padding: 12px 28px 20px;
+  background:
+    linear-gradient(180deg, transparent, rgba(43, 24, 18, 0.08));
+}
+.composer {
+  width: min(860px, 100%);
+  min-height: 108px;
+  border-radius: 8px;
+  padding: 14px 14px 12px 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 239, 0.96), rgba(247, 235, 212, 0.96));
+  border: 1px solid rgba(185, 137, 50, 0.72);
+  box-shadow:
+    0 18px 48px rgba(67, 39, 23, 0.18),
+    inset 0 0 0 5px rgba(185, 137, 50, 0.07);
+}
+.composer::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px solid rgba(185, 137, 50, 0.22);
+  border-radius: 6px;
+  pointer-events: none;
+}
+.composer:focus-within {
+  border-color: var(--gold);
+  box-shadow:
+    0 0 0 4px rgba(185, 137, 50, 0.14),
+    0 22px 54px rgba(67, 39, 23, 0.2),
+    inset 0 0 0 5px rgba(185, 137, 50, 0.08);
+}
+.composer.command {
+  border-color: var(--accent);
+}
+.composer-input {
+  position: relative;
+  z-index: 1;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.composer-input::placeholder {
+  color: var(--dim);
+}
+.composer-tools {
+  position: relative;
+  z-index: 2;
+}
+.composer-tool,
+.composer-send,
+.composer-mode,
+.composer-model {
+  position: relative;
+  z-index: 2;
+  border-radius: 8px;
+  border: 1px solid rgba(185, 137, 50, 0.52);
+  background: rgba(255, 248, 232, 0.74);
+  color: var(--accent);
+  box-shadow: inset 0 1px rgba(255,255,255,0.68);
+}
+.composer-tool:hover:not(:disabled),
+.composer-mode:hover:not(:disabled),
+.composer-model:hover:not(:disabled) {
+  color: #fff8e8;
+  background: var(--accent);
+  border-color: var(--gold);
+  transform: translateY(-1px);
+}
+.composer-choice {
+  position: relative;
+  display: inline-flex;
+}
+.composer-mode,
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 12px;
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.composer-mode:disabled,
+.composer-model:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.composer-mode::after {
+  content: '';
+  position: static;
+  right: auto;
+  top: auto;
+  display: block;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  margin-left: -1px;
+  margin-top: -3px;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.composer-mode svg,
+.composer-model svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: block;
+}
+.composer-model span:first-child,
+.composer-mode-text {
+  display: block;
+  line-height: 1;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-effort {
+  color: var(--gold);
+  font-size: 12px;
+}
+.composer-context {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(185, 137, 50, 0.52);
+  box-shadow: 0 0 0 3px rgba(255, 248, 232, 0.62);
+}
+.composer-context::after {
+  background: var(--paper);
+}
+.composer-send {
+  width: 36px;
+  height: 36px;
+  color: #fff8e8;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16), transparent 44%),
+    linear-gradient(135deg, #8f2d3a, #681f2a);
+  border-color: rgba(233, 192, 107, 0.72);
+}
+.composer-send:hover:not(:disabled) {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.2), transparent 44%),
+    linear-gradient(135deg, #a43847, #7d2430);
+  transform: translateY(-2px);
+}
+.composer-send:disabled {
+  opacity: 0.45;
+}
+.slash-menu,
+.choice-menu {
+  background:
+    linear-gradient(180deg, rgba(255, 250, 239, 0.98), rgba(239, 222, 195, 0.98));
+  border: 1px solid rgba(185, 137, 50, 0.78);
+  border-radius: 8px;
+  box-shadow: 0 20px 48px rgba(43, 24, 18, 0.24), inset 0 0 0 4px rgba(185, 137, 50, 0.07);
+  animation: menuUnfurl 0.18s ease both;
+  transform-origin: bottom center;
+}
+.choice-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  z-index: 25;
+  width: 230px;
+  padding: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.choice-menu-left {
+  left: 0;
+}
+.choice-menu-right {
+  right: 0;
+  width: 280px;
+}
+.slash-item,
+.choice-item {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.choice-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.slash-item.active,
+.slash-item:hover:not(.disabled),
+.choice-item.active,
+.choice-item:hover {
+  background: rgba(185, 137, 50, 0.16);
+  border-color: rgba(185, 137, 50, 0.34);
+  transform: translateX(2px);
+}
+.choice-item.active,
+.slash-item.active {
+  color: var(--accent);
+}
+.choice-item span {
+  font-weight: 650;
+}
+.choice-item small {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slash-badge {
+  border-radius: 7px;
+  color: #fff8e8;
+  background: linear-gradient(135deg, var(--accent), #4d171f);
+  border: 1px solid rgba(185, 137, 50, 0.48);
+}
+.slash-title {
+  color: var(--text);
+}
+.slash-desc,
+.slash-hint,
+.slash-empty {
+  color: var(--muted);
+}
+.approve {
+  border-radius: 8px;
+  background: rgba(255, 248, 232, 0.88);
+  border: 1px solid rgba(185, 137, 50, 0.62);
+  box-shadow: 0 12px 28px rgba(67, 39, 23, 0.12);
+  animation: pageIn 0.24s ease both;
+}
+.approve-head {
+  color: var(--yellow);
+}
+.approve-tool {
+  color: var(--cyan);
+}
+.approve-acts button,
+.approve-opt {
+  border: 1px solid rgba(185, 137, 50, 0.48);
+  background: var(--paper);
+  color: var(--text);
+}
+.approve-acts button:hover,
+.approve-opt:hover {
+  transform: translateY(-1px);
+  border-color: var(--gold);
+}
+.b-allow,
+.b-always {
+  color: #fff8e8;
+  background: var(--accent);
+}
+.b-deny {
+  background: rgba(255, 248, 232, 0.72);
+}
+.settings {
+  background:
+    linear-gradient(90deg, rgba(41, 24, 18, 0.22), transparent 25%),
+    var(--bg);
+  animation: settingsEnter 0.24s ease both;
+}
+.set-nav {
+  width: 268px;
+  background:
+    linear-gradient(180deg, rgba(255, 231, 174, 0.08), transparent 30%),
+    linear-gradient(90deg, #21110d, var(--wood2));
+  border-right: 1px solid rgba(185, 137, 50, 0.58);
+  box-shadow: inset -10px 0 28px rgba(0,0,0,0.22);
+  padding: 16px 14px;
+}
+.set-back,
+.set-item {
+  border-radius: 8px;
+  color: #d9c194;
+  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+.set-back:hover,
+.set-item:hover {
+  color: #fff8e8;
+  background: rgba(255, 248, 232, 0.08);
+  transform: translateX(2px);
+}
+.set-item.active {
+  color: #fff8e8;
+  background:
+    linear-gradient(90deg, rgba(185, 137, 50, 0.28), rgba(125, 36, 48, 0.28));
+  box-shadow: inset 0 0 0 1px rgba(185, 137, 50, 0.34);
+}
+.set-item .si,
+.set-back svg {
+  color: var(--gold);
+}
+.set-group {
+  color: #a98a52;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.set-main {
+  padding: 44px 54px;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 232, 0.86), rgba(231, 220, 200, 0.8));
+}
+.set-pane {
+  max-width: 780px;
+  animation: pageIn 0.24s ease both;
+}
+.set-pane h2,
+.setup-panel h2 {
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 700;
+}
+.set-pane h2::after {
+  content: '';
+  display: block;
+  width: 54px;
+  height: 2px;
+  margin-top: 9px;
+  background: linear-gradient(90deg, var(--accent), var(--gold));
+}
+.set-desc {
+  color: var(--muted);
+  margin-top: 12px;
+}
+.set-row,
+.official-model-card,
+.set-form,
+.setup-panel,
+.bot-status div {
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 239, 0.92), rgba(244, 231, 209, 0.92));
+  border: 1px solid rgba(185, 154, 99, 0.58);
+  box-shadow: 0 10px 26px rgba(67, 39, 23, 0.08), inset 0 1px rgba(255,255,255,0.72);
+}
+.set-row {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.official-model-card {
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+}
+.official-model-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(185, 137, 50, 0.14), transparent 46%);
+  pointer-events: none;
+}
+.official-model-card > * {
+  position: relative;
+}
+.model-row.active {
+  border-color: rgba(125, 36, 48, 0.62);
+  background:
+    linear-gradient(180deg, rgba(255, 250, 239, 0.96), rgba(237, 211, 197, 0.92));
+  box-shadow: 0 12px 30px rgba(67, 39, 23, 0.11), inset 4px 0 var(--accent);
+}
+.set-row:hover,
+.official-model-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(185, 137, 50, 0.8);
+  box-shadow: 0 14px 30px rgba(67, 39, 23, 0.12), inset 0 1px rgba(255,255,255,0.72);
+}
+.model-row.active:hover {
+  box-shadow: 0 14px 30px rgba(67, 39, 23, 0.12), inset 4px 0 var(--accent);
+}
+.set-row-title {
+  color: var(--ink);
+  font-weight: 700;
+}
+.set-row-desc,
+.set-empty,
+.set-note,
+.bot-status span {
+  color: var(--muted);
+}
+.set-form input,
+.set-form textarea,
+.set-select,
+.approve-input,
+.modal .ti {
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(255, 248, 232, 0.86);
+  border: 1px solid rgba(185, 154, 99, 0.58);
+  box-shadow: inset 0 1px 5px rgba(67, 39, 23, 0.08);
+}
+.set-form input:focus,
+.set-form textarea:focus,
+.set-select:focus,
+.approve-input:focus,
+.modal .ti:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(125, 36, 48, 0.1), inset 0 1px 5px rgba(67, 39, 23, 0.08);
+}
+.set-select,
+.rb-select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+.set-select option,
+.rb-select option {
+  color: var(--text);
+  background: var(--paper);
+}
+.set-add,
+.set-cancel {
+  color: var(--accent);
+  background: rgba(255, 248, 232, 0.82);
+  border: 1px solid rgba(185, 137, 50, 0.58);
+}
+.set-save {
+  color: #fff8e8;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14), transparent 42%),
+    linear-gradient(135deg, #8f2d3a, #681f2a);
+  border: 1px solid rgba(185, 137, 50, 0.68);
+}
+.set-add:hover,
+.set-cancel:hover,
+.set-save:hover {
+  transform: translateY(-1px);
+  border-color: var(--gold);
+  box-shadow: 0 8px 18px rgba(67, 39, 23, 0.14);
+}
+.set-del {
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.set-del:hover {
+  color: #fff8e8;
+  background: var(--red);
+}
+.switch .track {
+  background: rgba(88, 63, 41, 0.2);
+  border-color: rgba(185, 154, 99, 0.7);
+}
+.switch .track::before {
+  background: linear-gradient(180deg, #f8e6bd, #a8792e);
+  box-shadow: 0 2px 5px rgba(43, 24, 18, 0.24);
+}
+.switch input:checked + .track {
+  background: linear-gradient(90deg, var(--accent), #9b3340);
+  border-color: var(--gold);
+}
+.setup {
+  background:
+    linear-gradient(180deg, rgba(41, 24, 18, 0.22), rgba(231, 220, 200, 0.92)),
+    var(--bg);
+}
+.setup-panel {
+  border-radius: 8px;
+  box-shadow: 0 28px 72px rgba(43, 24, 18, 0.24), inset 0 0 0 6px rgba(185, 137, 50, 0.07);
+}
+.setup-mark {
+  border-radius: 8px;
+  background: rgba(185, 137, 50, 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(185, 137, 50, 0.38);
+}
+.modal {
+  border-radius: 8px;
+  background: var(--paper);
+  border-color: rgba(185, 137, 50, 0.62);
+  box-shadow: 0 24px 66px rgba(43, 24, 18, 0.3);
+  animation: pageIn 0.22s ease both;
+}
+.overlay {
+  background: rgba(32, 18, 13, 0.62);
+}
+.dot {
+  box-shadow: 0 0 0 3px rgba(255,248,232,0.08);
+}
+.dot.ok {
+  background: var(--green);
+}
+.dot.err {
+  background: var(--red);
+}
+:global(.toast) {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 999;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-family: var(--sans);
+  font-size: 13px;
+  border: 1px solid rgba(185, 137, 50, 0.52);
+  box-shadow: 0 16px 38px rgba(43, 24, 18, 0.22);
+  animation: toastIn 0.28s ease both;
+}
+:global(.toast.ok) {
+  color: #fff8e8;
+  background: linear-gradient(135deg, var(--green), #1f5138);
+}
+:global(.toast.err) {
+  color: #fff8e8;
+  background: linear-gradient(135deg, var(--red), #6f1d1a);
+}
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes panelSlide {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes settingsEnter {
+  from { opacity: 0; transform: scale(0.992); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes menuUnfurl {
+  from { opacity: 0; transform: translateY(8px) scaleY(0.96); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (max-width: 900px) {
+  .app {
+    display: flex;
+  }
+  .sidebar {
+    width: 224px;
+    flex-basis: 224px;
+  }
+  .rightbar {
+    width: 282px;
+  }
+  .set-nav {
+    width: 210px;
+  }
+  .set-main {
+    padding: 28px;
+  }
+  .chat {
+    padding: 18px 16px 42px;
+  }
+  .input-area {
+    padding: 10px 14px 14px;
+  }
+  .composer {
+    min-height: 100px;
+  }
+  .choice-menu-right {
+    right: -44px;
+    width: 246px;
+  }
 }
 </style>
