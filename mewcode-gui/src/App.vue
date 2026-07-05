@@ -2,11 +2,8 @@
   <div class="app">
     <!-- Sidebar -->
     <div class="sidebar">
-      <div class="sb-h">
-        <h1><svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>{{ APP_NAME }}</h1>
-      </div>
       <div class="sb-btns">
-        <button class="btn-new" @click="createSession()">＋ 新对话</button>
+        <button class="btn-new" @click="createSession()"><span class="btn-ic">＋</span><span>新对话</span></button>
         <button class="btn-open" @click="pickWorkspace" title="选择工作区文件夹"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>打开工作区</button>
       </div>
       <div class="slist">
@@ -35,21 +32,7 @@
     <div class="main">
       <div class="topbar">
         <div class="tb-ws" :title="currentWorkDir"><svg class="ficon" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>{{ currentWorkShort || '未选择工作区' }}</div>
-        <div class="tb-mid">
-          <div class="mode-seg" title="同步 TUI 的 Plan / 执行模式">
-            <button :class="{ active: sessionStatus.plan_mode }" @click="setMode('plan')" :disabled="!activeSessionId">计划</button>
-            <button :class="{ active: !sessionStatus.plan_mode }" @click="setMode('do')" :disabled="!activeSessionId">执行</button>
-          </div>
-          <span class="tb-chip" :title="sessionStatus.provider.model || ''">{{ sessionStatus.provider.model || '未加载模型' }}</span>
-          <span class="tb-chip">Token {{ tokenPercent }}%</span>
-        </div>
         <div class="tb-actions">
-          <button class="tb-icon" @click="manualCompact" :disabled="!activeSessionId" title="压缩上下文">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 7h16v2H4zm3 4h10v2H7zm3 4h4v2h-4z"/></svg>
-          </button>
-          <button class="tb-icon danger" @click="cancelActive" :disabled="!canStop" title="停止当前任务">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
-          </button>
           <button class="tb-btn" @click="openInfo">{{ showInfo ? '隐藏侧栏' : '侧栏' }}</button>
         </div>
       </div>
@@ -63,16 +46,14 @@
         </div>
 
         <div v-for="(msg, i) in messages" :key="msg._id || i" class="msg" :class="msg.role">
-          <div class="msg-head">
-            <span class="avatar" :class="msg.role">
-              <template v-if="msg.role === 'user'">你</template>
-              <svg v-else class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4"/><path d="m17 8 4 4-4 4"/><path d="m14 4-4 16"/></svg>
-            </span>
-            <span class="who">{{ msg.role === 'user' ? '你' : APP_NAME }}</span>
-            <button v-if="msg.role === 'assistant' && msg.content" class="msg-copy" type="button" @click="copyMsg(msg)">复制</button>
+          <div v-if="msg.role === 'user'" class="user-line">
+            <div class="bubble">{{ msg.content }}</div>
           </div>
-          <div v-if="msg.role === 'user'" class="bubble">{{ msg.content }}</div>
           <div v-else class="msg-content">
+            <div v-if="assistantPending(msg)" class="assistant-status">
+              <span class="status-spinner"></span>
+              <span>{{ assistantStatusText(msg) }}</span>
+            </div>
             <section v-if="msg.thinking" class="think" :class="{ collapsed: msg.thinkCollapsed }">
               <button class="think-h" type="button" :aria-expanded="String(!msg.thinkCollapsed)" @click="toggleThinking(msg)">
                 <span class="think-left">
@@ -84,24 +65,56 @@
               </button>
               <pre class="think-b">{{ msg.thinking }}</pre>
             </section>
-            <div v-for="tool in (msg.tools || [])" :key="tool.id" class="tc">
-              <div class="tc-h" @click="tool.expanded = !tool.expanded">
-                <span class="ts" :class="tool.status">{{ tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '✓' }}</span>
-                <span class="tn">{{ tool.name }}</span>
-                <span class="ta">{{ fmtArgs(tool) }}</span>
-                <span class="te" v-if="tool.elapsed">{{ tool.elapsed.toFixed(1) }}s</span>
-              </div>
-              <div class="tc-b" :class="{ hide: !tool.expanded }">
-                <div v-if="tool.name === 'Bash'" class="term">
-                  <div class="term-cmd"><span class="term-prompt">$</span> {{ tool.args && tool.args.command }}</div>
-                  <div class="term-out" :class="{ err: tool.status === 'error' }">{{ fmtRes(tool.result) }}</div>
+            <template v-if="msg.parts && msg.parts.length">
+              <template v-for="part in msg.parts" :key="part.id">
+                <div v-if="part.type === 'text' && part.text" class="md" @click="onMdClick">
+                  <span v-html="part.html"></span><span v-if="isActiveTextPart(msg, part)" class="cursor"></span>
                 </div>
-                <div v-else class="tbody" v-html="tool.expanded ? toolBody(tool) : ''"></div>
+                <div v-else-if="part.type === 'tool'" class="tc">
+                  <div class="tc-h" @click="part.tool.expanded = !part.tool.expanded">
+                    <span class="ts" :class="part.tool.status">{{ part.tool.status === 'running' ? '●' : part.tool.status === 'error' ? '✗' : '✓' }}</span>
+                    <span class="tn">{{ part.tool.name }}</span>
+                    <span class="ta">{{ fmtArgs(part.tool) }}</span>
+                    <span class="te" v-if="part.tool.elapsed">{{ part.tool.elapsed.toFixed(1) }}s</span>
+                  </div>
+                  <div class="tc-b" :class="{ hide: !part.tool.expanded }">
+                    <div v-if="part.tool.name === 'Bash'" class="term">
+                      <div class="term-cmd"><span class="term-prompt">$</span> {{ part.tool.args && part.tool.args.command }}</div>
+                      <div class="term-out" :class="{ err: part.tool.status === 'error' }">{{ fmtRes(part.tool.result) }}</div>
+                    </div>
+                    <div v-else class="tbody" v-html="part.tool.expanded ? toolBody(part.tool) : ''"></div>
+                  </div>
+                </div>
+                <div v-else-if="part.type === 'compact'" class="compact-card" :class="part.status">
+                  <span class="compact-ic">{{ part.status === 'running' ? '↻' : part.status === 'error' ? '!' : '✓' }}</span>
+                  <span class="compact-main">
+                    <span class="compact-title">{{ part.title }}</span>
+                    <span class="compact-detail">{{ part.detail }}</span>
+                  </span>
+                </div>
+              </template>
+            </template>
+            <template v-else>
+              <div v-for="tool in (msg.tools || [])" :key="tool.id" class="tc">
+                <div class="tc-h" @click="tool.expanded = !tool.expanded">
+                  <span class="ts" :class="tool.status">{{ tool.status === 'running' ? '●' : tool.status === 'error' ? '✗' : '✓' }}</span>
+                  <span class="tn">{{ tool.name }}</span>
+                  <span class="ta">{{ fmtArgs(tool) }}</span>
+                  <span class="te" v-if="tool.elapsed">{{ tool.elapsed.toFixed(1) }}s</span>
+                </div>
+                <div class="tc-b" :class="{ hide: !tool.expanded }">
+                  <div v-if="tool.name === 'Bash'" class="term">
+                    <div class="term-cmd"><span class="term-prompt">$</span> {{ tool.args && tool.args.command }}</div>
+                    <div class="term-out" :class="{ err: tool.status === 'error' }">{{ fmtRes(tool.result) }}</div>
+                  </div>
+                  <div v-else class="tbody" v-html="tool.expanded ? toolBody(tool) : ''"></div>
+                </div>
               </div>
-            </div>
-            <div v-if="msg.content" class="md" @click="onMdClick">
-              <span v-html="msg.html"></span><span v-if="msg.streaming" class="cursor"></span>
-            </div>
+              <div v-if="msg.content" class="md" @click="onMdClick">
+                <span v-html="msg.html"></span><span v-if="msg.streaming" class="cursor"></span>
+              </div>
+            </template>
+            <button v-if="msg.content" class="msg-copy" type="button" @click="copyMsg(msg)">复制</button>
           </div>
         </div>
         </div>
@@ -127,23 +140,74 @@
           </div>
           <input v-else type="text" class="approve-input" :ref="(el) => el && el.focus()" @keydown.enter="pickText(ask.questions[ask.currentQ].name, $event.target.value)" placeholder="输入回答后回车…" />
         </div>
-        <div class="composer" :class="{ disabled: !activeSessionId }">
+        <div class="composer" :class="{ disabled: !activeSessionId, command: slashMenuVisible }">
+          <div v-if="slashMenuVisible" class="slash-menu">
+            <button
+              v-for="(cmd, idx) in filteredSlashCommands"
+              :key="cmd.id"
+              class="slash-item"
+              :class="{ active: idx === selectedSlashIndex, disabled: slashCommandDisabled(cmd) }"
+              type="button"
+              @mousedown.prevent="runSlashCommand(cmd)"
+            >
+              <span class="slash-badge">/</span>
+              <span class="slash-main">
+                <span class="slash-title">{{ cmd.title }}</span>
+                <span class="slash-desc">{{ cmd.description }}</span>
+              </span>
+              <span class="slash-hint">{{ cmd.hint }}</span>
+            </button>
+            <div v-if="filteredSlashCommands.length === 0" class="slash-empty">没有匹配命令</div>
+          </div>
           <textarea
             ref="inputEl"
             class="composer-input"
             v-model="inputText"
             @keydown="onKey"
-            @input="autoGrow"
-            :placeholder="activeSessionId ? '输入消息…' : '先创建对话'"
+            @input="onComposerInput"
+            :placeholder="activeSessionId ? '要求后续变更' : '先创建对话'"
             :disabled="!activeSessionId"
             rows="1"
           ></textarea>
-          <button class="composer-send" @click="send" :disabled="!inputText.trim() || busy || !activeSessionId" :title="busy ? '生成中' : '发送'">
-            <svg v-if="!busy" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l6 6-1.41 1.41L13 8.83V19h-2V8.83l-3.59 3.58L6 11z"/></svg>
-            <span v-else class="spin"></span>
-          </button>
+          <div class="composer-tools">
+            <div class="composer-left">
+              <button class="composer-tool add" type="button" @click="focusComposer" :disabled="!activeSessionId" title="添加上下文">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </button>
+              <label class="composer-mode" title="命令接受状态">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5.5 5.5v5.8c0 4.1 2.7 7.8 6.5 9.1 3.8-1.3 6.5-5 6.5-9.1V5.5L12 3Z"/><path d="M12 8v4"/></svg>
+                <span class="composer-mode-text">{{ selectedModeLabel }}</span>
+                <select v-model="selectedMode" @change="setCommandAcceptanceMode(selectedMode)" :disabled="!activeSessionId || busy">
+                  <option v-for="m in modeOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="composer-right">
+              <button
+                class="composer-context"
+                :class="contextRingClass"
+                type="button"
+                :style="contextRingStyle"
+                :title="contextWindowTitle"
+                @click="openContextInfo"
+              ></button>
+              <label class="composer-model" :title="sessionStatus.provider.model || '选择模型'">
+                <span>{{ composerModelLabel }}</span>
+                <span v-if="composerEffortLabel" class="composer-effort">{{ composerEffortLabel }}</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                <select v-model="modelConfig.model" @change="changeComposerModel" :disabled="busy || !configStatus.configured">
+                  <option v-for="m in composerModelOptions" :key="m" :value="m">{{ modelOptionLabel(m) }}</option>
+                </select>
+              </label>
+              <button v-if="busy" class="composer-send stop" @click="cancelActive" :disabled="!canStop" title="停止当前任务">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v10H7z"/></svg>
+              </button>
+              <button v-else class="composer-send" @click="send" :disabled="!inputText.trim() || !activeSessionId" title="发送">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5l6 6-1.41 1.41L13 8.83V19h-2V8.83l-3.59 3.58L6 11z"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
       </div>
     </div>
 
@@ -175,14 +239,14 @@
 
       <div v-show="rightTab === 'run'" class="rb-run">
         <div class="metric-grid">
-          <div class="metric"><span>模式</span><strong>{{ sessionStatus.permission_mode || '—' }}</strong></div>
+          <div class="metric"><span>接受状态</span><strong>{{ selectedModeLabel }}</strong></div>
           <div class="metric"><span>工具</span><strong>{{ sessionStatus.tool_count || 0 }}</strong></div>
           <div class="metric"><span>输入</span><strong>{{ sessionStatus.input_tokens || 0 }}</strong></div>
           <div class="metric"><span>输出</span><strong>{{ sessionStatus.output_tokens || 0 }}</strong></div>
         </div>
         <div class="run-block">
           <div class="run-title">权限模式</div>
-          <select class="rb-select" v-model="selectedMode" @change="setMode(selectedMode)">
+          <select class="rb-select" v-model="selectedMode" @change="setCommandAcceptanceMode(selectedMode)">
             <option v-for="m in modeOptions" :key="m.value" :value="m.value">{{ m.label }}</option>
           </select>
         </div>
@@ -273,6 +337,11 @@
         <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16v5H4zm0 9h16v5H4zm3-6.5h2v2H7zm0 9h2v2H7z"/></svg>
         MCP 服务器
       </button>
+      <div class="set-group">A2A</div>
+      <button class="set-item" :class="{ active: setTab === 'qqbot' }" @click="setSettingsTab('qqbot')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v7A3.5 3.5 0 0 1 16.5 16H10l-4.6 4.1A.85.85 0 0 1 4 19.45V16.1A3.5 3.5 0 0 1 1 12.65V5.5zM7.5 4A1.5 1.5 0 0 0 6 5.5v9.05l3.05-2.7H16.5A1.5 1.5 0 0 0 18 10.35V5.5A1.5 1.5 0 0 0 16.5 4z"/></svg>
+        QQ Bot
+      </button>
     </div>
     <div class="set-main">
       <div v-if="setTab === 'model'" class="set-pane">
@@ -347,6 +416,37 @@
         </div>
         <p class="set-note">提示：配置会保存到本地，接入将在新建会话时生效。</p>
       </div>
+
+      <div v-else-if="setTab === 'qqbot'" class="set-pane">
+        <h2>QQ Bot</h2>
+        <p class="set-desc">官方 QQ Bot Gateway 的 A2A 接入配置。</p>
+        <div class="set-form model-form qqbot-form">
+          <label class="check-row"><input type="checkbox" v-model="qqBotConfig.enabled" /> 启用官方 QQ Bot</label>
+          <input v-model="qqBotConfig.app_id" placeholder="AppID" autocomplete="off" />
+          <div class="secret-row">
+            <input v-model="qqBotConfig.app_secret" type="password" placeholder="AppSecret（留空保持不变）" autocomplete="off" />
+            <span v-if="qqBotConfig.app_secret_set" class="set-tag">已设置</span>
+          </div>
+          <input v-model="qqBotConfig.command_prefix" placeholder="命令前缀，例如 /mew" />
+          <div class="set-grid2">
+            <textarea v-model="qqBotConfig.allowed_users" rows="4" placeholder="允许用户 OpenID（可选，每行一个）"></textarea>
+            <textarea v-model="qqBotConfig.allowed_groups" rows="4" placeholder="允许群 OpenID（可选，每行一个）"></textarea>
+          </div>
+          <div class="qq-status">
+            <div><span>启用</span><b>{{ qqBotStatus.enabled ? '是' : '否' }}</b></div>
+            <div><span>配置</span><b>{{ qqBotStatus.configured ? '完整' : '缺失' }}</b></div>
+            <div><span>连接</span><b>{{ qqBotStatus.running ? '运行中' : '未运行' }}</b></div>
+            <div><span>会话</span><b>{{ qqBotStatus.session_ready ? '已就绪' : '未就绪' }}</b></div>
+            <div><span>账号</span><b>{{ qqBotStatus.bot_username || '—' }}</b></div>
+            <div><span>错误</span><b>{{ qqBotStatus.last_error || '—' }}</b></div>
+          </div>
+          <div class="set-form-acts">
+            <button class="set-cancel" @click="loadQqBot">刷新状态</button>
+            <button class="set-save" @click="saveQqBot">保存并应用</button>
+          </div>
+          <div class="set-note mono">配置文件: {{ qqBotStatus.config_path || '—' }}</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -375,7 +475,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
 import hljs from 'highlight.js/lib/common';
@@ -409,7 +509,8 @@ function scheduleRender(m) {
   m._renderScheduled = true;
   requestAnimationFrame(() => {
     m._renderScheduled = false;
-    if (m.content) m.html = renderMarkdown(m.content);
+    const source = m.text !== undefined ? m.text : m.content;
+    if (source) m.html = renderMarkdown(source);
   });
 }
 
@@ -432,9 +533,184 @@ function copyMsg(m) {
   navigator.clipboard.writeText(m.content || '').then(() => toast('已复制', 'ok')).catch(() => {});
 }
 
+function assistantPending(m) {
+  return Boolean(
+    m
+    && m.role === 'assistant'
+    && m.streaming
+    && !m.content
+    && !m.thinking
+    && !(m.tools && m.tools.length)
+    && !(m.parts && m.parts.some((part) => part.type === 'text' ? part.text : part.type === 'tool'))
+  );
+}
+
+function assistantStatusText(m) {
+  if (m && m.statusText) return m.statusText;
+  return '正在思考...';
+}
+
 function toggleThinking(m) {
   m.thinkCollapsed = !m.thinkCollapsed;
   m._thinkUserTouched = true;
+}
+
+function newPartId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeAssistantMessage(m) {
+  if (!Array.isArray(m.parts)) m.parts = [];
+  if (!Array.isArray(m.tools)) m.tools = [];
+  return m;
+}
+
+function ensureTextPart(m) {
+  normalizeAssistantMessage(m);
+  let part = m.parts.at(-1);
+  if (!part || part.type !== 'text') {
+    part = { id: newPartId('text'), type: 'text', text: '', html: '' };
+    m.parts.push(part);
+  }
+  return part;
+}
+
+function addToolPart(m, tool) {
+  normalizeAssistantMessage(m);
+  m.tools.push(tool);
+  m.parts.push({ id: newPartId(`tool-${tool.id || 'call'}`), type: 'tool', tool });
+}
+
+function compactDetail(tokens, threshold, contextWindow) {
+  const parts = [];
+  if (tokens) parts.push(`压缩前 ${Number(tokens).toLocaleString()} tokens`);
+  if (threshold) parts.push(`阈值 ${Number(threshold).toLocaleString()}`);
+  if (contextWindow) parts.push(`窗口 ${Number(contextWindow).toLocaleString()}`);
+  return parts.join(' · ');
+}
+
+function compactDoneDetail(data) {
+  const before = Number(data.before_tokens || 0);
+  const after = Number(data.after_tokens || 0);
+  if (before && after) {
+    if (after >= before) {
+      return `${data.message || '上下文暂未压缩'} · 当前 ${after.toLocaleString()} tokens`;
+    }
+    const saved = Math.max(0, before - after);
+    return `压缩前 ${before.toLocaleString()} → 压缩后 ${after.toLocaleString()} tokens · 释放 ${saved.toLocaleString()}`;
+  }
+  return compactDetail(before, data.threshold, data.context_window) || data.message || '已生成摘要并保留最近上下文';
+}
+
+function applyContextTokenSnapshot(inputTokens) {
+  const input = Number(inputTokens || 0);
+  if (!input) return;
+  tokenInfo.value = { ...tokenInfo.value, input };
+  sessionStatus.value.input_tokens = input;
+  if (sessionStatus.value.context_window) {
+    sessionStatus.value.token_percent = Math.floor((input / sessionStatus.value.context_window) * 100);
+  }
+}
+
+function findLatestCompactPart(status = '') {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const msg = messages.value[i];
+    if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.parts)) continue;
+    for (let j = msg.parts.length - 1; j >= 0; j--) {
+      const part = msg.parts[j];
+      if (part.type === 'compact' && (!status || part.status === status)) return part;
+    }
+  }
+  return null;
+}
+
+function findCompactPartById(partId) {
+  if (!partId) return null;
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const msg = messages.value[i];
+    if (!msg || msg.role !== 'assistant' || !Array.isArray(msg.parts)) continue;
+    const part = msg.parts.find((p) => p.type === 'compact' && p.id === partId);
+    if (part) return part;
+  }
+  return null;
+}
+
+function addCompactPart(m, { status, title, detail }) {
+  normalizeAssistantMessage(m);
+  const part = { id: newPartId('compact'), type: 'compact', status, title, detail };
+  m.parts.push(part);
+  return part;
+}
+
+function beginCompactPart(data = {}) {
+  const m = ensureAssistant();
+  m.statusText = '正在压缩上下文...';
+  let part = findLatestCompactPart('running');
+  if (!part) {
+    part = addCompactPart(m, {
+      status: 'running',
+      title: '正在压缩上下文',
+      detail: '',
+    });
+  }
+  part.status = 'running';
+  part.title = data.title || '正在压缩上下文';
+  part.detail = data.detail || compactDetail(data.current_tokens, data.threshold, data.context_window) || '正在压缩当前会话';
+  part.completedAt = 0;
+  scrollDown();
+  return part;
+}
+
+function finishCompactPart(data = {}, targetPart = null) {
+  let part = targetPart || findLatestCompactPart('running');
+  if (!part) {
+    const latest = findLatestCompactPart();
+    if (latest && latest.completedAt && Date.now() - latest.completedAt < 10000) part = latest;
+  }
+  if (!part) {
+    part = addCompactPart(ensureAssistant(), {
+      status: 'done',
+      title: '上下文已压缩',
+      detail: '',
+    });
+  }
+  part.status = 'done';
+  const beforeTokens = Number(data.before_tokens || 0);
+  const afterTokens = Number(data.after_tokens || 0);
+  part.title = beforeTokens && afterTokens && afterTokens >= beforeTokens ? '上下文暂未压缩' : '上下文已压缩';
+  part.detail = compactDoneDetail(data);
+  part.completedAt = Date.now();
+  applyContextTokenSnapshot(data.after_tokens);
+  scrollDown();
+  return part;
+}
+
+function markRunningCompactError(message) {
+  const part = findLatestCompactPart('running');
+  if (!part) return;
+  part.status = 'error';
+  part.title = '上下文压缩失败';
+  part.detail = message || part.detail || '';
+}
+
+function findToolById(toolId) {
+  if (!toolId) return null;
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const msg = messages.value[i];
+    if (!msg || msg.role !== 'assistant') continue;
+    const tool = (msg.tools || []).find((x) => x.id === toolId);
+    if (tool) return tool;
+  }
+  return null;
+}
+
+function isActiveTextPart(msg, part) {
+  if (!msg || !msg.streaming || !part || part.type !== 'text') return false;
+  const parts = msg.parts || [];
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (parts[i].type === 'text') return parts[i] === part;
+  }
+  return false;
 }
 
 function escapeHtml(s) {
@@ -528,10 +804,12 @@ const ask = ref(null);
 const tokenInfo = ref({ input: 0, output: 0 });
 const sessionStatus = ref({
   permission_mode: '',
+  command_acceptance_mode: 'default',
   plan_mode: false,
   input_tokens: 0,
   output_tokens: 0,
   context_window: 0,
+  auto_compact_threshold: 0,
   token_percent: 0,
   tool_count: 0,
   active_task: { id: '', running: false },
@@ -539,12 +817,34 @@ const sessionStatus = ref({
 });
 const selectedMode = ref('default');
 const modeOptions = [
-  { value: 'default', label: 'Default' },
-  { value: 'acceptEdits', label: 'Accept Edits' },
-  { value: 'plan', label: 'Plan' },
-  { value: 'bypassPermissions', label: 'Bypass' },
-  { value: 'custom', label: 'Custom' },
-  { value: 'dontAsk', label: 'Don’t Ask' },
+  { value: 'default', label: '默认' },
+  { value: 'acceptEdits', label: '自动接受' },
+  { value: 'bypassPermissions', label: '完全访问' },
+];
+const slashMenuOpen = ref(false);
+const selectedSlashIndex = ref(0);
+const slashCommands = [
+  {
+    id: 'plan',
+    title: '计划模式',
+    hint: '/plan',
+    keywords: ['plan', '计划', '规划'],
+    description: '开启计划模式',
+  },
+  {
+    id: 'do',
+    title: '执行模式',
+    hint: '/do',
+    keywords: ['do', 'execute', '执行'],
+    description: '切回默认执行模式',
+  },
+  {
+    id: 'compact',
+    title: '压缩上下文',
+    hint: '/compact',
+    keywords: ['compact', 'compress', 'context', '上下文', '压缩'],
+    description: '压缩当前会话上下文，释放 token 空间',
+  },
 ];
 const tasks = ref([]);
 const worktreeState = ref({ current: '', worktrees: [] });
@@ -563,6 +863,24 @@ const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '', url: '' });
 const showAddSkill = ref(false);
 const newSkill = ref({ name: '', description: '', body: '' });
+const qqBotConfig = ref({
+  enabled: false,
+  app_id: '',
+  app_secret: '',
+  app_secret_set: false,
+  command_prefix: '/mew',
+  allowed_users: '',
+  allowed_groups: '',
+});
+const qqBotStatus = ref({
+  enabled: false,
+  configured: false,
+  running: false,
+  session_ready: false,
+  bot_username: '',
+  last_error: '',
+  config_path: '',
+});
 const configLoaded = ref(false);
 const configStatus = ref({ configured: false, config_path: '', error: '', providers: [] });
 const modelConfig = ref({
@@ -588,6 +906,77 @@ const tokenPercent = computed(() => sessionStatus.value.token_percent || 0);
 const canStop = computed(() => busy.value || Boolean(sessionStatus.value.active_task && sessionStatus.value.active_task.running));
 const worktrees = computed(() => worktreeState.value.worktrees || []);
 const needsConfig = computed(() => connected.value && configLoaded.value && !configStatus.value.configured);
+const contextWindowTitle = computed(() => {
+  const used = sessionStatus.value.input_tokens || tokenInfo.value.input || 0;
+  const total = sessionStatus.value.context_window || modelConfig.value.context_window || 0;
+  const threshold = sessionStatus.value.auto_compact_threshold || 0;
+  const pct = Math.max(0, Math.min(100, tokenPercent.value || 0));
+  if (!total) return '上下文窗口';
+  const thresholdText = threshold ? ` · 自动压缩阈值 ${threshold}` : '';
+  const state = contextCompactState.value === 'danger'
+    ? '将触发自动压缩'
+    : contextCompactState.value === 'warn'
+      ? '接近自动压缩'
+      : '上下文窗口';
+  return `${state} ${pct}% · ${used}/${total}${thresholdText}`;
+});
+const contextRingStyle = computed(() => {
+  const pct = Math.max(0, Math.min(100, tokenPercent.value || 0));
+  const color = contextCompactState.value === 'danger'
+    ? 'var(--red)'
+    : contextCompactState.value === 'warn'
+      ? 'var(--yellow)'
+      : 'var(--accent)';
+  return { '--ctx': `${pct * 3.6}deg`, '--ctx-color': color };
+});
+const contextCompactState = computed(() => {
+  const used = sessionStatus.value.input_tokens || tokenInfo.value.input || 0;
+  const threshold = sessionStatus.value.auto_compact_threshold || 0;
+  if (!threshold) return 'normal';
+  if (used >= threshold) return 'danger';
+  if (used >= Math.floor(threshold * 0.85)) return 'warn';
+  return 'normal';
+});
+const contextRingClass = computed(() => ({
+  warn: contextCompactState.value === 'warn',
+  danger: contextCompactState.value === 'danger',
+}));
+const composerModelLabel = computed(() => {
+  const model = sessionStatus.value.provider.model || modelConfig.value.model || '';
+  if (!model) return '模型';
+  return model;
+});
+const composerEffortLabel = computed(() => {
+  if (modelConfig.value.thinking) return '超高';
+  return '';
+});
+const selectedModeLabel = computed(() => modeOptions.find((m) => m.value === selectedMode.value)?.label || '默认');
+const composerModelOptions = computed(() => {
+  const current = modelConfig.value.model || sessionStatus.value.provider.model || '';
+  const common = [
+    current,
+    'gpt-5.5',
+    'gpt-5.1',
+    'gpt-4.1',
+    'claude-sonnet-4-5',
+  ];
+  return Array.from(new Set(common.map((m) => (m || '').trim()).filter(Boolean)));
+});
+const slashQuery = computed(() => {
+  const raw = inputText.value || '';
+  if (!raw.startsWith('/') || raw.includes('\n')) return null;
+  return raw.slice(1).trim().toLowerCase();
+});
+const filteredSlashCommands = computed(() => {
+  if (!slashMenuOpen.value || slashQuery.value === null) return [];
+  const q = slashQuery.value;
+  return slashCommands.filter((cmd) => {
+    if (!q) return true;
+    const haystack = [cmd.title, cmd.hint, cmd.id, ...(cmd.keywords || [])].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+});
+const slashMenuVisible = computed(() => slashMenuOpen.value && slashQuery.value !== null);
 // Group sessions by their workspace, folder-style.
 const sessionGroups = computed(() => {
   const map = new Map();
@@ -606,6 +995,12 @@ let ws = null;
 let _replaying = false; // true while the daemon is replaying history on connect
 let _wsGen = 0; // generation counter to ignore stale events from old connections
 let _sendLock = false; // synchronous lock to prevent double-click sending
+
+watch(filteredSlashCommands, (items) => {
+  if (selectedSlashIndex.value >= items.length) {
+    selectedSlashIndex.value = Math.max(0, items.length - 1);
+  }
+});
 
 async function checkHealth() {
   try {
@@ -708,6 +1103,22 @@ async function saveModelConfig() {
   }
 }
 
+function modelOptionLabel(model) {
+  if (!model) return '模型';
+  return model;
+}
+
+async function changeComposerModel() {
+  if (!modelConfig.value.model.trim()) return;
+  await saveModelConfig();
+  await loadStatus();
+}
+
+function openContextInfo() {
+  showInfo.value = true;
+  rightTab.value = 'info';
+}
+
 async function refreshSessions() {
   try {
     const r = await fetch(`${API}/api/sessions`);
@@ -724,7 +1135,10 @@ function applySessionStatus(data) {
     active_task: data.active_task || { id: '', running: false },
     provider: data.provider || { name: '', protocol: '', model: '' },
   };
-  selectedMode.value = sessionStatus.value.permission_mode || 'default';
+  const commandAcceptanceMode = sessionStatus.value.command_acceptance_mode || sessionStatus.value.permission_mode;
+  selectedMode.value = modeOptions.some((m) => m.value === commandAcceptanceMode)
+    ? commandAcceptanceMode
+    : 'default';
   tokenInfo.value = {
     input: sessionStatus.value.input_tokens || 0,
     output: sessionStatus.value.output_tokens || 0,
@@ -748,39 +1162,129 @@ async function loadStatus() {
   } catch {}
 }
 
-async function setMode(mode) {
+async function postSessionMode(mode) {
   if (!activeSessionId.value) return;
+  const r = await fetch(`${API}/api/session/${activeSessionId.value}/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || '模式切换失败');
+  applySessionStatus(d);
+  return d;
+}
+
+async function setCommandAcceptanceMode(mode) {
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/mode`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode }),
-    });
-    const d = await r.json();
-    if (!r.ok) {
-      toast(d.error || '模式切换失败', 'err');
-      return;
-    }
-    applySessionStatus(d);
+    await postSessionMode(mode);
+    const label = modeOptions.find((m) => m.value === mode)?.label || '默认';
+    toast(`命令接受状态已切换为：${label}`, 'ok');
+  } catch (e) {
+    toast('命令接受状态切换失败: ' + e.message, 'err');
+    await loadStatus();
+  }
+}
+
+async function setPlanMode(enabled) {
+  try {
+    const d = await postSessionMode(enabled ? 'plan' : 'do');
     toast(d.plan_mode ? '已进入计划模式' : '已进入执行模式', 'ok');
   } catch (e) {
     toast('模式切换失败: ' + e.message, 'err');
+    await loadStatus();
   }
 }
 
 async function manualCompact() {
   if (!activeSessionId.value) return;
+  const localPart = beginCompactPart({
+    current_tokens: sessionStatus.value.input_tokens || tokenInfo.value.input || 0,
+    threshold: sessionStatus.value.auto_compact_threshold || 0,
+    context_window: sessionStatus.value.context_window || modelConfig.value.context_window || 0,
+  });
   try {
     const r = await fetch(`${API}/api/compact/${activeSessionId.value}`, { method: 'POST' });
     const d = await r.json();
     if (!r.ok) {
+      const part = findCompactPartById(localPart.id) || localPart;
+      part.status = 'error';
+      part.title = '上下文压缩失败';
+      part.detail = d.error || '压缩失败';
+      part.completedAt = Date.now();
       toast(d.error || '压缩失败', 'err');
       return;
     }
-    toast('上下文已压缩', 'ok');
+    if (d.status) applySessionStatus(d.status);
+    if (d.data) {
+      setTimeout(() => {
+        const part = findCompactPartById(localPart.id);
+        if (part && part.status === 'running') finishCompactPart(d.data, part);
+      }, 250);
+    }
     await loadStatus();
   } catch (e) {
+    const part = findCompactPartById(localPart.id) || localPart;
+    part.status = 'error';
+    part.title = '上下文压缩失败';
+    part.detail = e.message || '网络请求失败';
+    part.completedAt = Date.now();
     toast('压缩失败: ' + e.message, 'err');
+  }
+}
+
+function slashCommandDisabled(cmd) {
+  if (!cmd) return true;
+  if (cmd.id === 'compact') return !activeSessionId.value || busy.value;
+  if (cmd.id === 'plan') return !activeSessionId.value || busy.value || sessionStatus.value.plan_mode;
+  if (cmd.id === 'do') return !activeSessionId.value || busy.value || !sessionStatus.value.plan_mode;
+  return false;
+}
+
+function openSlashMenu() {
+  if (!activeSessionId.value) return;
+  if (inputText.value && !inputText.value.startsWith('/')) {
+    inputEl.value?.focus();
+    return;
+  }
+  if (!inputText.value.startsWith('/')) inputText.value = '/';
+  slashMenuOpen.value = true;
+  selectedSlashIndex.value = 0;
+  nextTick(() => {
+    if (inputEl.value) {
+      inputEl.value.focus();
+      autoGrow();
+    }
+  });
+}
+
+function focusComposer() {
+  inputEl.value?.focus();
+}
+
+function openSlashMenuForMode() {
+  if (!activeSessionId.value) return;
+  inputText.value = sessionStatus.value.plan_mode ? '/do' : '/plan';
+  slashMenuOpen.value = true;
+  selectedSlashIndex.value = 0;
+  nextTick(() => {
+    inputEl.value?.focus();
+    autoGrow();
+  });
+}
+
+async function runSlashCommand(cmd) {
+  if (!cmd || slashCommandDisabled(cmd)) return;
+  slashMenuOpen.value = false;
+  inputText.value = '';
+  await nextTick();
+  autoGrow();
+  if (cmd.id === 'compact') {
+    await manualCompact();
+  } else if (cmd.id === 'plan') {
+    await setPlanMode(true);
+  } else if (cmd.id === 'do') {
+    await setPlanMode(false);
   }
 }
 
@@ -1003,6 +1507,7 @@ function setSettingsTab(t) {
   if (t === 'model') loadConfig();
   else if (t === 'skills') loadSkills();
   else if (t === 'mcp') loadMcp();
+  else if (t === 'qqbot') loadQqBot();
 }
 async function loadSkills() {
   try {
@@ -1062,6 +1567,58 @@ async function delMcp(name) {
   try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }); } catch {}
   await loadMcp();
 }
+function applyQqBotPayload(d) {
+  qqBotStatus.value = {
+    enabled: Boolean(d.enabled),
+    configured: Boolean(d.configured),
+    running: Boolean(d.running),
+    session_ready: Boolean(d.session_ready),
+    bot_username: d.bot_username || '',
+    last_error: d.last_error || '',
+    config_path: d.config_path || '',
+  };
+  qqBotConfig.value = {
+    enabled: Boolean(d.enabled),
+    app_id: d.app_id || '',
+    app_secret: '',
+    app_secret_set: Boolean(d.app_secret_set),
+    command_prefix: d.command_prefix || '/mew',
+    allowed_users: d.allowed_users || '',
+    allowed_groups: d.allowed_groups || '',
+  };
+}
+async function loadQqBot() {
+  try {
+    const r = await fetch(`${API}/api/settings/qqbot`);
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || 'QQ Bot 状态读取失败', 'err'); return; }
+    applyQqBotPayload(d);
+  } catch (e) {
+    toast('QQ Bot 状态读取失败: ' + e.message, 'err');
+  }
+}
+async function saveQqBot() {
+  if (qqBotConfig.value.enabled && !String(qqBotConfig.value.app_id || '').trim()) {
+    toast('启用 QQ Bot 需要 AppID', 'err');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/settings/qqbot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(qqBotConfig.value),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(d.error || 'QQ Bot 配置保存失败', 'err');
+      return;
+    }
+    applyQqBotPayload(d);
+    toast('QQ Bot 配置已应用', 'ok');
+  } catch (e) {
+    toast('QQ Bot 配置保存失败: ' + e.message, 'err');
+  }
+}
 function openInfo() {
   showInfo.value = !showInfo.value;
   if (showInfo.value && rightTab.value === 'files' && fileTree.value.length === 0) loadFiles();
@@ -1091,9 +1648,11 @@ async function selectSession(sid) {
   sessionStatus.value = {
     ...sessionStatus.value,
     permission_mode: '',
+    command_acceptance_mode: 'default',
     plan_mode: false,
     input_tokens: 0,
     output_tokens: 0,
+    auto_compact_threshold: 0,
     token_percent: 0,
     active_task: { id: '', running: false },
   };
@@ -1166,7 +1725,7 @@ async function recoverSession(deadSid) {
 // 确保末尾是一条可写入的 assistant 消息（新建时用 push，Vue 3 对 ref 数组是响应式的）。
 function ensureAssistant() {
   const last = messages.value.at(-1);
-  if (last && last.role === 'assistant') return last;
+  if (last && last.role === 'assistant') return normalizeAssistantMessage(last);
   messages.value.push({
     role: 'assistant',
     content: '',
@@ -1175,20 +1734,35 @@ function ensureAssistant() {
     thinkCollapsed: false,
     _thinkUserTouched: false,
     streaming: true,
+    statusText: '正在思考...',
     tools: [],
+    parts: [],
     _id: Date.now() + Math.random(),
   });
-  return messages.value.at(-1);
+  return normalizeAssistantMessage(messages.value.at(-1));
 }
 
 // Finalize a streamed assistant message: parse markdown once and stop the cursor.
 function finalizeAssistant() {
   const last = messages.value.at(-1);
   if (last && last.role === 'assistant') {
+    normalizeAssistantMessage(last);
     last.streaming = false;
+    last.statusText = '';
     if (last.content) last.html = renderMarkdown(last.content);
+    for (const part of last.parts) {
+      if (part.type === 'text' && part.text) part.html = renderMarkdown(part.text);
+    }
     if (last.thinking) last.thinkCollapsed = true;
   }
+}
+
+function findOptimisticUser(content) {
+  for (let i = messages.value.length - 1; i >= 0 && i >= messages.value.length - 6; i--) {
+    const msg = messages.value[i];
+    if (msg && msg.role === 'user' && msg._optimistic && msg.content === content) return msg;
+  }
+  return null;
 }
 
 function handleEvent(data) {
@@ -1196,33 +1770,51 @@ function handleEvent(data) {
   const d = data.data || {};
   if (t === 'UserMessage') {
     // 用户消息由 daemon 记入事件日志并回放，前端据此渲染（单一数据源）。
-    messages.value.push({ role: 'user', content: d.content || '', tools: [], _id: Date.now() + Math.random() });
+    const content = d.content || '';
+    const optimistic = findOptimisticUser(content);
+    if (optimistic) {
+      optimistic._optimistic = false;
+    } else {
+      messages.value.push({ role: 'user', content, tools: [], _id: Date.now() + Math.random() });
+    }
     scrollDown();
   } else if (t === 'StreamText') {
     // 就地追加：Vue 3 对 ref 数组内的对象是深响应式，直接改属性即可触发更新，
     // 避免每个 token 都全量重建数组（长对话卡顿的元凶之一）。
     const m = ensureAssistant();
+    const part = ensureTextPart(m);
     // 正文开始时自动收起推理块（Codex 式：回答出来后思考过程折叠）。
     if (m.thinking && !m._thinkAuto && !m._thinkUserTouched) { m.thinkCollapsed = true; m._thinkAuto = true; }
-    m.content += (d.text || '');
-    scheduleRender(m); // 流式期间实时渲染 Markdown（rAF 合帧节流）
+    const text = d.text || '';
+    m.content += text;
+    part.text += text;
+    scheduleRender(part); // 流式期间实时渲染 Markdown（rAF 合帧节流）
     scrollDown();
   } else if (t === 'ThinkingText') {
-    ensureAssistant().thinking += (d.text || '');
+    const m = ensureAssistant();
+    m.statusText = '正在思考...';
+    m.thinking += (d.text || '');
     scrollDown();
   } else if (t === 'RetryEvent') {
+    ensureAssistant().statusText = '正在重试...';
     toast('重试中: ' + (d.reason || ''), 'err');
   } else if (t === 'ToolUseEvent') {
-    ensureAssistant().tools.push({ id: d.tool_id, name: d.tool_name, args: d.arguments, status: 'running', expanded: false });
+    const m = ensureAssistant();
+    m.statusText = `正在运行 ${d.tool_name || '工具'}...`;
+    addToolPart(m, { id: d.tool_id, name: d.tool_name, args: d.arguments, status: 'running', expanded: false });
     scrollDown();
   } else if (t === 'ToolResultEvent') {
-    const last = messages.value.at(-1);
-    const tool = last && last.tools ? last.tools.find((x) => x.id === d.tool_id) : null;
+    const tool = findToolById(d.tool_id);
     if (tool) {
       tool.status = d.is_error ? 'error' : 'done';
       tool.result = d.output;
       tool.elapsed = d.elapsed;
     }
+  } else if (t === 'CompactStarted') {
+    beginCompactPart({
+      ...d,
+      detail: compactDetail(d.current_tokens, d.threshold, d.context_window) || '自动压缩已开始',
+    });
   } else if (t === 'ReplayDone') {
     // History replay finished; live events (incl. genuinely-pending prompts) follow.
     _replaying = false;
@@ -1239,8 +1831,9 @@ function handleEvent(data) {
   } else if (t === 'AskUserResolved') {
     if (ask.value && ask.value.request_id === d.request_id) ask.value = null;
   } else if (t === 'UsageEvent') {
-    tokenInfo.value = { input: d.input_tokens || 0, output: d.output_tokens || 0 };
-    sessionStatus.value.input_tokens = d.input_tokens || 0;
+    const contextTokens = d.context_tokens || d.input_tokens || 0;
+    tokenInfo.value = { input: contextTokens, output: d.output_tokens || 0 };
+    sessionStatus.value.input_tokens = contextTokens;
     sessionStatus.value.output_tokens = d.output_tokens || 0;
     if (sessionStatus.value.context_window) {
       sessionStatus.value.token_percent = Math.floor((sessionStatus.value.input_tokens / sessionStatus.value.context_window) * 100);
@@ -1255,15 +1848,31 @@ function handleEvent(data) {
     busy.value = false;
     toast('任务已停止', 'ok');
   } else if (t === 'ErrorEvent') {
-    finalizeAssistant();
+    const m = ensureAssistant();
+    const msg = d.message || '模型请求失败';
+    markRunningCompactError(msg);
+    const errorText = `模型请求失败：${msg}`;
+    const part = ensureTextPart(m);
+    part.text += errorText;
+    part.html = renderMarkdown(part.text);
+    m.content += errorText;
+    m.html = renderMarkdown(m.content);
+    m.streaming = false;
+    m.error = true;
     busy.value = false;
-    toast(d.message || 'Error', 'err');
+    scrollDown();
+    toast(msg, 'err');
   } else if (t === 'CompactNotification') {
-    toast('上下文已压缩', 'ok');
+    const part = finishCompactPart(d);
+    toast(d.message || '上下文已压缩', part.title === '上下文暂未压缩' ? 'err' : 'ok');
   } else if (t === 'ModeChanged') {
-    sessionStatus.value.permission_mode = d.mode || sessionStatus.value.permission_mode;
-    sessionStatus.value.plan_mode = d.mode === 'plan';
-    selectedMode.value = sessionStatus.value.permission_mode;
+    const modeIsCommandAcceptance = modeOptions.some((m) => m.value === d.mode);
+    applySessionStatus({
+      ...d,
+      permission_mode: d.permission_mode || d.mode || sessionStatus.value.permission_mode,
+      command_acceptance_mode: d.command_acceptance_mode || (modeIsCommandAcceptance ? d.mode : sessionStatus.value.command_acceptance_mode),
+      plan_mode: d.plan_mode ?? d.mode === 'plan',
+    });
   }
 }
 
@@ -1271,23 +1880,46 @@ async function send() {
   const text = inputText.value.trim();
   if (!text || busy.value || !activeSessionId.value || _sendLock) return;
   _sendLock = true;
-  // Don't optimistically add the user bubble — the daemon logs the prompt as a
-  // UserMessage event and every client (including this one) renders it from the
-  // replayed log, keeping a single source of truth.
+  const localId = Date.now() + Math.random();
   inputText.value = '';
+  slashMenuOpen.value = false;
   busy.value = true;
+  messages.value.push({
+    role: 'user',
+    content: text,
+    tools: [],
+    _id: localId,
+    _optimistic: true,
+  });
+  const pending = ensureAssistant();
+  pending.statusText = '正在思考...';
+  pending.streaming = true;
   await nextTick();
   if (inputEl.value) inputEl.value.style.height = 'auto';
+  scrollDown();
   try {
-    await fetch(`${API}/api/task`, {
+    const r = await fetch(`${API}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: activeSessionId.value, prompt: text }),
     });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || '发送失败');
     await loadStatus();
   } catch (e) {
-    toast('发送失败: ' + e.message, 'err');
+    const m = ensureAssistant();
+    const errorText = `发送失败：${e.message}`;
+    const part = ensureTextPart(m);
+    part.text += errorText;
+    part.html = renderMarkdown(part.text);
+    m.content += errorText;
+    m.html = renderMarkdown(m.content);
+    m.streaming = false;
+    m.statusText = '';
+    m.error = true;
     busy.value = false;
+    scrollDown();
+    toast('发送失败: ' + e.message, 'err');
   } finally {
     _sendLock = false;
   }
@@ -1371,9 +2003,42 @@ function fmtElapsed(seconds) {
   return Math.max(0, Math.round(n)) + 's';
 }
 function onKey(e) {
+  if (slashMenuVisible.value) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const count = filteredSlashCommands.value.length;
+      if (count) selectedSlashIndex.value = (selectedSlashIndex.value + 1) % count;
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const count = filteredSlashCommands.value.length;
+      if (count) selectedSlashIndex.value = (selectedSlashIndex.value - 1 + count) % count;
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      slashMenuOpen.value = false;
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+      e.preventDefault();
+      runSlashCommand(filteredSlashCommands.value[selectedSlashIndex.value]);
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     send();
+  }
+}
+function onComposerInput() {
+  autoGrow();
+  if (slashQuery.value !== null) {
+    slashMenuOpen.value = true;
+    selectedSlashIndex.value = 0;
+  } else {
+    slashMenuOpen.value = false;
   }
 }
 function autoGrow() {
@@ -1415,16 +2080,16 @@ onUnmounted(() => {
 .app { display: flex; height: 100vh; }
 .sidebar { width: 260px; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.sb-h { padding: 16px; border-bottom: 1px solid var(--border); }
-.sb-h h1 { font-size: 18px; font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 8px; }
-.sb-h h1 .logo { width: 20px; height: 20px; }
 .avatar .logo { width: 15px; height: 15px; color: #fff; }
-.sb-h .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
-.sb-btns { display: flex; gap: 6px; margin: 12px 16px; }
-.btn-new { flex: 1; padding: 10px; background: var(--accent-dim); border: none; border-radius: var(--r); color: var(--text); font-size: 13px; cursor: pointer; }
-.btn-new:hover { background: var(--accent); color: #fff; }
-.btn-open { padding: 10px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); color: var(--text); font-size: 12px; cursor: pointer; white-space: nowrap; }
-.btn-open:hover { border-color: var(--accent); }
+.sb-btns { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); }
+.btn-new,
+.btn-open { width: 100%; min-height: 42px; padding: 0 13px; border-radius: 9px; font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s; }
+.btn-new { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+.btn-new:hover { background: #276b4e; border-color: #276b4e; transform: translateY(-1px); }
+.btn-open { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+.btn-open:hover { border-color: var(--accent); background: var(--bg3); transform: translateY(-1px); }
+.btn-open .ficon { width: 17px; height: 17px; margin-right: 0; color: var(--muted); }
+.btn-ic { font-size: 20px; line-height: 1; font-weight: 400; margin-top: -1px; }
 .slist { flex: 1; overflow-y: auto; padding: 8px; }
 .sgroup { margin-bottom: 4px; }
 .sg-h { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: var(--r); cursor: pointer; color: var(--muted); font-size: 12px; }
@@ -1447,21 +2112,10 @@ onUnmounted(() => {
 .sitem:hover .sdel { opacity: 1; }
 .sdel:hover { background: var(--bg2); color: var(--red); }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
-.topbar .tb-ws { min-width: 120px; max-width: 32%; font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tb-mid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.topbar .tb-ws { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .topbar .tb-btn { padding: 4px 10px; font-size: 12px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: var(--r); cursor: pointer; white-space: nowrap; }
 .topbar .tb-btn:hover { border-color: var(--accent); }
-.mode-seg { display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); flex-shrink: 0; }
-.mode-seg button { min-width: 48px; height: 26px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
-.mode-seg button.active { background: var(--accent); color: #fff; }
-.mode-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
-.tb-chip { max-width: 220px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 11px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--bg); }
-.tb-icon { width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg3); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-.tb-icon svg { width: 15px; height: 15px; }
-.tb-icon:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
-.tb-icon.danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
-.tb-icon:disabled { opacity: 0.45; cursor: not-allowed; }
 .rightbar { width: 300px; background: var(--bg2); border-left: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; }
 .rb-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .rb-tab { flex: 1; min-width: 0; padding: 10px 4px; background: transparent; border: none; color: var(--muted); font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
@@ -1564,6 +2218,13 @@ onUnmounted(() => {
 .set-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .check-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .model-form { max-width: 620px; }
+.qqbot-form { gap: 10px; }
+.secret-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.secret-row input { flex: 1; min-width: 0; }
+.qq-status { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+.qq-status div { min-width: 0; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.qq-status span { display: block; color: var(--dim); font-size: 11px; margin-bottom: 3px; }
+.qq-status b { display: block; color: var(--text); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-form-acts { display: flex; gap: 8px; justify-content: flex-end; }
 .set-save { padding: 6px 16px; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; }
 .set-cancel { padding: 6px 16px; background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; cursor: pointer; }
@@ -1588,14 +2249,18 @@ onUnmounted(() => {
 .dot.err { background: var(--red); }
 .chat { flex: 1; overflow-y: auto; padding: 24px 24px 48px; }
 .thread { max-width: 780px; margin: 0 auto; }
-.msg { margin-bottom: 24px; animation: msgin 0.24s ease; }
+.msg { margin-bottom: 22px; animation: msgin 0.24s ease; }
 @keyframes msgin { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 .msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .avatar { width: 24px; height: 24px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
 .avatar.assistant { background: linear-gradient(135deg, var(--accent), #7a3d18); }
 .avatar.user { background: var(--bg3); color: var(--muted); font-size: 11px; font-weight: 600; }
 .who { font-size: 12.5px; color: var(--text); font-weight: 600; }
-.msg-content { line-height: 1.7; padding-left: 32px; }
+.msg.user { display: flex; justify-content: flex-end; }
+.user-line { display: flex; justify-content: flex-end; width: 100%; }
+.msg-content { line-height: 1.7; max-width: 100%; }
+.assistant-status { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--muted); font-size: 13px; }
+.status-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: sp 0.7s linear infinite; flex-shrink: 0; }
 .think { border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); margin: 2px 0 10px; overflow: hidden; }
 .think-h { width: 100%; min-height: 34px; display: flex; justify-content: space-between; gap: 8px; align-items: center; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 7px 10px; font-size: 12px; font-family: var(--sans); text-align: left; }
 .think-h:hover { background: var(--bg3); color: var(--text); }
@@ -1606,6 +2271,18 @@ onUnmounted(() => {
 .think-h .tg { color: var(--dim); flex-shrink: 0; }
 .think-b { margin: 0; border-top: 1px solid var(--border); padding: 9px 10px; max-height: 260px; overflow-y: auto; color: var(--muted); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; background: var(--bg); }
 .think.collapsed .think-b { display: none; }
+.compact-card { position: relative; display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg2); margin: 7px 0; padding: 8px 10px; color: var(--muted); overflow: hidden; }
+.compact-card.done { border-color: rgba(47, 125, 91, 0.22); background: rgba(47, 125, 91, 0.06); }
+.compact-card.running { border-color: rgba(224, 152, 67, 0.32); background: rgba(224, 152, 67, 0.08); }
+.compact-card.error { border-color: rgba(197, 77, 77, 0.28); background: rgba(197, 77, 77, 0.07); }
+.compact-card.running::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--yellow), transparent); animation: compactbar 1.1s ease-in-out infinite; }
+.compact-ic { width: 20px; height: 20px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--accent); background: var(--bg); border: 1px solid var(--border); font-size: 12px; font-weight: 700; }
+.compact-card.running .compact-ic { color: var(--yellow); animation: sp 1s linear infinite; }
+.compact-card.error .compact-ic { color: var(--red); animation: none; }
+.compact-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.compact-title { color: var(--text); font-size: 13px; font-weight: 650; }
+.compact-detail { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes compactbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
 .md :deep(p) { margin: 6px 0; }
 .md :deep(p:first-child) { margin-top: 0; }
 .md :deep(p:last-child) { margin-bottom: 0; }
@@ -1629,7 +2306,7 @@ onUnmounted(() => {
 .md :deep(.copy-btn) { position: absolute; top: 6px; right: 6px; padding: 2px 8px; font-size: 11px; background: var(--bg3); color: var(--muted); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
 .md :deep(pre:hover .copy-btn) { opacity: 1; }
 .md :deep(.copy-btn:hover) { color: var(--text); border-color: var(--accent); }
-.msg-copy { margin-left: 8px; padding: 0 6px; font-size: 11px; background: transparent; color: var(--dim); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.msg-copy { margin-top: 6px; padding: 0 6px; font-size: 11px; background: transparent; color: var(--dim); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
 .msg-copy:hover { color: var(--text); border-color: var(--accent); }
 .term { font-family: var(--mono); font-size: 12px; }
 .term-cmd { color: var(--green); margin-bottom: 6px; white-space: pre-wrap; word-break: break-all; }
@@ -1641,7 +2318,7 @@ onUnmounted(() => {
 .tc-b :deep(.diff) { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
 .tc-b :deep(.d-del) { color: var(--red); background: rgba(247, 118, 142, 0.08); }
 .tc-b :deep(.d-add) { color: var(--green); background: rgba(158, 206, 106, 0.08); }
-.bubble { display: inline-block; padding: 10px 14px; border-radius: 12px; max-width: 100%; margin-left: 32px; background: var(--bg2); border: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+.bubble { display: inline-block; padding: 10px 14px; border-radius: 14px; max-width: min(72%, 620px); background: var(--bg2); border: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; line-height: 1.6; box-shadow: 0 1px 2px rgba(32, 36, 33, 0.04); }
 .tc { background: transparent; border: 1px solid var(--border); border-radius: 8px; margin: 6px 0; overflow: hidden; }
 .tc-h { padding: 6px 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12.5px; }
 .tc-h:hover { background: var(--bg2); }
@@ -1656,17 +2333,54 @@ onUnmounted(() => {
 .tc-b.hide { display: none; }
 .cursor { display: inline-block; width: 8px; height: 16px; background: var(--accent); animation: bk 1s infinite; vertical-align: text-bottom; margin-left: 2px; }
 @keyframes bk { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
-.input-area { padding: 12px 24px 18px; border-top: 1px solid var(--border); background: var(--bg); }
-.composer { display: flex; align-items: flex-end; gap: 8px; max-width: 780px; margin: 0 auto; background: var(--bg3); border: 1px solid var(--border); border-radius: 16px; padding: 8px 8px 8px 16px; transition: border-color 0.15s, box-shadow 0.15s; }
-.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(162, 84, 42, 0.14); }
-.composer.disabled { opacity: 0.6; }
-.composer-input { flex: 1; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-size: 14px; font-family: var(--sans); line-height: 1.5; padding: 6px 0; min-height: 24px; max-height: 200px; }
+.input-area { padding: 10px 24px 16px; background: var(--bg); }
+.composer { position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; width: min(780px, 100%); min-height: 98px; margin: 0 auto; background: var(--bg2); border: 1px solid var(--border); border-radius: 18px; padding: 12px 12px 10px 14px; color: var(--text); box-shadow: 0 8px 24px rgba(32, 36, 33, 0.07); transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
+.composer:focus-within { border-color: rgba(47, 125, 91, 0.42); box-shadow: 0 0 0 3px rgba(47, 125, 91, 0.09), 0 10px 24px rgba(32, 36, 33, 0.08); }
+.composer.disabled { opacity: 0.66; }
+.composer-input { width: 100%; flex: 1; background: transparent; border: none; outline: none; resize: none; color: var(--text); font-size: 15px; font-family: var(--sans); line-height: 1.5; padding: 0 8px 0 0; min-height: 38px; max-height: 150px; }
 .composer-input::placeholder { color: var(--dim); }
-.composer-send { flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px; border: none; background: var(--accent); color: var(--bg); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform 0.1s, background 0.15s; }
+.composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
+.composer-left, .composer-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.composer-tool { width: 30px; height: 30px; border: none; background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; flex-shrink: 0; }
+.composer-tool svg { width: 21px; height: 21px; }
+.composer-tool:hover:not(:disabled) { color: var(--text); background: var(--bg3); }
+.composer-tool:disabled { opacity: 0.45; cursor: not-allowed; }
+.composer-mode { border: none; background: transparent; font-family: var(--sans); position: relative; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 13px; font-weight: 650; white-space: nowrap; padding: 4px 18px 4px 6px; cursor: pointer; border-radius: 999px; }
+.composer-mode svg { width: 17px; height: 17px; flex-shrink: 0; }
+.composer-mode-text { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.composer-mode select { position: absolute; inset: 0; width: 100%; height: 100%; appearance: none; border: none; background: transparent; color: currentColor; font: inherit; outline: none; cursor: pointer; opacity: 0; }
+.composer-mode select:disabled { cursor: not-allowed; }
+.composer-mode:hover { background: var(--accent-dim); }
+.composer-mode::after { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); position: absolute; right: 5px; top: 9px; pointer-events: none; }
+.composer-mode option { color: var(--text); background: var(--bg2); }
+.composer-context { --ctx: 0deg; --ctx-color: var(--accent); width: 15px; height: 15px; border: none; border-radius: 50%; background: conic-gradient(var(--ctx-color) var(--ctx), var(--border) 0); cursor: pointer; flex-shrink: 0; position: relative; }
+.composer-context::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg2); }
+.composer-context:hover { filter: saturate(1.25); }
+.composer-context.warn::before,
+.composer-context.danger::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 1px solid var(--ctx-color); opacity: 0.28; }
+.composer-model { position: relative; border: 1px solid var(--border); background: var(--bg); color: var(--muted); display: inline-flex; align-items: center; gap: 5px; font-size: 13px; line-height: 1; cursor: pointer; min-width: 0; padding: 6px 8px; border-radius: 999px; }
+.composer-model span:first-child { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model svg { width: 15px; height: 15px; color: var(--dim); flex-shrink: 0; }
+.composer-model:hover { color: var(--text); border-color: var(--accent); background: var(--bg2); }
+.composer-effort { color: var(--dim); font-size: 13px; white-space: nowrap; }
+.composer-model select { position: absolute; inset: 0; width: 100%; height: 100%; appearance: none; border: none; background: transparent; color: currentColor; font: inherit; outline: none; cursor: pointer; opacity: 0; }
+.composer-model select:disabled { cursor: not-allowed; }
+.composer-model option { color: var(--text); background: var(--bg2); }
+.composer-send { flex-shrink: 0; width: 34px; height: 34px; border-radius: 999px; border: none; background: var(--accent); color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform 0.1s, opacity 0.15s, background 0.15s; }
 .composer-send svg { width: 18px; height: 18px; }
-.composer-send:hover:not(:disabled) { transform: translateY(-1px); }
-.composer-send:disabled { background: var(--bg2); color: var(--dim); cursor: not-allowed; }
-.composer-hint { max-width: 780px; margin: 6px auto 0; font-size: 11px; color: var(--dim); text-align: center; }
+.composer-send:hover:not(:disabled) { transform: translateY(-1px); background: #276b4e; }
+.composer-send:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.composer-send.stop svg { width: 14px; height: 14px; }
+.slash-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 20; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 14px 36px rgba(32, 36, 33, 0.14); }
+.slash-item { width: 100%; display: flex; align-items: center; gap: 10px; border: none; border-radius: 8px; background: transparent; color: var(--text); padding: 9px 10px; text-align: left; cursor: pointer; }
+.slash-item.active, .slash-item:hover:not(.disabled) { background: var(--bg3); }
+.slash-item.disabled { opacity: 0.45; cursor: not-allowed; }
+.slash-badge { width: 24px; height: 24px; border-radius: 7px; background: var(--accent-dim); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+.slash-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.slash-title { font-size: 13px; font-weight: 650; }
+.slash-desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slash-hint { color: var(--dim); font-family: var(--mono); font-size: 12px; flex-shrink: 0; }
+.slash-empty { padding: 14px 12px; color: var(--dim); font-size: 13px; }
 .spin { width: 14px; height: 14px; border: 2px solid rgba(0, 0, 0, 0.25); border-top-color: currentColor; border-radius: 50%; animation: sp 0.7s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 .approve { max-width: 780px; margin: 0 auto 10px; background: var(--bg2); border: 1px solid var(--accent-dim); border-radius: 12px; padding: 12px 14px; }
@@ -1708,8 +2422,18 @@ onUnmounted(() => {
 .empty-sub { font-size: 12px; margin-top: 6px; color: var(--dim); }
 @media (max-width: 900px) {
   .sidebar { width: 220px; }
-  .tb-chip { display: none; }
-  .topbar .tb-ws { max-width: 42%; }
   .rightbar { width: 270px; }
+  .set-nav { width: 190px; }
+  .set-main { padding: 24px; }
+  .set-grid2, .qq-status { grid-template-columns: 1fr; }
+  .input-area { padding: 8px 12px 12px; }
+  .composer { min-height: 92px; border-radius: 16px; padding: 11px 10px 9px 12px; }
+  .composer-input { font-size: 14px; min-height: 34px; }
+  .composer-tools { gap: 6px; }
+  .composer-left, .composer-right { gap: 6px; }
+  .composer-mode-text { max-width: 96px; }
+  .composer-model span:first-child { max-width: 62px; }
+  .composer-effort { display: none; }
+  .slash-menu { left: 10px; right: 10px; }
 }
 </style>

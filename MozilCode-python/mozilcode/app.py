@@ -18,6 +18,7 @@ from mozilcode.agent import (
     Agent,
     AskUserRequest,
     CompactNotification,
+    CompactStarted,
     ErrorEvent,
     HookEvent,
     LoopComplete,
@@ -1385,6 +1386,9 @@ class MozilCodeApp(App):
                     self._show_system_message(
                         f"Hook [{event.hook_id}] {status} {event.output}"
                     )
+
+                elif isinstance(event, CompactStarted):
+                    self._show_system_message(event.message)
 
                 elif isinstance(event, CompactNotification):
                     self._show_system_message(event.message)

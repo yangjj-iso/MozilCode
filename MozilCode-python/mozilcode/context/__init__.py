@@ -21,6 +21,7 @@ from mozilcode.context.manager import (
     ensure_session_dir,
     load_replacement_records,
     reconstruct_replacement_state,
+    should_auto_compact,
 )
 
 
@@ -46,5 +47,5 @@ __all__ = [
     "ensure_session_dir",
     "load_replacement_records",
     "reconstruct_replacement_state",
+    "should_auto_compact",
 ]
-

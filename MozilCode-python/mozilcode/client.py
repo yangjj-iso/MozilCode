@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
+from urllib.parse import urlparse
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -77,6 +78,99 @@ def _mark_last_tool_for_cache(tools: list[dict[str, Any]]) -> list[dict[str, Any
     last["cache_control"] = _EPHEMERAL
     marked[-1] = last
     return marked
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if hasattr(value, "model_dump"):
+        try:
+            data = value.model_dump(exclude_none=True)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _get_text(value: Any, *names: str) -> str:
+    for name in names:
+        item = getattr(value, name, None)
+        if isinstance(item, str) and item:
+            return item
+    data = _as_dict(value)
+    for name in names:
+        item = data.get(name)
+        if isinstance(item, str) and item:
+            return item
+    return ""
+
+
+def _extract_response_reasoning_summary(response: Any) -> str:
+    data = _as_dict(response)
+    output = data.get("output")
+    if not isinstance(output, list):
+        output = getattr(response, "output", [])
+    parts: list[str] = []
+    for item in output or []:
+        item_data = _as_dict(item)
+        if item_data.get("type") != "reasoning":
+            continue
+        summary = item_data.get("summary") or getattr(item, "summary", [])
+        for summary_item in summary or []:
+            text = _get_text(summary_item, "text")
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _extract_chat_reasoning_delta(delta: Any) -> str:
+    text = _get_text(
+        delta,
+        "reasoning_content",
+        "reasoning_delta",
+        "reasoning",
+        "thinking",
+    )
+    if text:
+        return text
+    data = _as_dict(delta)
+    reasoning = data.get("reasoning")
+    if isinstance(reasoning, dict):
+        for key in ("content", "text", "summary"):
+            item = reasoning.get(key)
+            if isinstance(item, str) and item:
+                return item
+    return ""
+
+
+_RESPONSE_REASONING_DELTA_EVENTS = {
+    "response.reasoning_summary_text.delta",
+    "response.reasoning_text.delta",
+    "response.reasoning.delta",
+}
+
+_RESPONSE_REASONING_DONE_EVENTS = {
+    "response.reasoning_summary_text.done",
+    "response.reasoning_text.done",
+    "response.reasoning.done",
+}
+
+
+def _is_local_base_url(base_url: str) -> bool:
+    try:
+        host = urlparse(base_url).hostname or ""
+    except Exception:
+        return False
+    return host.lower() in {"127.0.0.1", "localhost", "::1"}
+
+
+def _resolve_openai_api_key(config: ProviderConfig) -> str:
+    api_key = config.resolve_api_key()
+    if api_key:
+        return api_key
+    if _is_local_base_url(config.base_url):
+        return "mozilcode-local"
+    return ""
 
 
 class LLMError(Exception):
@@ -285,8 +379,9 @@ class AnthropicClient(LLMClient):
 class OpenAIClient(LLMClient):
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
+        self.thinking = config.thinking
         self.max_output_tokens = config.get_max_output_tokens()
-        api_key = config.resolve_api_key()
+        api_key = _resolve_openai_api_key(config)
         if not api_key:
             raise AuthenticationError(
                 "OpenAI API key not found. "
@@ -316,16 +411,36 @@ class OpenAIClient(LLMClient):
             kwargs["instructions"] = system
         if tools:
             kwargs["tools"] = tools
+        if self.thinking:
+            kwargs["reasoning"] = {"summary": "auto"}
 
         current_tool_name = ""
         current_call_id = ""
         json_accum = ""
+        reasoning_accum = ""
+        reasoning_completed = False
 
         try:
             response_stream = await self._client.responses.create(**kwargs)
             async for event in response_stream:
                 if event.type == "response.output_text.delta":
                     yield TextDelta(text=event.delta)
+                elif event.type in _RESPONSE_REASONING_DELTA_EVENTS:
+                    text = _get_text(event, "delta", "text")
+                    if text:
+                        reasoning_accum += text
+                        yield ThinkingDelta(text=text)
+                elif event.type in _RESPONSE_REASONING_DONE_EVENTS:
+                    text = _get_text(event, "text")
+                    if text and not reasoning_accum.endswith(text):
+                        reasoning_accum += text
+                        yield ThinkingDelta(text=text)
+                    if reasoning_accum:
+                        yield ThinkingComplete(
+                            thinking=reasoning_accum,
+                            signature="",
+                        )
+                        reasoning_completed = True
                 elif event.type == "response.function_call_arguments.delta":
                     if not current_tool_name:
                         current_tool_name = getattr(event, "name", "") or ""
@@ -365,6 +480,12 @@ class OpenAIClient(LLMClient):
                         )
                 elif event.type == "response.completed":
                     resp = getattr(event, "response", None)
+                    if self.thinking and not reasoning_completed:
+                        summary = _extract_response_reasoning_summary(resp)
+                        if summary:
+                            yield ThinkingDelta(text=summary)
+                            yield ThinkingComplete(thinking=summary, signature="")
+                            reasoning_completed = True
                     usage = getattr(resp, "usage", None) if resp else None
                     # Responses API 通过 input_tokens_details.cached_tokens
                     # 暴露 cache 命中数，没有 creation 计数。注意这里的
@@ -408,8 +529,9 @@ class OpenAICompatClient(LLMClient):
 
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
+        self.thinking = config.thinking
         self.max_output_tokens = config.get_max_output_tokens()
-        api_key = config.resolve_api_key()
+        api_key = _resolve_openai_api_key(config)
         if not api_key:
             raise AuthenticationError(
                 "OpenAI-compatible API key not found. "
@@ -474,6 +596,8 @@ class OpenAICompatClient(LLMClient):
         # 用于累积 streaming tool call 的状态。Chat Completions 流按
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
         active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
+        reasoning_accum = ""
+        reasoning_completed = False
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -502,6 +626,12 @@ class OpenAICompatClient(LLMClient):
                 choice = chunk.choices[0]
                 delta = choice.delta
 
+                if self.thinking and delta:
+                    reasoning = _extract_chat_reasoning_delta(delta)
+                    if reasoning:
+                        reasoning_accum += reasoning
+                        yield ThinkingDelta(text=reasoning)
+
                 # --- 文本内容 ---
                 if delta and delta.content:
                     yield TextDelta(text=delta.content)
@@ -528,6 +658,9 @@ class OpenAICompatClient(LLMClient):
 
                 # --- 结束原因 ---
                 if choice.finish_reason in ("tool_calls", "stop"):
+                    if reasoning_accum and not reasoning_completed:
+                        yield ThinkingComplete(thinking=reasoning_accum, signature="")
+                        reasoning_completed = True
                     if choice.finish_reason == "tool_calls":
                         for _idx, call in sorted(active_calls.items()):
                             try:

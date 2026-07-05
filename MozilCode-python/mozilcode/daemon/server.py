@@ -19,9 +19,11 @@ import json
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from starlette.applications import Starlette
@@ -32,7 +34,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig, WorktreeConfig
 from mozilcode.validator import ConfigError, validate_config_structure
-from mozilcode.client import create_client, resolve_context_window
+from mozilcode.client import LLMError, create_client, resolve_context_window
+from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
 from mozilcode.permissions import (
     DangerousCommandDetector,
@@ -54,10 +57,13 @@ from mozilcode.tools.team_delete import TeamDeleteTool
 from mozilcode.worktree import WorktreeManager
 from mozilcode.memory.instructions import load_instructions
 from mozilcode.hooks import HookEngine, load_hooks
-from mozilcode.agent import Agent, PermissionResponse
+from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
+from mozilcode.a2a.bridge import A2ABridge, A2AError
+from mozilcode.a2a.qq import OneBotQQAdapter
+from mozilcode.a2a.qq_official import DEFAULT_INTENTS, OfficialQQConfig, create_official_qq_gateway
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +78,8 @@ _GUI_SETTINGS_FILE = Path.home() / ".mozilcode" / "gui_settings.json"
 # First-run model configuration written by the GUI.
 _USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 
+_QQBOT_PROVIDER = "official"
+
 
 def _session_dir(sid: str) -> Path:
     return _SESSIONS_DIR / sid
@@ -83,10 +91,11 @@ def _load_gui_settings() -> dict:
         if isinstance(d, dict):
             d.setdefault("mcp_servers", [])
             d.setdefault("disabled_skills", [])
+            d.setdefault("qqbot", {})
             return d
     except Exception:
         pass
-    return {"mcp_servers": [], "disabled_skills": []}
+    return {"mcp_servers": [], "disabled_skills": [], "qqbot": {}}
 
 
 def _save_gui_settings(data: dict) -> None:
@@ -97,12 +106,139 @@ def _save_gui_settings(data: dict) -> None:
         log.warning("Failed to save gui settings: %s", e)
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default
+
+
+def _coerce_int(value: Any, default: int, *, minimum: int | None = None) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    if minimum is not None:
+        number = max(minimum, number)
+    return number
+
+
+def _split_id_list(value: Any) -> set[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item).strip() for item in value]
+    else:
+        raw = str(value)
+        for sep in [",", ";", "，", "；", "\r", "\n", "\t"]:
+            raw = raw.replace(sep, " ")
+        items = [item.strip() for item in raw.split(" ")]
+    clean = {item for item in items if item}
+    return clean or None
+
+
+def _id_list_text(value: Any) -> str:
+    ids = _split_id_list(value)
+    if not ids:
+        return ""
+    return "\n".join(sorted(ids))
+
+
+def _normalize_qqbot_settings(raw: dict | None) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "provider": _QQBOT_PROVIDER,
+        "enabled": _coerce_bool(raw.get("enabled"), False),
+        "app_id": str(raw.get("app_id") or "").strip(),
+        "app_secret": str(raw.get("app_secret") or "").strip(),
+        "command_prefix": str(raw.get("command_prefix") or "/mew").strip(),
+        "allowed_users": _id_list_text(raw.get("allowed_users")),
+        "allowed_groups": _id_list_text(raw.get("allowed_groups")),
+        "intents": _coerce_int(raw.get("intents"), DEFAULT_INTENTS, minimum=0),
+    }
+
+
+def _qqbot_settings_from_payload(body: dict, current: dict | None = None) -> dict:
+    current = current if isinstance(current, dict) else {}
+    merged = {**current, **(body or {})}
+    secret = body.get("app_secret") if isinstance(body, dict) else None
+    if secret is None or not str(secret).strip():
+        merged["app_secret"] = str(current.get("app_secret") or "").strip()
+    return _normalize_qqbot_settings(merged)
+
+
+def _resolve_qqbot_config(settings: dict | None = None) -> tuple[bool, OfficialQQConfig, dict]:
+    data = settings if isinstance(settings, dict) else _load_gui_settings()
+    raw = data.get("qqbot") if isinstance(data, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    saved = bool(raw)
+    normalized = _normalize_qqbot_settings(raw)
+    env_cfg = OfficialQQConfig.from_env()
+    enabled = _coerce_bool(raw.get("enabled"), False) if saved else OfficialQQConfig.enabled_from_env()
+
+    cfg = OfficialQQConfig.from_env()
+    cfg.app_id = normalized["app_id"] or env_cfg.app_id
+    cfg.app_secret = normalized["app_secret"] or env_cfg.app_secret
+    if saved and "command_prefix" in raw:
+        cfg.command_prefix = normalized["command_prefix"]
+    if saved and "allowed_users" in raw:
+        cfg.allowed_users = _split_id_list(normalized["allowed_users"])
+    if saved and "allowed_groups" in raw:
+        cfg.allowed_groups = _split_id_list(normalized["allowed_groups"])
+    if saved and "intents" in raw:
+        cfg.intents = normalized["intents"]
+    return enabled, cfg, normalized
+
+
+def _public_qqbot_status(app: Starlette | None = None, settings: dict | None = None) -> dict:
+    enabled, cfg, _normalized = _resolve_qqbot_config(settings)
+    gateway = getattr(app.state, "qq_official_gateway", None) if app is not None else None
+    status = gateway.status() if gateway is not None else {}
+    return {
+        "provider": _QQBOT_PROVIDER,
+        "enabled": enabled,
+        "configured": cfg.is_configured(),
+        "running": False,
+        "session_ready": False,
+        "bot_username": "",
+        "last_sequence": None,
+        "last_error": "",
+        "app_id": cfg.app_id,
+        "app_secret_set": bool(cfg.app_secret),
+        "command_prefix": cfg.command_prefix,
+        "allowed_users": _id_list_text(cfg.allowed_users),
+        "allowed_groups": _id_list_text(cfg.allowed_groups),
+        "intents": cfg.intents,
+        "shard": [cfg.shard_id, cfg.shard_count],
+        "config_path": str(_GUI_SETTINGS_FILE),
+        **status,
+    }
+
+
 def _default_base_url(protocol: str) -> str:
     if protocol == "anthropic":
         return "https://api.anthropic.com"
     if protocol == "openai":
         return "https://api.openai.com/v1"
     return ""
+
+
+def _normalize_base_url(protocol: str, base_url: str) -> str:
+    if protocol not in {"openai", "openai-compat"}:
+        return base_url
+    parsed = urlparse(base_url)
+    if (
+        parsed.scheme in {"http", "https"}
+        and (parsed.hostname or "").lower() in {"127.0.0.1", "localhost", "::1"}
+        and parsed.path in {"", "/"}
+    ):
+        return base_url.rstrip("/") + "/v1"
+    return base_url
 
 
 def _public_config(config: AppConfig | None, error: str = "") -> dict:
@@ -128,11 +264,17 @@ def _public_config(config: AppConfig | None, error: str = "") -> dict:
     }
 
 
-def _config_from_gui_payload(body: dict) -> dict:
+def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> dict:
     protocol = (body.get("protocol") or "openai").strip()
-    base_url = (body.get("base_url") or _default_base_url(protocol)).strip()
+    base_url = _normalize_base_url(
+        protocol,
+        (body.get("base_url") or _default_base_url(protocol)).strip(),
+    )
     model = (body.get("model") or "").strip()
     name = (body.get("name") or protocol or "default").strip()
+    api_key = (body.get("api_key") or "").strip()
+    if not api_key and current is not None and current.providers:
+        api_key = current.providers[0].api_key
 
     raw = {
         "providers": [{
@@ -140,7 +282,7 @@ def _config_from_gui_payload(body: dict) -> dict:
             "protocol": protocol,
             "base_url": base_url,
             "model": model,
-            "api_key": (body.get("api_key") or "").strip(),
+            "api_key": api_key,
             "thinking": bool(body.get("thinking", False)),
             "context_window": int(body.get("context_window") or 0),
             "max_output_tokens": int(body.get("max_output_tokens") or 0),
@@ -282,6 +424,12 @@ async def create_agent_from_config(
 
 class DaemonServer:
     """Holds shared state across HTTP/WS requests."""
+
+    _COMMAND_ACCEPTANCE_MODES = {
+        PermissionMode.DEFAULT,
+        PermissionMode.ACCEPT_EDITS,
+        PermissionMode.BYPASS,
+    }
 
     def __init__(self, config: AppConfig | None, work_dir: str, hook_engine: HookEngine | None = None):
         self.config = config
@@ -527,17 +675,53 @@ class DaemonServer:
         if mode == "do":
             next_mode = self._pre_plan_modes.pop(sid, None) or PermissionMode.DEFAULT
         else:
-            next_mode = PermissionMode(mode)
-            if next_mode == PermissionMode.PLAN and agent.permission_mode != PermissionMode.PLAN:
-                self._pre_plan_modes[sid] = agent.permission_mode
+            requested_mode = PermissionMode(mode)
+            if requested_mode == PermissionMode.PLAN:
+                next_mode = PermissionMode.PLAN
+                if agent.permission_mode != PermissionMode.PLAN:
+                    self._pre_plan_modes[sid] = self._command_acceptance_mode(sid, agent)
+            elif requested_mode in self._COMMAND_ACCEPTANCE_MODES and agent.permission_mode == PermissionMode.PLAN:
+                self._pre_plan_modes[sid] = requested_mode
+                next_mode = PermissionMode.PLAN
+            else:
+                self._pre_plan_modes.pop(sid, None)
+                next_mode = requested_mode
 
         agent.set_permission_mode(next_mode)
-        self._emit(sid, {"type": "ModeChanged", "data": {"mode": next_mode.value}})
-        return self.status(sid)
+        status = self.status(sid)
+        self._emit(sid, {
+            "type": "ModeChanged",
+            "data": {
+                "mode": status["permission_mode"],
+                "permission_mode": status["permission_mode"],
+                "command_acceptance_mode": status["command_acceptance_mode"],
+                "plan_mode": status["plan_mode"],
+            },
+        })
+        return status
+
+    def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
+        """Return the GUI-facing command acceptance state, excluding plan mode."""
+        if agent is not None:
+            if agent.permission_mode == PermissionMode.PLAN:
+                pre_plan = self._pre_plan_modes.get(sid)
+                if pre_plan in self._COMMAND_ACCEPTANCE_MODES:
+                    return pre_plan
+                return PermissionMode.DEFAULT
+            if agent.permission_mode in self._COMMAND_ACCEPTANCE_MODES:
+                return agent.permission_mode
+            return PermissionMode.DEFAULT
+
+        if self.config is not None:
+            configured_mode = PermissionMode(self.config.permission_mode)
+            if configured_mode in self._COMMAND_ACCEPTANCE_MODES:
+                return configured_mode
+        return PermissionMode.DEFAULT
 
     def status(self, sid: str) -> dict:
         agent = self.get_agent(sid)
         deps = self.get_deps(sid)
+        conv = self.get_conversation(sid)
         meta = self._session_meta.get(sid, {})
         task = self._tasks.get(sid)
         running = bool(task and not task.done())
@@ -551,7 +735,11 @@ class DaemonServer:
 
         provider = deps.provider if deps is not None else (self.config.providers[0] if self.config and self.config.providers else None)
         context_window = agent.context_window if agent is not None else (provider.get_context_window() if provider else 0)
-        input_tokens = agent.total_input_tokens if agent is not None else 0
+        auto_compact_threshold = max(0, compute_compact_threshold(context_window)) if context_window else 0
+        if conv is not None and hasattr(conv, "current_tokens"):
+            input_tokens = conv.current_tokens()
+        else:
+            input_tokens = agent.total_input_tokens if agent is not None else 0
         output_tokens = agent.total_output_tokens if agent is not None else 0
 
         return {
@@ -559,10 +747,12 @@ class DaemonServer:
             "work_dir": meta.get("work_dir", self.work_dir),
             "title": meta.get("title", ""),
             "permission_mode": agent.permission_mode.value if agent else (self.config.permission_mode if self.config else "default"),
+            "command_acceptance_mode": self._command_acceptance_mode(sid, agent).value,
             "plan_mode": bool(agent.plan_mode) if agent else False,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "context_window": context_window,
+            "auto_compact_threshold": auto_compact_threshold,
             "token_percent": int(input_tokens / context_window * 100) if context_window else 0,
             "tool_count": len(enabled_tools),
             "tools": enabled_tools,
@@ -611,6 +801,16 @@ class DaemonServer:
             self._pending_prompts.get(sid, {}).pop(request_id, None)
             self._emit(sid, {"type": "AskUserResolved", "data": {"request_id": request_id}})
         return ok
+
+    async def invalidate_idle_agents(self) -> None:
+        """Drop cached Agent instances so updated provider config applies."""
+        for sid in list(self._agents.keys()):
+            task = self._tasks.get(sid)
+            if task and not task.done():
+                continue
+            self._agents.pop(sid, None)
+            await self.session_mgr.close_session(sid)
+            self._pre_plan_modes.pop(sid, None)
 
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""
@@ -670,8 +870,9 @@ async def save_config(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     try:
         body = await request.json()
-        raw = _config_from_gui_payload(body or {})
+        raw = _config_from_gui_payload(body or {}, server.config)
         server.config = _write_user_config(raw)
+        await server.invalidate_idle_agents()
     except (ConfigError, ValueError, TypeError) as e:
         return JSONResponse(_public_config(server.config, str(e)), status_code=400)
     except Exception as e:
@@ -711,9 +912,18 @@ async def session_info(request: Request) -> JSONResponse:
 async def session_status(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     sid = request.path_params["sid"]
-    if not await server.ensure_agent(sid):
+    try:
+        ok = await server.ensure_agent(sid)
+    except LLMError as e:
+        status = server.status(sid)
+        status["agent_ready"] = False
+        status["error"] = str(e)
+        return JSONResponse(status)
+    if not ok:
         return JSONResponse({"error": "session not found"}, status_code=404)
-    return JSONResponse(server.status(sid))
+    status = server.status(sid)
+    status["agent_ready"] = True
+    return JSONResponse(status)
 
 
 async def set_session_mode(request: Request) -> JSONResponse:
@@ -958,12 +1168,35 @@ async def manual_compact(request: Request) -> JSONResponse:
     conv = server.get_conversation(sid)
     if agent is None or conv is None:
         return JSONResponse({"error": "session not found"}, status_code=404)
+    before_tokens = conv.current_tokens()
+    server._emit(sid, {
+        "type": "CompactStarted",
+        "data": {
+            "current_tokens": before_tokens,
+            "threshold": max(0, compute_compact_threshold(agent.context_window, manual=True)),
+            "context_window": agent.context_window,
+            "message": "正在压缩上下文",
+        },
+    })
     result = await agent.manual_compact(conv)
-    server._emit(sid, {"type": "CompactNotification", "data": {"message": "Manual compact completed"}})
+    event = serialize_event(result)
+    server._emit(sid, event)
+    if not isinstance(result, ErrorEvent):
+        server._emit(sid, {
+            "type": "UsageEvent",
+            "data": {
+                "input_tokens": agent.total_input_tokens,
+                "output_tokens": agent.total_output_tokens,
+                "context_tokens": conv.current_tokens(),
+            },
+        })
     server._persist_events(sid)
+    if isinstance(result, ErrorEvent):
+        return JSONResponse({"error": result.message}, status_code=400)
     return JSONResponse({
         "type": type(result).__name__,
-        "data": str(result),
+        "data": event.get("data", {}),
+        "status": server.status(sid),
     })
 
 
@@ -1179,6 +1412,118 @@ async def skill_delete(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+def _public_base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
+async def a2a_agent_card(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    return JSONResponse(bridge.agent_card(_public_base_url(request)))
+
+
+async def a2a_rpc(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400,
+        )
+    return JSONResponse(await bridge.handle_json_rpc(payload))
+
+
+async def a2a_message_send(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    try:
+        body = await request.json()
+        result = await bridge.send_message(body or {})
+    except A2AError as e:
+        return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
+    return JSONResponse(result)
+
+
+async def a2a_task_get(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    try:
+        task = bridge.get_task(request.path_params["task_id"])
+    except A2AError as e:
+        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+    return JSONResponse(bridge.task_to_a2a(task))
+
+
+async def a2a_task_cancel(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    try:
+        task = await bridge.cancel_task(request.path_params["task_id"])
+    except A2AError as e:
+        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+    return JSONResponse(bridge.task_to_a2a(task))
+
+
+async def qq_onebot_webhook(request: Request) -> JSONResponse:
+    bridge: A2ABridge = request.app.state.a2a_bridge
+    raw = await request.body()
+    try:
+        event = json.loads(raw.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+    adapter = OneBotQQAdapter(bridge)
+    result = await adapter.handle_event(
+        event,
+        headers=dict(request.headers),
+        raw_body=raw,
+    )
+    return JSONResponse(result)
+
+
+async def qq_official_status(request: Request) -> JSONResponse:
+    return JSONResponse(_public_qqbot_status(request.app))
+
+
+async def _apply_qq_official_gateway(app: Starlette, bridge: A2ABridge, *, restart: bool = False) -> None:
+    gateway = getattr(app.state, "qq_official_gateway", None)
+    enabled, cfg, _settings = _resolve_qqbot_config()
+
+    if gateway is not None and (restart or not enabled or not cfg.is_configured()):
+        await gateway.stop()
+        app.state.qq_official_gateway = None
+        gateway = None
+
+    if not enabled:
+        return
+    if not cfg.is_configured():
+        log.warning("Official QQ Gateway requested but AppID/AppSecret are not configured")
+        return
+    if gateway is not None:
+        return
+
+    gateway = create_official_qq_gateway(bridge, cfg)
+    app.state.qq_official_gateway = gateway
+    await gateway.start()
+    log.info("Official QQ Gateway adapter enabled")
+
+
+async def qqbot_settings_get(request: Request) -> JSONResponse:
+    return JSONResponse(_public_qqbot_status(request.app))
+
+
+async def qqbot_settings_save(request: Request) -> JSONResponse:
+    body = await request.json()
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "JSON object is required"}, status_code=400)
+
+    data = _load_gui_settings()
+    data["qqbot"] = _qqbot_settings_from_payload(body, data.get("qqbot"))
+    enabled, cfg, _settings = _resolve_qqbot_config(data)
+    if enabled and not cfg.is_configured():
+        return JSONResponse({"error": "启用 QQ Bot 需要 AppID 和 AppSecret"}, status_code=400)
+
+    _save_gui_settings(data)
+    await _apply_qq_official_gateway(request.app, request.app.state.a2a_bridge, restart=True)
+    return JSONResponse({"ok": True, **_public_qqbot_status(request.app)})
+
+
 async def serve_gui(request: Request) -> JSONResponse:
     """Serve the embedded GUI HTML at /."""
     from pathlib import Path
@@ -1196,9 +1541,31 @@ async def serve_gui(request: Request) -> JSONResponse:
 def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine | None = None) -> Starlette:
     """Create the Starlette application with all routes wired."""
     server = DaemonServer(config, work_dir, hook_engine)
+    a2a_bridge = A2ABridge(server)
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette):
+        app.state.qq_official_gateway = None
+        await _apply_qq_official_gateway(app, a2a_bridge)
+        try:
+            yield
+        finally:
+            gateway = getattr(app.state, "qq_official_gateway", None)
+            if gateway is not None:
+                await gateway.stop()
 
     routes = [
         Route("/", serve_gui, methods=["GET"]),
+        Route("/.well-known/agent-card.json", a2a_agent_card, methods=["GET"]),
+        Route("/a2a/agent-card.json", a2a_agent_card, methods=["GET"]),
+        Route("/a2a/rpc", a2a_rpc, methods=["POST"]),
+        Route("/a2a/message:send", a2a_message_send, methods=["POST"]),
+        Route("/a2a/tasks/{task_id}", a2a_task_get, methods=["GET"]),
+        Route("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, methods=["POST"]),
+        Route("/api/qq/onebot", qq_onebot_webhook, methods=["POST"]),
+        Route("/api/qq/official/status", qq_official_status, methods=["GET"]),
+        Route("/api/settings/qqbot", qqbot_settings_get, methods=["GET"]),
+        Route("/api/settings/qqbot", qqbot_settings_save, methods=["POST"]),
         Route("/api/health", health, methods=["GET"]),
         Route("/api/config", config_status, methods=["GET"]),
         Route("/api/config", save_config, methods=["POST"]),
@@ -1231,8 +1598,9 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         WebSocketRoute("/api/stream/{sid}", stream_events),
     ]
 
-    app = Starlette(routes=routes)
+    app = Starlette(routes=routes, lifespan=lifespan)
     app.state.server = server
+    app.state.a2a_bridge = a2a_bridge
 
     # CORS: allow Tauri (tauri://localhost) and browser access
     from starlette.middleware.cors import CORSMiddleware

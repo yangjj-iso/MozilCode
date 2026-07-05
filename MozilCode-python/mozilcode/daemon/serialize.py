@@ -9,6 +9,7 @@ from typing import Any
 from mozilcode.agent import (
     AskUserRequest,
     CompactNotification,
+    CompactStarted,
     ErrorEvent,
     HookEvent,
     LoopComplete,

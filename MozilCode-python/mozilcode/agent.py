@@ -22,10 +22,12 @@ from mozilcode.context import (
     append_replacement_records,
     apply_tool_result_budget,
     auto_compact,
+    compute_compact_threshold,
     create_replacement_state,
     ensure_session_dir,
     load_replacement_records,
     reconstruct_replacement_state,
+    should_auto_compact,
 )
 from mozilcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
@@ -109,6 +111,7 @@ class LoopComplete:
 class UsageEvent:
     input_tokens: int
     output_tokens: int
+    context_tokens: int = 0
 
 
 @dataclass
@@ -120,9 +123,18 @@ class ErrorEvent:
 class CompactNotification:
     before_tokens: int
     message: str
+    after_tokens: int = 0
     # 结构化 boundary（摘要 + 原文保留尾部），UI/session 层用它持久化 compact_boundary 记录。
     # 失败路径下为 None。
     boundary: "CompactBoundary | None" = None
+
+
+@dataclass
+class CompactStarted:
+    current_tokens: int
+    threshold: int
+    context_window: int
+    message: str = "正在自动压缩上下文"
 
 
 @dataclass
@@ -170,6 +182,7 @@ AgentEvent = (
     | PermissionRequest
     | AskUserRequest
     | CompactNotification
+    | CompactStarted
     | HookEvent
 )
 
@@ -485,6 +498,15 @@ class Agent:
                     conversation.add_system_reminder(note)
 
             # Layer 2: 接近 context window 上限时自动 compact（操作原始对话）
+            current_tokens = conversation.current_tokens()
+            compact_threshold = compute_compact_threshold(self.context_window)
+            compact_started = should_auto_compact(current_tokens, self.context_window)
+            if compact_started:
+                yield CompactStarted(
+                    current_tokens=current_tokens,
+                    threshold=compact_threshold,
+                    context_window=self.context_window,
+                )
             compact_result = await auto_compact(
                 conversation,
                 self.client,
@@ -497,15 +519,32 @@ class Agent:
                 transcript_path=self._transcript_path,
             )
             if isinstance(compact_result, CompactEvent):
-                yield CompactNotification(
-                    before_tokens=compact_result.before_tokens,
-                    message=f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）",
-                    boundary=compact_result.boundary,
-                )
                 conversation.inject_environment(env_context)
                 mem = self.memory_manager.load() if self.memory_manager else ""
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
+                )
+                after_tokens = conversation.current_tokens()
+                yield CompactNotification(
+                    before_tokens=compact_result.before_tokens,
+                    message=(
+                        f"上下文已压缩（{compact_result.before_tokens:,} → "
+                        f"{after_tokens:,} tokens）"
+                    ),
+                    after_tokens=after_tokens,
+                    boundary=compact_result.boundary,
+                )
+                yield UsageEvent(
+                    input_tokens=self.total_input_tokens,
+                    output_tokens=self.total_output_tokens,
+                    context_tokens=after_tokens,
+                )
+            elif compact_result is None and compact_started:
+                after_tokens = conversation.current_tokens()
+                yield CompactNotification(
+                    before_tokens=current_tokens,
+                    message="上下文暂未压缩（近期内容不足以生成有效摘要）",
+                    after_tokens=after_tokens,
                 )
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
@@ -576,9 +615,16 @@ class Agent:
 
             self.total_input_tokens += response.input_tokens
             self.total_output_tokens += response.output_tokens
+            context_tokens = (
+                response.input_tokens
+                + response.output_tokens
+                + response.cache_read
+                + response.cache_creation
+            )
             yield UsageEvent(
                 input_tokens=self.total_input_tokens,
                 output_tokens=self.total_output_tokens,
+                context_tokens=context_tokens,
             )
 
             conv_thinking = [
@@ -1171,19 +1217,32 @@ class Agent:
         )
         if isinstance(result, CompactEvent):
             env_context = build_environment_context(
-            self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
-        )
+                self.work_dir,
+                self.active_skills,
+                self._skill_catalog,
+                self._agent_catalog,
+            )
             conversation.inject_environment(env_context)
             memory_content = self.memory_manager.load() if self.memory_manager else ""
             conversation.inject_long_term_memory(
                 self.instructions_content, memory_content
             )
+            after_tokens = conversation.current_tokens()
             return CompactNotification(
                 before_tokens=result.before_tokens,
-                message=f"上下文已压缩（压缩前 {result.before_tokens:,} tokens）",
+                message=(
+                    f"上下文已压缩（{result.before_tokens:,} → "
+                    f"{after_tokens:,} tokens）"
+                ),
+                after_tokens=after_tokens,
                 boundary=result.boundary,
             )
-        return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
+        current_tokens = conversation.current_tokens()
+        return CompactNotification(
+            before_tokens=current_tokens,
+            message=result or "上下文暂未压缩（对话历史为空或未达到压缩条件）",
+            after_tokens=current_tokens,
+        )
 
     async def run_to_completion(
         self, task: str, conversation: ConversationManager | None = None,

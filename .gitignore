@@ -23,6 +23,8 @@ mewcode-cloud/target/
 .mozilcode/
 .mewcode/
 .workbuddy/
+.tools/
+QQ.exe
 MozilCode-python/.tools/
 MozilCode-python/snake.html
 *.log
