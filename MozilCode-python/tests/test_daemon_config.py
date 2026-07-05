@@ -2,6 +2,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, MemoryConfig, MemoryProviderConfig, ProviderConfig
+from mozilcode.daemon import server as daemon_server
 from mozilcode.daemon.server import _config_from_gui_payload
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import _public_qqbot_status
@@ -177,7 +178,7 @@ def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
                     type="python",
                     module="custom.memory",
                     class_name="VectorMemory",
-                    config={"secret": "not-returned"},
+                    config={"secret": "not-returned", "top_k": 5},
                 )
             ]
         ),
@@ -196,8 +197,64 @@ def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
             "enabled": True,
             "module": "custom.memory",
             "class": "VectorMemory",
+            "config": {"secret": "", "top_k": 5},
+            "secret_fields": ["secret"],
         }
     ]
+
+
+def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon_server, "_USER_CONFIG_FILE", tmp_path / "config.yaml")
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    config = AppConfig(
+        providers=[provider],
+        memory=MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="tencentdb",
+                    type="builtin.tencentdb",
+                    config={
+                        "base_url": "http://127.0.0.1:8420",
+                        "api_key": "old-secret",
+                    },
+                )
+            ]
+        ),
+    )
+    app = create_app(config, str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/settings/memory",
+            json={
+                "enabled": True,
+                "providers": [
+                    {
+                        "name": "tencentdb",
+                        "type": "builtin.tencentdb",
+                        "enabled": True,
+                        "config": {
+                            "base_url": "http://127.0.0.1:8421",
+                            "api_key": "",
+                        },
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["providers"][0]["config"]["api_key"] == ""
+    assert data["providers"][0]["config"]["base_url"] == "http://127.0.0.1:8421"
+    saved = daemon_server.load_config(tmp_path / "config.yaml")
+    saved_provider = saved.memory.providers[0]
+    assert saved_provider.config["api_key"] == "old-secret"
+    assert saved_provider.config["base_url"] == "http://127.0.0.1:8421"
 
 
 @pytest.mark.asyncio

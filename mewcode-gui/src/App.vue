@@ -337,6 +337,10 @@
         <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16v5H4zm0 9h16v5H4zm3-6.5h2v2H7zm0 9h2v2H7z"/></svg>
         MCP 服务器
       </button>
+      <button class="set-item" :class="{ active: setTab === 'memory' }" @click="setSettingsTab('memory')">
+        <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a8 4 0 0 0-8 4v10a8 4 0 0 0 16 0V7a8 4 0 0 0-8-4Zm0 2c3.7 0 6 1.2 6 2s-2.3 2-6 2-6-1.2-6-2 2.3-2 6-2Zm0 6c2.4 0 4.6-.5 6-1.4V12c0 .8-2.3 2-6 2s-6-1.2-6-2V9.6c1.4.9 3.6 1.4 6 1.4Zm0 5c2.4 0 4.6-.5 6-1.4V17c0 .8-2.3 2-6 2s-6-1.2-6-2v-2.4c1.4.9 3.6 1.4 6 1.4Z"/></svg>
+        记忆模块
+      </button>
       <div class="set-group">A2A</div>
       <button class="set-item" :class="{ active: setTab === 'qqbot' }" @click="setSettingsTab('qqbot')">
         <svg class="si" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2h9A3.5 3.5 0 0 1 20 5.5v7A3.5 3.5 0 0 1 16.5 16H10l-4.6 4.1A.85.85 0 0 1 4 19.45V16.1A3.5 3.5 0 0 1 1 12.65V5.5zM7.5 4A1.5 1.5 0 0 0 6 5.5v9.05l3.05-2.7H16.5A1.5 1.5 0 0 0 18 10.35V5.5A1.5 1.5 0 0 0 16.5 4z"/></svg>
@@ -419,6 +423,58 @@
           </div>
         </div>
         <p class="set-note">提示：配置会保存到本地，接入将在新建会话时生效。</p>
+      </div>
+
+      <div v-else-if="setTab === 'memory'" class="set-pane">
+        <h2>记忆模块</h2>
+        <p class="set-desc">同步管理本地 config.yaml 中的 memory providers，保存后空闲会话会重新加载配置。</p>
+        <div class="set-row set-row-wide">
+          <div class="set-row-l">
+            <div class="set-row-title">启用记忆系统</div>
+            <div class="set-row-desc">关闭后不会注入长期记忆，也不会记录新的对话记忆。</div>
+          </div>
+          <label class="switch"><input type="checkbox" v-model="memorySettings.enabled" @change="saveMemorySettings" /><span class="track"></span></label>
+        </div>
+        <div class="set-row-h"><span>Provider</span><button class="set-add" @click="showAddMemory = !showAddMemory">＋ 添加记忆模块</button></div>
+        <div v-if="showAddMemory" class="set-form">
+          <input v-model="newMemory.name" placeholder="名称，如 markdown / tencentdb / vector" />
+          <select class="set-select" v-model="newMemory.type" @change="applyNewMemoryType">
+            <option value="builtin.markdown">内置 Markdown</option>
+            <option value="builtin.tencentdb">TencentDB Agent Memory</option>
+            <option value="python">Python 自研模块</option>
+          </select>
+          <input v-if="newMemory.type === 'python'" v-model="newMemory.module" placeholder="Python module，如 my_memory.provider" />
+          <input v-if="newMemory.type === 'python'" v-model="newMemory.class_name" placeholder="Class，如 VectorMemory" />
+          <textarea class="set-code" v-model="newMemory.configText" rows="7" spellcheck="false" placeholder='JSON 配置，如 {"base_url":"http://127.0.0.1:8420"}'></textarea>
+          <div class="set-form-acts"><button class="set-save" @click="addMemoryProvider">保存</button><button class="set-cancel" @click="showAddMemory = false">取消</button></div>
+        </div>
+        <div v-if="memorySettings.providers.length === 0" class="set-empty">还没有配置记忆模块</div>
+        <div v-for="p in memorySettings.providers" :key="p.name" class="set-row memory-row">
+          <div class="set-row-l">
+            <div class="set-row-title">{{ p.name }} <span class="set-tag">{{ memoryTypeLabel(p.type) }}</span></div>
+            <div class="set-row-desc mono">{{ memoryConfigSummary(p) }}</div>
+            <div v-if="p.secret_fields && p.secret_fields.length" class="set-row-desc">已保存敏感字段：{{ p.secret_fields.join(', ') }}</div>
+          </div>
+          <div class="set-row-r">
+            <button class="set-del" @click="startEditMemory(p)">编辑</button>
+            <button class="set-del" @click="delMemoryProvider(p.name)">删除</button>
+            <label class="switch"><input type="checkbox" :checked="p.enabled" @change="toggleMemoryProvider(p)" /><span class="track"></span></label>
+          </div>
+          <div v-if="editingMemoryName === p.name" class="set-form memory-edit">
+            <input v-model="memoryEdit.name" placeholder="名称" />
+            <select class="set-select" v-model="memoryEdit.type">
+              <option value="builtin.markdown">内置 Markdown</option>
+              <option value="builtin.tencentdb">TencentDB Agent Memory</option>
+              <option value="python">Python 自研模块</option>
+            </select>
+            <input v-if="memoryEdit.type === 'python'" v-model="memoryEdit.module" placeholder="Python module" />
+            <input v-if="memoryEdit.type === 'python'" v-model="memoryEdit.class_name" placeholder="Class" />
+            <textarea class="set-code" v-model="memoryEdit.configText" rows="7" spellcheck="false"></textarea>
+            <div class="set-note">敏感字段留空会保留原值。</div>
+            <div class="set-form-acts"><button class="set-save" @click="saveMemoryEdit(p.name)">保存修改</button><button class="set-cancel" @click="editingMemoryName = ''">取消</button></div>
+          </div>
+        </div>
+        <p class="set-note">内置 Markdown 是默认本地记忆；TencentDB 需要本地 Gateway；Python 自研模块需实现 MozilCode 记忆协议。</p>
       </div>
 
       <div v-else-if="setTab === 'qqbot'" class="set-pane">
@@ -897,6 +953,18 @@ const showAddMcp = ref(false);
 const newMcp = ref({ name: '', command: '', args: '', url: '' });
 const showAddSkill = ref(false);
 const newSkill = ref({ name: '', description: '', body: '' });
+const memorySettings = ref({ enabled: true, providers: [], config_path: '' });
+const showAddMemory = ref(false);
+const newMemory = ref({
+  name: 'tencentdb',
+  type: 'builtin.tencentdb',
+  enabled: true,
+  module: '',
+  class_name: '',
+  configText: JSON.stringify({ base_url: 'http://127.0.0.1:8420' }, null, 2),
+});
+const editingMemoryName = ref('');
+const memoryEdit = ref({ name: '', type: '', enabled: true, module: '', class_name: '', configText: '{}' });
 const qqBotConfig = ref({
   enabled: false,
   app_id: '',
@@ -1558,6 +1626,7 @@ function setSettingsTab(t) {
   if (t === 'model') loadConfig();
   else if (t === 'skills') loadSkills();
   else if (t === 'mcp') loadMcp();
+  else if (t === 'memory') loadMemorySettings();
   else if (t === 'qqbot') loadQqBot();
   else if (t === 'telegrambot') loadTelegramBot();
 }
@@ -1618,6 +1687,169 @@ async function delMcp(name) {
   if (!window.confirm(`删除 MCP 服务器 “${name}”？`)) return;
   try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }); } catch {}
   await loadMcp();
+}
+function defaultMemoryConfig(type) {
+  if (type === 'builtin.tencentdb') return { base_url: 'http://127.0.0.1:8420' };
+  return {};
+}
+function memoryTypeLabel(type) {
+  if (type === 'builtin.markdown') return 'Markdown';
+  if (type === 'builtin.tencentdb') return 'TencentDB';
+  if (type === 'python') return 'Python';
+  return type || 'unknown';
+}
+function normalizeMemoryProvider(p) {
+  return {
+    name: p.name || '',
+    type: p.type || 'builtin.markdown',
+    enabled: p.enabled !== false,
+    module: p.module || '',
+    class_name: p.class_name || p.class || '',
+    config: p.config || {},
+    secret_fields: p.secret_fields || [],
+  };
+}
+function memoryProviderPayload(p) {
+  return {
+    name: p.name,
+    type: p.type,
+    enabled: p.enabled !== false,
+    module: p.module || '',
+    class: p.class_name || p.class || '',
+    config: p.config || {},
+  };
+}
+function parseMemoryConfig(text) {
+  const raw = (text || '').trim();
+  if (!raw) return {};
+  const parsed = JSON.parse(raw);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error('config must be object');
+  return parsed;
+}
+function memoryConfigSummary(p) {
+  const cfg = p.config || {};
+  const text = Object.keys(cfg).length ? JSON.stringify(cfg) : '{}';
+  return text.length > 100 ? text.substring(0, 100) + '...' : text;
+}
+function applyNewMemoryType() {
+  newMemory.value.configText = JSON.stringify(defaultMemoryConfig(newMemory.value.type), null, 2);
+  if (newMemory.value.type === 'builtin.markdown') newMemory.value.name = 'markdown';
+  else if (newMemory.value.type === 'builtin.tencentdb') newMemory.value.name = 'tencentdb';
+  else if (newMemory.value.name === 'markdown' || newMemory.value.name === 'tencentdb') newMemory.value.name = 'custom-memory';
+}
+async function loadMemorySettings() {
+  try {
+    const r = await fetch(`${API}/api/settings/memory`);
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || '记忆配置读取失败', 'err'); return; }
+    memorySettings.value = {
+      enabled: d.enabled !== false,
+      providers: (d.providers || []).map(normalizeMemoryProvider),
+      config_path: d.config_path || '',
+    };
+  } catch (e) {
+    memorySettings.value = { enabled: false, providers: [], config_path: '' };
+    toast('记忆配置读取失败: ' + e.message, 'err');
+  }
+}
+async function saveMemorySettings() {
+  try {
+    const body = {
+      enabled: memorySettings.value.enabled !== false,
+      providers: memorySettings.value.providers.map(memoryProviderPayload),
+    };
+    const r = await fetch(`${API}/api/settings/memory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(d.error || '保存记忆配置失败', 'err'); return false; }
+    memorySettings.value = {
+      enabled: d.enabled !== false,
+      providers: (d.providers || []).map(normalizeMemoryProvider),
+      config_path: d.config_path || '',
+    };
+    toast('记忆配置已同步', 'ok');
+    return true;
+  } catch (e) {
+    toast('保存记忆配置失败: ' + e.message, 'err');
+    return false;
+  }
+}
+async function addMemoryProvider() {
+  const name = (newMemory.value.name || '').trim();
+  if (!name) { toast('请填写名称', 'err'); return; }
+  if (memorySettings.value.providers.some((p) => p.name === name)) { toast('名称已存在', 'err'); return; }
+  let config;
+  try { config = parseMemoryConfig(newMemory.value.configText); }
+  catch { toast('JSON 配置格式错误', 'err'); return; }
+  const previous = memorySettings.value.providers.slice();
+  memorySettings.value.providers.push(normalizeMemoryProvider({
+    name,
+    type: newMemory.value.type,
+    enabled: true,
+    module: newMemory.value.module,
+    class_name: newMemory.value.class_name,
+    config,
+  }));
+  if (await saveMemorySettings()) {
+    showAddMemory.value = false;
+    newMemory.value = {
+      name: 'tencentdb',
+      type: 'builtin.tencentdb',
+      enabled: true,
+      module: '',
+      class_name: '',
+      configText: JSON.stringify({ base_url: 'http://127.0.0.1:8420' }, null, 2),
+    };
+  } else {
+    memorySettings.value.providers = previous;
+  }
+}
+function startEditMemory(p) {
+  editingMemoryName.value = p.name;
+  memoryEdit.value = {
+    name: p.name,
+    type: p.type,
+    enabled: p.enabled !== false,
+    module: p.module || '',
+    class_name: p.class_name || p.class || '',
+    configText: JSON.stringify(p.config || {}, null, 2),
+  };
+}
+async function saveMemoryEdit(originalName) {
+  const name = (memoryEdit.value.name || '').trim();
+  if (!name) { toast('请填写名称', 'err'); return; }
+  if (name !== originalName && memorySettings.value.providers.some((p) => p.name === name)) { toast('名称已存在', 'err'); return; }
+  let config;
+  try { config = parseMemoryConfig(memoryEdit.value.configText); }
+  catch { toast('JSON 配置格式错误', 'err'); return; }
+  const idx = memorySettings.value.providers.findIndex((p) => p.name === originalName);
+  if (idx < 0) return;
+  const previous = memorySettings.value.providers.slice();
+  memorySettings.value.providers[idx] = normalizeMemoryProvider({
+    ...memorySettings.value.providers[idx],
+    name,
+    type: memoryEdit.value.type,
+    enabled: memoryEdit.value.enabled !== false,
+    module: memoryEdit.value.module,
+    class_name: memoryEdit.value.class_name,
+    config,
+  });
+  if (await saveMemorySettings()) editingMemoryName.value = '';
+  else memorySettings.value.providers = previous;
+}
+async function toggleMemoryProvider(p) {
+  const previous = p.enabled;
+  p.enabled = !p.enabled;
+  if (!(await saveMemorySettings())) p.enabled = previous;
+}
+async function delMemoryProvider(name) {
+  if (!window.confirm(`删除记忆模块 “${name}”？`)) return;
+  const previous = memorySettings.value.providers.slice();
+  memorySettings.value.providers = memorySettings.value.providers.filter((p) => p.name !== name);
+  if (!(await saveMemorySettings())) memorySettings.value.providers = previous;
 }
 function applyQqBotPayload(d) {
   qqBotStatus.value = {
@@ -2318,6 +2550,11 @@ onUnmounted(() => {
 .set-form input:focus, .set-form textarea:focus { border-color: var(--accent); }
 .set-select { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 8px 10px; font-size: 13px; outline: none; font-family: var(--sans); }
 .set-select:focus { border-color: var(--accent); }
+.set-code { font-family: var(--mono) !important; font-size: 12px !important; line-height: 1.5; }
+.set-row-wide { align-items: center; }
+.memory-row { flex-wrap: wrap; align-items: flex-start; }
+.memory-row > .set-row-l { flex: 1; }
+.memory-edit { width: 100%; margin-top: 4px; margin-bottom: 0; }
 .set-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .check-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
 .model-form { max-width: 620px; }

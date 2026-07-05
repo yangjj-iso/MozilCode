@@ -33,7 +33,7 @@ from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig, WorktreeConfig
-from mozilcode.validator import ConfigError, validate_config_structure
+from mozilcode.validator import ConfigError, validate_config_structure, validate_memory
 from mozilcode.client import LLMError, create_client, resolve_context_window
 from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
@@ -363,6 +363,19 @@ def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> di
             "stale_cleanup_interval": 3600,
             "stale_cutoff_hours": 24,
         },
+        "memory": _memory_config_to_raw(current.memory) if current is not None else {
+            "enabled": True,
+            "providers": [
+                {
+                    "name": "markdown",
+                    "type": "builtin.markdown",
+                    "enabled": True,
+                    "config": {},
+                    "module": "",
+                    "class": "",
+                }
+            ],
+        },
         "teammate_mode": "",
         "enable_coordinator_mode": bool(body.get("enable_coordinator_mode", False)),
     }
@@ -377,6 +390,180 @@ def _write_user_config(raw: dict) -> AppConfig:
         encoding="utf-8",
     )
     return load_config(_USER_CONFIG_FILE)
+
+
+_MEMORY_SECRET_KEY_PARTS = ("api_key", "apikey", "secret", "token", "password", "authorization")
+
+
+def _is_memory_secret_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(part in lowered for part in _MEMORY_SECRET_KEY_PARTS)
+
+
+def _memory_config_to_raw(memory: Any) -> dict:
+    return {
+        "enabled": bool(getattr(memory, "enabled", True)),
+        "providers": [
+            {
+                "name": provider.name,
+                "type": provider.type,
+                "enabled": provider.enabled,
+                "config": dict(provider.config or {}),
+                "module": provider.module,
+                "class": provider.class_name,
+            }
+            for provider in getattr(memory, "providers", [])
+        ],
+    }
+
+
+def _app_config_to_raw(config: AppConfig) -> dict:
+    return {
+        "providers": [
+            {
+                "name": provider.name,
+                "protocol": provider.protocol,
+                "base_url": provider.base_url,
+                "model": provider.model,
+                "api_key": provider.api_key,
+                "thinking": provider.thinking,
+                "context_window": provider.context_window,
+                "max_output_tokens": provider.max_output_tokens,
+            }
+            for provider in config.providers
+        ],
+        "permission_mode": config.permission_mode,
+        "mcp_servers": [
+            {
+                "name": server.name,
+                "command": server.command,
+                "args": server.args,
+                "url": server.url,
+                "headers": server.headers,
+                "env": server.env,
+            }
+            for server in config.mcp_servers
+        ],
+        "hooks": list(config.raw_hooks),
+        "memory": _memory_config_to_raw(config.memory),
+        "enable_fork": config.enable_fork,
+        "enable_verification_agent": config.enable_verification_agent,
+        "worktree": {
+            "symlink_directories": config.worktree.symlink_directories,
+            "stale_cleanup_interval": config.worktree.stale_cleanup_interval,
+            "stale_cutoff_hours": config.worktree.stale_cutoff_hours,
+        },
+        "teammate_mode": config.teammate_mode,
+        "enable_coordinator_mode": config.enable_coordinator_mode,
+    }
+
+
+def _sanitize_memory_config(value: Any) -> Any:
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            out[key] = "" if _is_memory_secret_key(str(key)) else _sanitize_memory_config(item)
+        return out
+    if isinstance(value, list):
+        return [_sanitize_memory_config(item) for item in value]
+    return value
+
+
+def _memory_secret_fields(value: Any, prefix: str = "") -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    fields: list[str] = []
+    for key, item in value.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if _is_memory_secret_key(str(key)):
+            fields.append(path)
+        elif isinstance(item, dict):
+            fields.extend(_memory_secret_fields(item, path))
+    return fields
+
+
+def _merge_memory_secrets(new_config: dict, current_config: dict) -> dict:
+    merged = dict(new_config)
+    for key, value in list(merged.items()):
+        current_value = current_config.get(key) if isinstance(current_config, dict) else None
+        if _is_memory_secret_key(str(key)):
+            if value is None or str(value).strip() in {"", "********"}:
+                if current_value not in (None, ""):
+                    merged[key] = current_value
+        elif isinstance(value, dict) and isinstance(current_value, dict):
+            merged[key] = _merge_memory_secrets(value, current_value)
+    return merged
+
+
+def _public_memory_settings(config: AppConfig | None, error: str = "") -> dict:
+    cfg = config.memory if config is not None else None
+    if cfg is None:
+        return {
+            "enabled": False,
+            "providers": [],
+            "config_path": str(_USER_CONFIG_FILE),
+            "error": error,
+        }
+    return {
+        "enabled": cfg.enabled,
+        "providers": [
+            {
+                "name": provider.name,
+                "type": provider.type,
+                "enabled": provider.enabled,
+                "module": provider.module,
+                "class": provider.class_name,
+                "config": _sanitize_memory_config(provider.config or {}),
+                "secret_fields": _memory_secret_fields(provider.config or {}),
+            }
+            for provider in cfg.providers
+        ],
+        "config_path": str(_USER_CONFIG_FILE),
+        "error": error,
+    }
+
+
+def _memory_settings_from_payload(body: dict, current: AppConfig) -> dict:
+    if not isinstance(body, dict):
+        raise ConfigError("'memory' payload must be a mapping")
+    raw_providers = body.get("providers")
+    if raw_providers is None:
+        raw_providers = _memory_config_to_raw(current.memory)["providers"]
+    if not isinstance(raw_providers, list):
+        raise ConfigError("'memory.providers' must be a list")
+
+    current_by_name = {
+        provider.name: provider.config or {}
+        for provider in current.memory.providers
+    }
+    providers: list[dict] = []
+    for entry in raw_providers:
+        if not isinstance(entry, dict):
+            raise ConfigError("Memory provider entries must be mappings")
+        name = str(entry.get("name") or "").strip()
+        config_value = entry.get("config", {})
+        if isinstance(config_value, str):
+            try:
+                config_value = json.loads(config_value or "{}")
+            except json.JSONDecodeError as e:
+                raise ConfigError(f"Memory provider '{name}': config must be JSON") from e
+        if not isinstance(config_value, dict):
+            raise ConfigError(f"Memory provider '{name}': 'config' must be a mapping")
+        providers.append(
+            {
+                "name": name,
+                "type": str(entry.get("type") or "").strip(),
+                "enabled": _coerce_bool(entry.get("enabled"), True),
+                "config": _merge_memory_secrets(config_value, current_by_name.get(name, {})),
+                "module": str(entry.get("module") or "").strip(),
+                "class": str(entry.get("class") or entry.get("class_name") or "").strip(),
+            }
+        )
+
+    return validate_memory({
+        "enabled": _coerce_bool(body.get("enabled"), current.memory.enabled),
+        "providers": providers,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -1419,22 +1606,29 @@ async def mcp_toggle(request: Request) -> JSONResponse:
 
 async def memory_settings_get(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
-    cfg = server.config.memory if server.config is not None else None
-    if cfg is None:
-        return JSONResponse({"enabled": False, "providers": []})
-    return JSONResponse({
-        "enabled": cfg.enabled,
-        "providers": [
-            {
-                "name": p.name,
-                "type": p.type,
-                "enabled": p.enabled,
-                "module": p.module,
-                "class": p.class_name,
-            }
-            for p in cfg.providers
-        ],
-    })
+    return JSONResponse(_public_memory_settings(server.config))
+
+
+async def memory_settings_save(request: Request) -> JSONResponse:
+    server: DaemonServer = request.app.state.server
+    if server.config is None:
+        return JSONResponse(
+            _public_memory_settings(server.config, "model provider is not configured"),
+            status_code=400,
+        )
+    try:
+        body = await request.json()
+        raw = _app_config_to_raw(server.config)
+        raw["memory"] = _memory_settings_from_payload(body or {}, server.config)
+        validate_config_structure(raw)
+        server.config = _write_user_config(raw)
+        await server.invalidate_idle_agents()
+    except (ConfigError, ValueError, TypeError) as e:
+        return JSONResponse(_public_memory_settings(server.config, str(e)), status_code=400)
+    except Exception as e:
+        log.exception("Failed to save memory settings")
+        return JSONResponse(_public_memory_settings(server.config, str(e)), status_code=500)
+    return JSONResponse({"ok": True, **_public_memory_settings(server.config)})
 
 
 async def skills_list(request: Request) -> JSONResponse:
@@ -1724,6 +1918,7 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         Route("/api/settings/mcp/{name}/toggle", mcp_toggle, methods=["POST"]),
         Route("/api/settings/mcp/{name}", mcp_delete, methods=["DELETE"]),
         Route("/api/settings/memory", memory_settings_get, methods=["GET"]),
+        Route("/api/settings/memory", memory_settings_save, methods=["POST"]),
         Route("/api/skills", skills_list, methods=["GET"]),
         Route("/api/skills", skill_create, methods=["POST"]),
         Route("/api/skills/{name}/toggle", skill_toggle, methods=["POST"]),
