@@ -4,7 +4,13 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from mozilcode.skills.parser import SkillDef, SkillParseError, parse_frontmatter, parse_skill_file
+from mozilcode.skills.parser import (
+    SkillDef,
+    SkillParseError,
+    build_skill_def,
+    parse_frontmatter,
+    parse_skill_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -75,21 +81,15 @@ class SkillLoader:
             try:
                 raw = skill_md.read_text(encoding="utf-8")
                 meta, body = parse_frontmatter(raw)
-                from mozilcode.skills.parser import _validate_meta
-                _validate_meta(meta, f"builtin:{resource.name}")
                 source = None
                 try:
                     source = Path(str(skill_md))
                 except Exception:
                     pass
-                skill = SkillDef(
-                    name=meta["name"],
-                    description=meta["description"],
-                    prompt_body=body,
-                    allowed_tools=meta.get("allowedTools", []),
-                    mode=meta.get("mode", "inline"),
-                    model=meta.get("model"),
-                    context=meta.get("context", "full"),
+                skill = build_skill_def(
+                    meta,
+                    body,
+                    source=f"builtin:{resource.name}",
                     source_path=source,
                     is_directory=True,
                 )
@@ -109,6 +109,7 @@ class SkillLoader:
             try:
                 fresh = parse_skill_file(skill.source_path)
                 fresh.is_directory = skill.is_directory
+                fresh.source_path = skill.source_path
                 self._skills[name] = fresh
                 self._cache[name] = fresh
                 return fresh

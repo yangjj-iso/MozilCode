@@ -79,15 +79,15 @@ def _validate_meta(meta: dict, source: str = "") -> None:
         raise SkillParseError(f"Invalid context '{context}'{ctx}: must be one of {VALID_CONTEXTS}")
 
 
-def parse_skill_file(path: Path) -> SkillDef:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise SkillParseError(f"Cannot read skill file {path}: {e}") from e
-
-    meta, body = parse_frontmatter(raw)
-    _validate_meta(meta, str(path))
-
+def build_skill_def(
+    meta: dict,
+    body: str,
+    *,
+    source: str = "",
+    source_path: Path | None = None,
+    is_directory: bool = False,
+) -> SkillDef:
+    _validate_meta(meta, source)
     return SkillDef(
         name=meta["name"],
         description=meta["description"],
@@ -96,8 +96,23 @@ def parse_skill_file(path: Path) -> SkillDef:
         mode=meta.get("mode", "inline"),
         model=meta.get("model"),
         context=meta.get("context", "full"),
+        source_path=source_path,
+        is_directory=is_directory,
+    )
+
+
+def parse_skill_file(path: Path) -> SkillDef:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise SkillParseError(f"Cannot read skill file {path}: {e}") from e
+
+    meta, body = parse_frontmatter(raw)
+    return build_skill_def(
+        meta,
+        body,
+        source=str(path),
         source_path=path,
-        is_directory=False,
     )
 
 

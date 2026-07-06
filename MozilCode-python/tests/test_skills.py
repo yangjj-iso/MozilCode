@@ -11,6 +11,7 @@ import pytest
 from mozilcode.skills.parser import (
     SkillDef,
     SkillParseError,
+    build_skill_def,
     parse_frontmatter,
     parse_skill_file,
     substitute_arguments,
@@ -151,6 +152,25 @@ class TestParseSkillFile:
         assert skill.mode == "fork"
         assert skill.context == "none"
 
+    def test_build_skill_def_sets_source_fields(self, tmp_path: Path) -> None:
+        path = tmp_path / "skill" / "SKILL.md"
+        skill = build_skill_def(
+            {
+                "name": "custom",
+                "description": "Custom skill",
+                "allowedTools": ["ReadFile"],
+            },
+            "Body",
+            source="custom-source",
+            source_path=path,
+            is_directory=True,
+        )
+
+        assert skill.name == "custom"
+        assert skill.allowed_tools == ["ReadFile"]
+        assert skill.source_path == path
+        assert skill.is_directory is True
+
 class TestSubstituteArguments:
     def test_with_args(self) -> None:
         result = substitute_arguments("Do $ARGUMENTS now", "something cool")
@@ -245,6 +265,7 @@ class TestSkillLoader:
         skill = loader.get("custom")
         assert skill.description == "v2"
         assert "v2" in skill.prompt_body
+        assert skill.source_path == f
 
     def test_hot_reload_fallback_on_error(self, tmp_path: Path) -> None:
         skills_dir = tmp_path / ".mozilcode" / "skills"
