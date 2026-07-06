@@ -33,6 +33,28 @@ def test_recovery_attachment_emits_all_sections():
     assert "- Bash" in out
     assert "提示" in out  # 结尾提示部分的标题
 
+def test_recovery_attachment_reads_chat_completion_tool_schema():
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": "ReadFile",
+                "description": "Read a file.\nSecond line is not shown.",
+                "parameters": {},
+            },
+        },
+    ]
+
+    out = build_recovery_attachment(None, schemas)
+
+    assert "- ReadFile — Read a file." in out
+    assert "Second line" not in out
+
+def test_recovery_attachment_skips_invalid_tool_schemas():
+    out = build_recovery_attachment(None, [{"type": "function"}, object()])
+
+    assert out == ""
+
 def test_recovery_file_limit_and_order():
     state = RecoveryState()
     # 记录 7 个时间分散的文件；只有最新的 5 个应当出现。

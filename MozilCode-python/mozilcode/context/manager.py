@@ -541,6 +541,23 @@ def _first_line(s: str) -> str:
     return ""
 
 
+def _tool_schema_summary(schema: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Return a provider-agnostic ``(name, description)`` for a tool schema."""
+    name = schema.get("name")
+    desc = schema.get("description", "")
+
+    nested = schema.get("function")
+    if not name and isinstance(nested, Mapping):
+        name = nested.get("name")
+        desc = nested.get("description", desc)
+
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if not isinstance(desc, str):
+        desc = ""
+    return name.strip(), _first_line(desc)
+
+
 def build_recovery_attachment(
     state: RecoveryState | None,
     tool_schemas: list[Mapping[str, Any]] | None,
@@ -591,17 +608,21 @@ def build_recovery_attachment(
     if tool_schemas:
         buf = ["## 可用工具\n",
                "你仍然可以调用以下工具，需要时直接发起调用即可：\n"]
+        emitted = False
         for t in tool_schemas:
-            name = t.get("name") if isinstance(t, Mapping) else None
-            if not name:
+            if not isinstance(t, Mapping):
                 continue
-            desc = t.get("description", "") if isinstance(t, Mapping) else ""
-            desc = _first_line(desc or "")
+            summary = _tool_schema_summary(t)
+            if summary is None:
+                continue
+            name, desc = summary
             if desc:
                 buf.append(f"- {name} — {desc}\n")
             else:
                 buf.append(f"- {name}\n")
-        sections.append("".join(buf))
+            emitted = True
+        if emitted:
+            sections.append("".join(buf))
 
     if not sections:
         return ""
