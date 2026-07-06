@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-import httpx
 
 from mozilcode.config import ConfigError, MemoryConfig, MemoryProviderConfig, load_config
 from mozilcode.conversation import (
@@ -35,14 +33,11 @@ from mozilcode.memory.session import (
     validate_message_chain,
 )
 from mozilcode.memory.providers import (
-    MEMORY_EVENT_TURN_COMPLETED,
     BaseMemoryProvider,
     MemoryEvent,
     MemoryHub,
     MemoryItem,
     MemoryScope,
-    TencentDBGatewayClient,
-    TencentDBMemoryProvider,
     build_memory_hub,
 )
 from mozilcode.validator import validate_memory
@@ -871,151 +866,18 @@ class TestMemoryProviders:
         assert "## loaded" in context
         assert "loaded:" in context
 
-    @pytest.mark.asyncio
-    async def test_tencentdb_gateway_client_uses_expected_endpoints_and_auth(self) -> None:
-        seen: list[tuple[str, str, dict, str]] = []
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            body = json.loads(request.content.decode("utf-8") or "{}") if request.content else {}
-            seen.append((
-                request.method,
-                request.url.path,
-                body,
-                request.headers.get("authorization", ""),
-            ))
-            if request.url.path == "/health":
-                return httpx.Response(200, json={"status": "ok"})
-            if request.url.path == "/recall":
-                return httpx.Response(200, json={"context": "remembered"})
-            if request.url.path == "/capture":
-                return httpx.Response(200, json={"l0_recorded": 1, "scheduler_notified": True})
-            if request.url.path == "/search/memories":
-                return httpx.Response(200, json={"results": "hit", "total": 1, "strategy": "hybrid"})
-            if request.url.path == "/session/end":
-                return httpx.Response(200, json={"flushed": True})
-            return httpx.Response(404, json={"error": "missing"})
-
-        client = TencentDBGatewayClient(
-            "http://tdai.local",
-            api_key="secret",
-            transport=httpx.MockTransport(handler),
-        )
-
-        assert await client.health() == {"status": "ok"}
-        assert (await client.recall("q", "s"))["context"] == "remembered"
-        assert (await client.capture("u", "a", "s"))["l0_recorded"] == 1
-        assert (await client.search_memories("q"))["results"] == "hit"
-        assert (await client.end_session("s"))["flushed"] is True
-
-        assert [item[1] for item in seen] == [
-            "/health",
-            "/recall",
-            "/capture",
-            "/search/memories",
-            "/session/end",
-        ]
-        assert all(auth == "Bearer secret" for *_rest, auth in seen)
-        assert seen[1][2] == {"query": "q", "session_key": "s"}
-
-    @pytest.mark.asyncio
-    async def test_tencentdb_provider_recalls_captures_and_searches(self, tmp_path: Path) -> None:
-        calls: list[tuple[str, dict]] = []
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            body = json.loads(request.content.decode("utf-8") or "{}") if request.content else {}
-            calls.append((request.url.path, body))
-            if request.url.path == "/health":
-                return httpx.Response(200, json={"status": "ok"})
-            if request.url.path == "/recall":
-                return httpx.Response(200, json={"context": "ctx"})
-            if request.url.path == "/capture":
-                return httpx.Response(200, json={"l0_recorded": 1, "scheduler_notified": True})
-            if request.url.path == "/search/memories":
-                return httpx.Response(200, json={"results": "memory hit", "total": 1, "strategy": "hybrid"})
-            if request.url.path == "/session/end":
-                return httpx.Response(200, json={"flushed": True})
-            return httpx.Response(404, json={})
-
-        client = TencentDBGatewayClient(
-            "http://tdai.local",
-            transport=httpx.MockTransport(handler),
-        )
-        provider = TencentDBMemoryProvider(str(tmp_path), {"session_prefix": "mc"}, client=client)
-
-        await provider.initialize()
-        context = await provider.load_context(
-            "find prefs",
-            MemoryScope(session_id="s1", project_root=str(tmp_path)),
-        )
-
-        conv = ConversationManager()
-        conv.add_user_message("user asks")
-        conv.add_assistant_message("assistant answers")
-        await provider.observe(
-            MemoryEvent(type=MEMORY_EVENT_TURN_COMPLETED, conversation=conv, session_id="s1")
-        )
-        items = await provider.search("prefs")
-        await provider.shutdown()
-
-        assert context == "ctx"
-        assert [item.content for item in items] == ["memory hit"]
-        assert ("/recall", {"query": "find prefs", "session_key": "mc:s1"}) in calls
-        assert (
-            "/capture",
-            {
-                "user_content": "user asks",
-                "assistant_content": "assistant answers",
-                "session_key": "mc:s1",
-                "session_id": "s1",
-            },
-        ) in calls
-        assert ("/session/end", {"session_key": "mc:s1"}) in calls
-
-    @pytest.mark.asyncio
-    async def test_tencentdb_provider_ignores_no_match_search_response(self, tmp_path: Path) -> None:
-        async def handler(request: httpx.Request) -> httpx.Response:
-            if request.url.path == "/health":
-                return httpx.Response(200, json={"status": "ok"})
-            if request.url.path == "/search/memories":
-                return httpx.Response(
-                    200,
-                    json={
-                        "results": "No matching memories found.",
-                        "total": 0,
-                        "strategy": "fts",
-                    },
-                )
-            return httpx.Response(404, json={})
-
-        client = TencentDBGatewayClient(
-            "http://tdai.local",
-            transport=httpx.MockTransport(handler),
-        )
-        provider = TencentDBMemoryProvider(str(tmp_path), client=client)
-
-        await provider.initialize()
-
-        assert await provider.search("missing") == []
-
-    @pytest.mark.asyncio
-    async def test_builtin_tencentdb_provider_can_be_loaded_from_config(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unknown_builtin_remote_provider_is_rejected(self, tmp_path: Path) -> None:
         cfg = MemoryConfig(
             providers=[
                 MemoryProviderConfig(
-                    name="tdai",
-                    type="builtin.tencentdb",
-                    config={"base_url": "http://127.0.0.1:8420", "capture": False},
+                    name="remote",
+                    type="builtin.remote",
                 )
             ]
         )
 
-        hub = build_memory_hub(cfg, str(tmp_path))
-
-        assert hub is not None
-        assert hub.providers[0].name == "tdai"
-        assert isinstance(hub.providers[0], TencentDBMemoryProvider)
+        with pytest.raises(Exception, match="Unsupported memory provider type"):
+            build_memory_hub(cfg, str(tmp_path))
 
     def test_validate_memory_defaults_and_python_provider(self) -> None:
         defaults = validate_memory(None)

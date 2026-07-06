@@ -19,7 +19,6 @@ import json
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -46,11 +45,6 @@ from mozilcode.daemon.config_settings import (
     public_config as _public_config,
     write_user_config as _write_user_config,
 )
-from mozilcode.daemon.bot_runtime import (
-    init_bot_state as _init_bot_state,
-    start_configured_bots as _start_configured_bots,
-    stop_configured_bots as _stop_configured_bots,
-)
 from mozilcode.daemon.workspace_payloads import (
     WorkspacePathError,
     list_workspace_directory as _list_workspace_directory,
@@ -63,12 +57,6 @@ from mozilcode.daemon.a2a_routes import (
     a2a_rpc,
     a2a_task_cancel,
     a2a_task_get,
-    qq_official_status,
-    qqbot_settings_get,
-    qqbot_settings_save,
-    telegrambot_settings_get,
-    telegrambot_settings_save,
-    telegrambot_status_get,
 )
 from mozilcode.daemon.management_routes import (
     mcp_add,
@@ -826,15 +814,6 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
     server = DaemonServer(config, work_dir, hook_engine)
     a2a_bridge = A2ABridge(server)
 
-    @asynccontextmanager
-    async def lifespan(app: Starlette):
-        _init_bot_state(app)
-        await _start_configured_bots(app, a2a_bridge)
-        try:
-            yield
-        finally:
-            await _stop_configured_bots(app)
-
     routes = [
         Route("/.well-known/agent-card.json", a2a_agent_card, methods=["GET"]),
         Route("/a2a/agent-card.json", a2a_agent_card, methods=["GET"]),
@@ -842,12 +821,6 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         Route("/a2a/message:send", a2a_message_send, methods=["POST"]),
         Route("/a2a/tasks/{task_id}", a2a_task_get, methods=["GET"]),
         Route("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, methods=["POST"]),
-        Route("/api/qq/official/status", qq_official_status, methods=["GET"]),
-        Route("/api/telegram/status", telegrambot_status_get, methods=["GET"]),
-        Route("/api/settings/qqbot", qqbot_settings_get, methods=["GET"]),
-        Route("/api/settings/qqbot", qqbot_settings_save, methods=["POST"]),
-        Route("/api/settings/telegrambot", telegrambot_settings_get, methods=["GET"]),
-        Route("/api/settings/telegrambot", telegrambot_settings_save, methods=["POST"]),
         Route("/api/health", health, methods=["GET"]),
         Route("/api/config", config_status, methods=["GET"]),
         Route("/api/config", save_config, methods=["POST"]),
@@ -882,7 +855,7 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         WebSocketRoute("/api/stream/{sid}", stream_events),
     ]
 
-    app = Starlette(routes=routes, lifespan=lifespan)
+    app = Starlette(routes=routes)
     app.state.server = server
     app.state.a2a_bridge = a2a_bridge
 

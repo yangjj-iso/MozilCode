@@ -40,7 +40,6 @@ memory:
 - `mozilcode/memory/providers/base.py`：定义 `MemoryProvider` 协议、`MemoryScope`、`MemoryEvent`、`MemoryItem`。
 - `mozilcode/memory/providers/hub.py`：聚合多个 provider，并隔离单个 provider 的异常和超时。
 - `mozilcode/memory/providers/markdown.py`：内置 Markdown provider，兼容原来的 `MemoryManager`。
-- `mozilcode/memory/providers/tencentdb.py`：内置 TencentDB Agent Memory Gateway provider，它只是标准 provider 的一个实现。
 - `mozilcode/memory/providers/loader.py`：从配置创建 `MemoryHub`，支持声明式内置 provider registry 和 Python provider。
 
 默认配置等价于：
@@ -102,53 +101,3 @@ class VectorMemoryProvider(BaseMemoryProvider):
     async def search(self, query: str, limit: int = 5) -> list[MemoryItem]:
         return []
 ```
-
-## TencentDB Agent Memory
-
-TencentDB Agent Memory 是 Node.js/OpenClaw/Hermes 侧的记忆系统。MozilCode 里的 `TencentDBMemoryProvider` 是一个标准 `MemoryProvider` 实现；它不改 Agent 主循环，也不把 Node 包作为 Python 核心依赖，而是通过 TencentDB Agent Memory 的本地 HTTP Gateway 接入：
-
-- `GET /health`
-- `POST /recall`
-- `POST /capture`
-- `POST /search/memories`
-- `POST /session/end`
-
-先按官方方式启动 Gateway，默认监听 `http://127.0.0.1:8420`。然后在 MozilCode 配置里启用：
-
-```yaml
-memory:
-  enabled: true
-  providers:
-    - name: markdown
-      type: builtin.markdown
-      enabled: true
-
-    - name: tencentdb
-      type: builtin.tencentdb
-      enabled: true
-      config:
-        base_url: http://127.0.0.1:8420
-        # 如果 Gateway 设置了 TDAI_GATEWAY_API_KEY，这里填写同一份值。
-        api_key: ""
-        session_prefix: mozilcode
-        capture: true
-        recall: true
-```
-
-如果你希望 MozilCode 自动拉起 Gateway，可以配置：
-
-```yaml
-memory:
-  enabled: true
-  providers:
-    - name: tencentdb
-      type: builtin.tencentdb
-      config:
-        gateway_cmd: "node --import tsx C:/path/to/tdai-memory-openclaw-plugin/src/gateway/server.ts"
-        gateway_cwd: "C:/path/to/tdai-memory-openclaw-plugin"
-        auto_start: true
-```
-
-Gateway 的 LLM、Embedding、SQLite/TCVDB 后端仍由 TencentDB Agent Memory 自己的配置管理，例如 `TDAI_LLM_*`、`TDAI_DATA_DIR` 或 `tdai-gateway.json`。MozilCode provider 只负责把对话轮次和召回请求转发过去。
-
-这样核心协议稳定，默认 Markdown 记忆继续工作，TencentDB Agent Memory、向量库、数据库或云端记忆都可以作为可替换模块存在。

@@ -11,12 +11,6 @@ from mozilcode.config import (
 from mozilcode.daemon import config_settings
 from mozilcode.daemon.config_settings import config_from_settings_payload
 from mozilcode.daemon.settings import normalize_daemon_settings
-from mozilcode.daemon.settings import public_qqbot_status
-from mozilcode.daemon.settings import public_telegrambot_status
-from mozilcode.daemon.settings import qqbot_settings_from_payload
-from mozilcode.daemon.settings import resolve_qqbot_config
-from mozilcode.daemon.settings import resolve_telegrambot_config
-from mozilcode.daemon.settings import telegrambot_settings_from_payload
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.permissions.modes import PermissionMode
@@ -55,12 +49,12 @@ class _FakeDeps:
 def test_normalize_daemon_settings_returns_independent_defaults():
     first = normalize_daemon_settings({})
     first["mcp_servers"].append({"name": "local"})
-    first["qqbot"]["enabled"] = True
+    first["disabled_skills"].append("review")
 
     second = normalize_daemon_settings({})
 
     assert second["mcp_servers"] == []
-    assert second["qqbot"] == {}
+    assert second["disabled_skills"] == []
 
 
 def test_settings_config_normalizes_local_openai_base_url_to_v1():
@@ -188,90 +182,6 @@ def test_settings_config_rejects_duplicate_provider_names():
         })
 
 
-def test_qqbot_public_status_uses_env_fallback_and_masks_secret(monkeypatch):
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1234567890")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
-    monkeypatch.setenv("MOZILCODE_QQ_COMMAND_PREFIX", "/mew")
-
-    status = public_qqbot_status(settings={"qqbot": {}})
-
-    assert status["enabled"] is True
-    assert status["configured"] is True
-    assert status["app_id"] == "1234567890"
-    assert status["app_secret_set"] is True
-    assert "app_secret" not in status
-
-
-def test_qqbot_saved_disabled_overrides_env_enabled(monkeypatch):
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1234567890")
-    monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
-
-    enabled, cfg, _settings = resolve_qqbot_config({"qqbot": {"enabled": False}})
-
-    assert enabled is False
-    assert cfg.is_configured() is True
-
-
-def test_qqbot_payload_preserves_existing_secret_when_blank():
-    settings = qqbot_settings_from_payload(
-        {
-            "enabled": True,
-            "app_id": "1234567890",
-            "app_secret": "",
-            "command_prefix": "/mc",
-            "allowed_users": "u2, u1",
-            "allowed_groups": "g1\ng2",
-        },
-        {"app_secret": "old-secret"},
-    )
-
-    assert settings["app_secret"] == "old-secret"
-    assert settings["allowed_users"] == "u1\nu2"
-    assert settings["allowed_groups"] == "g1\ng2"
-
-
-def test_telegrambot_public_status_uses_env_fallback_and_masks_token(monkeypatch):
-    monkeypatch.setenv("MOZILCODE_TELEGRAM_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("MOZILCODE_TELEGRAM_COMMAND_PREFIX", "/mew")
-
-    status = public_telegrambot_status(settings={"telegrambot": {}})
-
-    assert status["enabled"] is True
-    assert status["configured"] is True
-    assert status["bot_token_set"] is True
-    assert "bot_token" not in status
-
-
-def test_telegrambot_saved_disabled_overrides_env_enabled(monkeypatch):
-    monkeypatch.setenv("MOZILCODE_TELEGRAM_ENABLED", "true")
-    monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
-
-    enabled, cfg, _settings = resolve_telegrambot_config({"telegrambot": {"enabled": False}})
-
-    assert enabled is False
-    assert cfg.is_configured() is True
-
-
-def test_telegrambot_payload_preserves_existing_token_when_blank():
-    settings = telegrambot_settings_from_payload(
-        {
-            "enabled": True,
-            "bot_token": "",
-            "command_prefix": "/mc",
-            "allowed_users": "42, 7",
-            "allowed_chats": "-100\n-200",
-        },
-        {"bot_token": "old-token"},
-    )
-
-    assert settings["bot_token"] == "old-token"
-    assert settings["allowed_users"] == "42\n7"
-    assert settings["allowed_chats"] == "-100\n-200"
-
-
 def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
     provider = ProviderConfig(
         name="openai",
@@ -346,7 +256,7 @@ def test_a2a_agent_card_route_is_available(tmp_path):
     assert data["metadata"]["model"] == "gpt-local"
 
 
-def test_bot_status_routes_are_available(tmp_path):
+def test_cloud_bot_settings_routes_are_removed(tmp_path):
     provider = ProviderConfig(
         name="openai",
         protocol="openai",
@@ -358,11 +268,13 @@ def test_bot_status_routes_are_available(tmp_path):
     with TestClient(app) as client:
         qq = client.get("/api/settings/qqbot")
         telegram = client.get("/api/settings/telegrambot")
+        qq_status = client.get("/api/qq/official/status")
+        telegram_status = client.get("/api/telegram/status")
 
-    assert qq.status_code == 200
-    assert qq.json()["provider"] == "official"
-    assert telegram.status_code == 200
-    assert telegram.json()["provider"] == "telegram-official"
+    assert qq.status_code == 404
+    assert telegram.status_code == 404
+    assert qq_status.status_code == 404
+    assert telegram_status.status_code == 404
 
 
 def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monkeypatch):
@@ -378,11 +290,13 @@ def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monk
         memory=MemoryConfig(
             providers=[
                 MemoryProviderConfig(
-                    name="tencentdb",
-                    type="builtin.tencentdb",
+                    name="vector",
+                    type="python",
+                    module="my_memory.provider",
+                    class_name="VectorMemoryProvider",
                     config={
-                        "base_url": "http://127.0.0.1:8420",
                         "api_key": "old-secret",
+                        "top_k": 5,
                     },
                 )
             ]
@@ -397,12 +311,14 @@ def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monk
                 "enabled": True,
                 "providers": [
                     {
-                        "name": "tencentdb",
-                        "type": "builtin.tencentdb",
+                        "name": "vector",
+                        "type": "python",
+                        "module": "my_memory.provider",
+                        "class": "VectorMemoryProvider",
                         "enabled": True,
                         "config": {
-                            "base_url": "http://127.0.0.1:8421",
                             "api_key": "",
+                            "top_k": 8,
                         },
                     }
                 ],
@@ -412,11 +328,11 @@ def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monk
     assert response.status_code == 200
     data = response.json()
     assert data["providers"][0]["config"]["api_key"] == ""
-    assert data["providers"][0]["config"]["base_url"] == "http://127.0.0.1:8421"
+    assert data["providers"][0]["config"]["top_k"] == 8
     saved = load_config(tmp_path / "config.yaml")
     saved_provider = saved.memory.providers[0]
     assert saved_provider.config["api_key"] == "old-secret"
-    assert saved_provider.config["base_url"] == "http://127.0.0.1:8421"
+    assert saved_provider.config["top_k"] == 8
 
 
 def test_create_session_rejects_malformed_json(tmp_path):

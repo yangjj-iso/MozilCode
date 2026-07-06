@@ -18,9 +18,6 @@ from mozilcode.memory.providers import (
     MemoryProviderLoadError,
     MemoryScope,
     MarkdownMemoryProvider,
-    TencentDBGatewayClient,
-    TencentDBGatewayError,
-    TencentDBMemoryProvider,
     build_memory_hub,
 )
 from mozilcode.memory.session import (
@@ -49,9 +46,6 @@ __all__ = [
     "MemoryProviderLoadError",
     "MemoryScope",
     "MarkdownMemoryProvider",
-    "TencentDBGatewayClient",
-    "TencentDBGatewayError",
-    "TencentDBMemoryProvider",
     "RelevantMemory",
     "build_memory_hub",
     "ResumeResult",

@@ -15,8 +15,6 @@ class MemoryProviderLoadError(Exception):
 
 BUILTIN_MEMORY_PROVIDERS = {
     "builtin.markdown": "mozilcode.memory.providers.markdown:MarkdownMemoryProvider",
-    "builtin.tencentdb": "mozilcode.memory.providers.tencentdb:TencentDBMemoryProvider",
-    "builtin.tencentdb-agent-memory": "mozilcode.memory.providers.tencentdb:TencentDBMemoryProvider",
 }
 
 

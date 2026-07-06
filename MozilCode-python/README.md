@@ -24,34 +24,20 @@ uv run mozilcode-daemon
 
 The daemon listens on `127.0.0.1:7800` by default.
 
-## A2A and official bots
+## A2A
 
-The daemon also exposes a non-streaming A2A bridge:
+The daemon exposes a non-streaming local A2A bridge:
 
 - Agent card: `GET http://127.0.0.1:7800/.well-known/agent-card.json`
 - JSON-RPC: `POST http://127.0.0.1:7800/a2a/rpc`
 
-Official bot integrations can be configured through environment variables or the local daemon settings APIs. Secrets are stored locally in `~/.mozilcode/daemon_settings.json` and are not returned by status APIs.
-
-Official QQ Bot Gateway:
-
-- Status: `GET http://127.0.0.1:7800/api/settings/qqbot`
-- Environment fallback: `MOZILCODE_QQ_OFFICIAL_ENABLED=1`, `MOZILCODE_QQ_OFFICIAL_APP_ID`, `MOZILCODE_QQ_OFFICIAL_APP_SECRET`
-- Windows helper: `scripts/start-qq-official-bot.ps1`
-
-Official Telegram Bot API:
-
-- Status: `GET http://127.0.0.1:7800/api/settings/telegrambot`
-- Environment fallback: `MOZILCODE_TELEGRAM_ENABLED=1`, `MOZILCODE_TELEGRAM_BOT_TOKEN`
-- Windows helper: `scripts/start-telegram-bot.ps1`
-
-Private chats can send either `/mew <prompt>` or plain text. Group chats require the configured command prefix by default.
+GUI and external bot/cloud adapters are intentionally not part of this package.
 
 ## Memory plugins
 
 Long-term memory is routed through `MemoryHub`, with the legacy Markdown memory kept as the default provider. Custom memory systems can be added with `memory.providers` in `config.yaml` using `type: python`, `module`, and `class`.
 
-TencentDB Agent Memory can be connected through its local Gateway:
+Example custom provider configuration:
 
 ```yaml
 memory:
@@ -59,10 +45,12 @@ memory:
   providers:
     - name: markdown
       type: builtin.markdown
-    - name: tencentdb
-      type: builtin.tencentdb
+    - name: vector
+      type: python
+      module: my_memory.provider
+      class: VectorMemoryProvider
       config:
-        base_url: http://127.0.0.1:8420
+        top_k: 8
 ```
 
-See `mozilcode/docs/memory-plugins.md` for the provider protocol, configuration examples, and TencentDB Gateway setup notes.
+See `mozilcode/docs/memory-plugins.md` for the provider protocol and configuration examples.

@@ -13,7 +13,6 @@ dependencies = [
     "httpx>=0.27.0",
     "starlette>=0.37.0",
     "uvicorn>=0.30.0",
-    "websockets>=14.0",
 ]
 
 [project.scripts]
@@ -31,4 +30,5 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
+    "websockets>=14.0",
 ]
