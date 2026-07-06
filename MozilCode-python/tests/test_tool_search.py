@@ -216,6 +216,23 @@ async def test_tool_search_select_multiple():
     assert reg.is_discovered("DeferredAlpha")
     assert reg.is_discovered("DeferredBeta")
 
+
+@pytest.mark.asyncio
+async def test_tool_search_select_does_not_expose_disabled_deferred_tool():
+    reg = _make_registry()
+    search = ToolSearchTool(reg, protocol="anthropic")
+    reg.register(search)
+    reg.disable("DeferredAlpha")
+
+    from mozilcode.tools.impl.tool_search import ToolSearchParams
+
+    result = await search.execute(ToolSearchParams(query="select:DeferredAlpha"))
+
+    assert "No matching deferred tools" in result.output
+    assert "Available: DeferredBeta" in result.output
+    assert "A deferred tool for testing" not in result.output
+    assert not reg.is_discovered("DeferredAlpha")
+
 # ---------------------------------------------------------------------------
 # 延迟加载：token 节省量与端到端发现流程
 # ---------------------------------------------------------------------------

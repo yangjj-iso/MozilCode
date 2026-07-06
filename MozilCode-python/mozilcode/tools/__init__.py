@@ -112,7 +112,7 @@ class ToolRegistry:
             tool = self._tools.get(name)
             if tool is None:
                 continue
-            if not self._is_deferred(tool):
+            if not self._is_deferred_searchable(name, tool):
                 continue
             results.append(self._schema_for_protocol(tool, protocol))
         return results
