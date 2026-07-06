@@ -102,6 +102,24 @@ class DaemonServer:
             meta["title"] = prompt[:40]
             self._persist_meta(sid)
 
+    async def _create_session_runtime(
+        self,
+        sid: str,
+        work_dir: str,
+    ) -> DaemonSessionRuntime:
+        if self.config is None:
+            raise ValueError("model provider is not configured")
+        mode = PermissionMode(self.config.permission_mode)
+        agent, deps = await create_agent_from_config(
+            self.config, work_dir, mode, self.hook_engine
+        )
+        agent.session_id = sid
+        conv = ConversationManager()
+        runtime = DaemonSessionRuntime(agent, deps, conv)
+        self._agents[sid] = runtime
+        await self.session_mgr.create_session(sid, agent, conv)
+        return runtime
+
     async def init_session(
         self, session_id: str | None = None, work_dir: str | None = None
     ) -> str:
@@ -112,18 +130,11 @@ class DaemonServer:
         wd = work_dir or self.work_dir
         if not Path(wd).is_dir():
             raise ValueError(f"workspace not found: {wd}")
-        mode = PermissionMode(self.config.permission_mode)
-        agent, deps = await create_agent_from_config(
-            self.config, wd, mode, self.hook_engine
-        )
-        agent.session_id = sid
-        conv = ConversationManager()
-        self._agents[sid] = DaemonSessionRuntime(agent, deps, conv)
+        await self._create_session_runtime(sid, wd)
         self._event_logs[sid] = []
         self._session_meta[sid] = {"work_dir": wd, "created_at": time.time(), "title": ""}
         self._persisted_count[sid] = 0
         self._persist_meta(sid)
-        await self.session_mgr.create_session(sid, agent, conv)
         log.info("Session %s initialized (work_dir=%s)", sid, wd)
         return sid
 
@@ -139,16 +150,9 @@ class DaemonServer:
         wd = meta.get("work_dir") or self.work_dir
         if not Path(wd).is_dir():
             wd = self.work_dir
-        mode = PermissionMode(self.config.permission_mode)
-        agent, deps = await create_agent_from_config(
-            self.config, wd, mode, self.hook_engine
-        )
-        agent.session_id = sid
-        conv = ConversationManager()
-        self._agents[sid] = DaemonSessionRuntime(agent, deps, conv)
+        await self._create_session_runtime(sid, wd)
         if sid not in self._event_logs:
             self._event_logs[sid] = []
-        await self.session_mgr.create_session(sid, agent, conv)
         log.info("Session %s reactivated (work_dir=%s)", sid, wd)
         return True
 

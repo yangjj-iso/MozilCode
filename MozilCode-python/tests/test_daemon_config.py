@@ -9,6 +9,7 @@ from mozilcode.daemon.routes import build_routes
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime
+from mozilcode.daemon.session_store import SessionStore
 from mozilcode.permissions.modes import PermissionMode
 
 
@@ -224,3 +225,91 @@ def test_session_runtime_accessors_use_named_fields(tmp_path):
     assert server.get_agent("sid-1") is agent
     assert server.get_deps("sid-1") is deps
     assert server.get_conversation("sid-1") is conversation
+
+
+@pytest.mark.asyncio
+async def test_init_session_creates_named_runtime(tmp_path, monkeypatch):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    captured = {}
+
+    async def fake_create_agent_from_config(config, work_dir, mode, hook_engine):
+        captured.update(
+            {
+                "config": config,
+                "work_dir": work_dir,
+                "mode": mode,
+                "hook_engine": hook_engine,
+            }
+        )
+        return _FakeAgent(mode), _FakeDeps(config.providers[0])
+
+    monkeypatch.setattr(
+        "mozilcode.daemon.server_state.create_agent_from_config",
+        fake_create_agent_from_config,
+    )
+    config = AppConfig(providers=[provider], permission_mode="acceptEdits")
+    server = DaemonServer(
+        config,
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
+
+    sid = await server.init_session("sid-runtime")
+
+    runtime = server._agents[sid]
+    session = await server.session_mgr.get_session(sid)
+    assert runtime.agent.session_id == "sid-runtime"
+    assert runtime.deps.provider is provider
+    assert server.get_agent(sid) is runtime.agent
+    assert server.get_deps(sid) is runtime.deps
+    assert server.get_conversation(sid) is runtime.conversation
+    assert session is not None
+    assert session.agent is runtime.agent
+    assert session.conversation is runtime.conversation
+    assert captured == {
+        "config": config,
+        "work_dir": str(tmp_path),
+        "mode": PermissionMode.ACCEPT_EDITS,
+        "hook_engine": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_ensure_agent_recreates_persisted_runtime(tmp_path, monkeypatch):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+
+    async def fake_create_agent_from_config(config, work_dir, mode, _hook_engine):
+        return _FakeAgent(mode), _FakeDeps(config.providers[0])
+
+    monkeypatch.setattr(
+        "mozilcode.daemon.server_state.create_agent_from_config",
+        fake_create_agent_from_config,
+    )
+    server = DaemonServer(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
+    server._session_meta["sid-persisted"] = {
+        "work_dir": str(tmp_path),
+        "title": "persisted",
+    }
+
+    assert await server.ensure_agent("sid-persisted") is True
+
+    runtime = server._agents["sid-persisted"]
+    session = await server.session_mgr.get_session("sid-persisted")
+    assert runtime.agent.session_id == "sid-persisted"
+    assert server._event_logs["sid-persisted"] == []
+    assert session is not None
+    assert session.agent is runtime.agent
