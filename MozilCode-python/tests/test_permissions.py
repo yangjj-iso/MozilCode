@@ -56,6 +56,23 @@ class TestDangerousCommandDetector:
         hit, _ = self.detector.detect("rm -rf /")
         assert hit
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rm -fr /",
+            "rm -r -f /",
+            "rm -Rf /",
+            "sudo rm -rf /",
+            "rm -rf --no-preserve-root /",
+            "rm --recursive --force /",
+            "rm --force --recursive /*",
+        ],
+    )
+    def test_rm_root_equivalent_forms(self, command: str) -> None:
+        hit, reason = self.detector.detect(command)
+        assert hit
+        assert "根目录" in reason
+
     def test_mkfs(self) -> None:
         hit, _ = self.detector.detect("mkfs.ext4 /dev/sda1")
         assert hit
@@ -90,6 +107,10 @@ class TestDangerousCommandDetector:
 
     def test_safe_rm_file(self) -> None:
         hit, _ = self.detector.detect("rm -rf build/")
+        assert not hit
+
+    def test_safe_rm_tmp_path(self) -> None:
+        hit, _ = self.detector.detect("rm -fr /tmp/build")
         assert not hit
 
     def test_safe_npm_test(self) -> None:
