@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -163,6 +164,33 @@ def test_session_store_preserves_unknown_meta_fields(tmp_path):
     loaded = store.load_sessions()
 
     assert loaded[0].meta == meta
+
+
+def test_session_store_preserves_existing_meta_when_atomic_replace_fails(
+    tmp_path,
+    monkeypatch,
+):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+    original_meta = {"title": "old"}
+    store.persist_meta(sid, original_meta)
+
+    original_replace = Path.replace
+
+    def fail_meta_replace(self, target):
+        if Path(target).name == "meta.json":
+            raise OSError("replace failed")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_meta_replace)
+
+    store.persist_meta(sid, {"title": "new"})
+
+    session_dir = store.session_dir(sid)
+    assert json.loads((session_dir / "meta.json").read_text(encoding="utf-8")) == (
+        original_meta
+    )
+    assert list(session_dir.glob(".meta.json.*.tmp")) == []
 
 
 @pytest.mark.parametrize(

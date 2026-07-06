@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +56,28 @@ def _event_slice_start(persisted_count: int, event_count: int) -> int:
     if persisted_count > event_count:
         return event_count
     return persisted_count
+
+
+def _write_json_atomically(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 class SessionStore:
@@ -132,11 +156,7 @@ class SessionStore:
     def persist_meta(self, sid: str, meta: dict) -> None:
         try:
             directory = self.session_dir(sid)
-            directory.mkdir(parents=True, exist_ok=True)
-            (directory / META_FILE).write_text(
-                json.dumps(meta, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            _write_json_atomically(directory / META_FILE, meta)
         except Exception as e:
             log.warning("Persist meta failed for %s: %s", sid, e)
 
