@@ -653,3 +653,46 @@ class TestMCPManagerPartialFailure:
         assert "duplicate registered tool 'mcp_good_same_tool'" in errors[0]
         assert registry.get("mcp_good_same_tool").description == "First"
         assert manager._clients == {"good": client}
+
+    @pytest.mark.asyncio
+    async def test_reloaded_server_config_closes_stale_client(self) -> None:
+        from mozilcode.mcp.manager import MCPManager
+
+        old_config = MCPServerConfig(name="srv", command="old")
+        new_config = MCPServerConfig(name="srv", command="new")
+        manager = MCPManager()
+        manager.load_configs([old_config])
+
+        old_client = AsyncMock()
+        manager._clients["srv"] = old_client
+
+        manager.load_configs([new_config])
+
+        with patch("mozilcode.mcp.manager.MCPClient") as MockClient:
+            new_client = AsyncMock()
+            MockClient.return_value = new_client
+
+            client = await manager.get_client("srv")
+
+        old_client.close.assert_awaited_once()
+        MockClient.assert_called_once_with(new_config)
+        new_client.connect.assert_awaited_once()
+        assert client is new_client
+        assert manager._clients == {"srv": new_client}
+        assert manager._stale_clients == []
+
+    @pytest.mark.asyncio
+    async def test_reloading_identical_config_keeps_existing_client(self) -> None:
+        from mozilcode.mcp.manager import MCPManager
+
+        config = MCPServerConfig(name="srv", command="same")
+        manager = MCPManager()
+        manager.load_configs([config])
+
+        client = AsyncMock()
+        manager._clients["srv"] = client
+
+        manager.load_configs([config])
+
+        assert await manager.get_client("srv") is client
+        client.close.assert_not_called()

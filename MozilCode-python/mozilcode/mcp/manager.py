@@ -14,12 +14,19 @@ class MCPManager:
     def __init__(self) -> None:
         self._configs: dict[str, MCPServerConfig] = {}
         self._clients: dict[str, MCPClient] = {}
+        self._stale_clients: list[tuple[str, MCPClient]] = []
 
     def load_configs(self, configs: list[MCPServerConfig]) -> None:
         for cfg in configs:
+            existing = self._configs.get(cfg.name)
             self._configs[cfg.name] = cfg
+            if existing is not None and existing != cfg:
+                client = self._clients.pop(cfg.name, None)
+                if client is not None:
+                    self._stale_clients.append((cfg.name, client))
 
     async def register_all_tools(self, registry: ToolRegistry) -> list[str]:
+        await self._close_stale_clients()
         errors: list[str] = []
         for name, config in self._configs.items():
             try:
@@ -66,6 +73,7 @@ class MCPManager:
             raise
 
     async def get_client(self, name: str) -> MCPClient | None:
+        await self._close_stale_clients()
         client = self._clients.get(name)
         if client is None:
             config = self._configs.get(name)
@@ -86,6 +94,7 @@ class MCPManager:
         return client
 
     async def shutdown(self) -> None:
+        await self._close_stale_clients()
         for name, client in self._clients.items():
             try:
                 await client.close()
@@ -93,3 +102,17 @@ class MCPManager:
             except Exception:
                 logger.debug("Error closing MCP server '%s'", name, exc_info=True)
         self._clients.clear()
+
+    async def _close_stale_clients(self) -> None:
+        stale_clients = self._stale_clients
+        self._stale_clients = []
+        for name, client in stale_clients:
+            try:
+                await client.close()
+                logger.info("MCP server '%s' closed after config reload", name)
+            except Exception:
+                logger.debug(
+                    "Error closing stale MCP server '%s'",
+                    name,
+                    exc_info=True,
+                )
