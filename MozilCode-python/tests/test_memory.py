@@ -1091,6 +1091,65 @@ class TestMemoryProviders:
         ):
             build_memory_hub(cfg, str(tmp_path))
 
+    def test_python_provider_missing_protocol_methods_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "incomplete_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "class IncompleteProvider:\n"
+            "    name = 'incomplete'\n"
+            "    kind = 'python.incomplete'\n"
+            "    version = '0.1'\n"
+            "    async def load_context(self, query, scope):\n"
+            "        return 'context'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="incomplete",
+                    type="python",
+                    module=module_name,
+                    class_name="IncompleteProvider",
+                )
+            ]
+        )
+
+        with pytest.raises(
+            MemoryProviderLoadError,
+            match="required method\\(s\\): initialize",
+        ):
+            build_memory_hub(cfg, str(tmp_path))
+
+    def test_python_provider_metadata_must_be_strings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "bad_metadata_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class BadMetadataProvider(BaseMemoryProvider):\n"
+            "    name = ['bad']\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="bad",
+                    type="python",
+                    module=module_name,
+                    class_name="BadMetadataProvider",
+                )
+            ]
+        )
+
+        with pytest.raises(
+            MemoryProviderLoadError,
+            match="non-empty string 'name'",
+        ):
+            build_memory_hub(cfg, str(tmp_path))
+
     def test_duplicate_memory_provider_names_are_rejected(self, tmp_path: Path) -> None:
         cfg = MemoryConfig(
             providers=[

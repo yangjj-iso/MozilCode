@@ -19,6 +19,16 @@ BUILTIN_MEMORY_PROVIDERS = {
     "builtin.markdown": "mozilcode.memory.providers.markdown:MarkdownMemoryProvider",
 }
 
+_REQUIRED_PROVIDER_METHODS = (
+    "initialize",
+    "load_context",
+    "observe",
+    "search",
+    "write",
+    "clear",
+    "shutdown",
+)
+
 
 def build_memory_hub(
     memory_config: MemoryConfig | None,
@@ -124,11 +134,33 @@ def _load_class_provider(
             config,
             legacy_manager,
         )
-        return cls(**kwargs)
+        provider = cls(**kwargs)
     except TypeError as e:
         raise MemoryProviderLoadError(
             f"Failed to construct memory provider {target}: {e}"
         ) from e
+    _validate_provider_contract(provider, target)
+    return provider
+
+
+def _validate_provider_contract(provider: Any, target: str) -> None:
+    for attr in ("name", "kind", "version"):
+        value = getattr(provider, attr, None)
+        if not isinstance(value, str) or not value.strip():
+            raise MemoryProviderLoadError(
+                f"Memory provider {target} must define non-empty string '{attr}'"
+            )
+
+    missing_methods = [
+        method_name
+        for method_name in _REQUIRED_PROVIDER_METHODS
+        if not callable(getattr(provider, method_name, None))
+    ]
+    if missing_methods:
+        raise MemoryProviderLoadError(
+            f"Memory provider {target} does not implement required method(s): "
+            f"{', '.join(missing_methods)}"
+        )
 
 
 def _provider_constructor_kwargs(
