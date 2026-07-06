@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from mozilcode.hooks.conditions import ConditionGroup
+
+
+_EXPANSION_RE = re.compile(
+    r"\$(?P<name>EVENT|TOOL_NAME|FILE_PATH|MESSAGE|ERROR)"
+    r"|\$TOOL_ARGS\.(?P<arg>[A-Za-z_][A-Za-z0-9_]*)"
+)
 
 
 @dataclass
@@ -63,20 +70,35 @@ class HookContext:
             return self.event_name
         if name.startswith("args."):
             key = name[5:]
-            value = self.tool_args.get(key, "")
-            return str(value) if value else ""
+            if key not in self.tool_args:
+                return ""
+            value = self.tool_args[key]
+            return "" if value is None else str(value)
         return ""
 
     def expand(self, template: str) -> str:
-        result = template
-        result = result.replace("$EVENT", self.event_name)
-        result = result.replace("$TOOL_NAME", self.tool_name)
-        result = result.replace("$FILE_PATH", self.file_path)
-        result = result.replace("$MESSAGE", self.message)
-        result = result.replace("$ERROR", self.error)
-        for key, value in self.tool_args.items():
-            result = result.replace(f"$TOOL_ARGS.{key}", str(value))
-        return result
+        def replace(match: re.Match[str]) -> str:
+            arg_key = match.group("arg")
+            if arg_key is not None:
+                if arg_key not in self.tool_args:
+                    return match.group(0)
+                value = self.tool_args[arg_key]
+                return "" if value is None else str(value)
+
+            name = match.group("name")
+            if name == "EVENT":
+                return self.event_name
+            if name == "TOOL_NAME":
+                return self.tool_name
+            if name == "FILE_PATH":
+                return self.file_path
+            if name == "MESSAGE":
+                return self.message
+            if name == "ERROR":
+                return self.error
+            return match.group(0)
+
+        return _EXPANSION_RE.sub(replace, template)
 
 
 class ToolRejectedError(Exception):

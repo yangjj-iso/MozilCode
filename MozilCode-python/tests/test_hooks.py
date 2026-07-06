@@ -67,6 +67,12 @@ class TestHookContext:
         assert ctx.get_field("args.command") == "ls -la"
         assert ctx.get_field("args.path") == "/tmp"
 
+    def test_get_field_preserves_falsy_args(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False, "empty": ""})
+        assert ctx.get_field("args.count") == "0"
+        assert ctx.get_field("args.enabled") == "False"
+        assert ctx.get_field("args.empty") == ""
+
     def test_get_field_unknown(self):
         ctx = HookContext()
         assert ctx.get_field("nonexistent") == ""
@@ -94,6 +100,18 @@ class TestHookContext:
         ctx = HookContext()
         assert ctx.expand("hello $UNKNOWN world") == "hello $UNKNOWN world"
         assert ctx.expand("$FILE_PATH") == ""
+        assert ctx.expand("$TOOL_ARGS.missing") == "$TOOL_ARGS.missing"
+
+    def test_expand_preserves_falsy_args(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False, "empty": ""})
+        result = ctx.expand(
+            "count=$TOOL_ARGS.count enabled=$TOOL_ARGS.enabled empty=$TOOL_ARGS.empty"
+        )
+        assert result == "count=0 enabled=False empty="
+
+    def test_expand_tool_args_does_not_replace_prefixes(self):
+        ctx = HookContext(tool_args={"path": "short", "path_extra": "long"})
+        assert ctx.expand("$TOOL_ARGS.path $TOOL_ARGS.path_extra") == "short long"
 
 # ---------------------------------------------------------------------------
 # 条件解析
@@ -170,6 +188,11 @@ class TestConditionEvaluate:
         assert c.evaluate(ctx) is True
         c2 = Condition(field="args.path", operator="~=", value="*.go")
         assert c2.evaluate(ctx) is False
+
+    def test_falsy_arg_values_are_matchable(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False})
+        assert Condition("args.count", "==", "0").evaluate(ctx) is True
+        assert Condition("args.enabled", "==", "False").evaluate(ctx) is True
 
 class TestConditionGroupEvaluate:
     def test_and_all_pass(self):
