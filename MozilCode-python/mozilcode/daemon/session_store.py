@@ -108,6 +108,13 @@ class SessionStore:
             sid = directory.name
             try:
                 validate_session_id(sid)
+                if not (directory / META_FILE).is_file():
+                    log.debug(
+                        "Skipping incomplete session %s: missing %s",
+                        sid,
+                        META_FILE,
+                    )
+                    continue
                 sessions.append(self._load_session(sid, directory))
             except Exception as e:
                 log.warning("Failed to load session %s: %s", sid, e)

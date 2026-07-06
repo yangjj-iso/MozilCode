@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,29 @@ def test_session_store_skips_corrupt_session_and_loads_valid_ones(tmp_path):
 
     assert [session.sid for session in loaded] == ["valid"]
     assert loaded[0].events == [{"type": "LoopComplete"}]
+
+
+def test_session_store_skips_missing_meta_without_warning(tmp_path, caplog):
+    store = SessionStore(tmp_path)
+    store.persist_meta("valid", {"title": "ok"})
+    store.persist_events("valid", [{"type": "LoopComplete"}], 0)
+
+    missing_meta = store.session_dir("missing-meta")
+    missing_meta.mkdir(parents=True)
+    (missing_meta / "events.jsonl").write_text(
+        '{"type": "UserMessage"}\n',
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        loaded = store.load_sessions()
+
+    assert [session.sid for session in loaded] == ["valid"]
+    assert not [
+        record
+        for record in caplog.records
+        if "missing-meta" in record.getMessage()
+    ]
 
 
 def test_session_store_skips_malformed_event_lines(tmp_path):
