@@ -439,6 +439,22 @@ class TestPermissionChecker:
 
         assert d.effect == "allow"
 
+    def test_plan_mode_configured_plan_file_must_stay_in_sandbox(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        self.checker.mode = PermissionMode.PLAN
+        outside_plan = Path.home() / ".mozilcode-outside-plan.md"
+        self.checker.plan_file_path = str(outside_plan)
+
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(outside_plan), "content": "plan"},
+        )
+
+        assert d.effect == "deny"
+        assert "沙箱" in d.reason
+
     def test_plan_mode_does_not_allow_same_basename_outside_plan_path(self) -> None:
         from mozilcode.tools.write_file import WriteFile
 
@@ -468,6 +484,27 @@ class TestPermissionChecker:
         )
 
         assert d.effect == "allow"
+
+    def test_plan_mode_plan_directory_symlink_must_stay_in_sandbox(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        mozilcode_dir = self.tmpdir / ".mozilcode"
+        mozilcode_dir.mkdir()
+        plans_link = mozilcode_dir / "plans"
+        try:
+            plans_link.symlink_to(Path.home(), target_is_directory=True)
+        except (NotImplementedError, OSError) as e:
+            pytest.skip(f"directory symlinks are not available: {e}")
+
+        self.checker.mode = PermissionMode.PLAN
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(plans_link / "escape.md"), "content": "plan"},
+        )
+
+        assert d.effect == "deny"
+        assert "沙箱" in d.reason
 
     def test_plan_mode_rejects_plan_directory_outside_project(self) -> None:
         from mozilcode.tools.write_file import WriteFile

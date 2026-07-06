@@ -74,6 +74,12 @@ class PermissionChecker:
             return Decision(effect="allow", reason="Plan mode: allowed tool")
         if tool.name in ("WriteFile", "EditFile") and content:
             if self._is_plan_file(content):
+                ok, reason = self.sandbox.check(content)
+                if not ok:
+                    return Decision(
+                        effect="deny",
+                        reason=f"路径沙箱拦截: {reason}",
+                    )
                 return Decision(effect="allow", reason="Plan mode: plan file write")
         return None
 
