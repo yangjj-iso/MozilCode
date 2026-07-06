@@ -12,6 +12,8 @@ from mozilcode.daemon.task_events import pending_prompt_request_id
 
 log = logging.getLogger(__name__)
 
+CLIENT_ACTIONS = {"cancel"}
+
 
 def parse_client_action(raw: str) -> str:
     if not raw:
@@ -23,7 +25,9 @@ def parse_client_action(raw: str) -> str:
     if not isinstance(payload, dict):
         return ""
     action = payload.get("action")
-    return action if isinstance(action, str) else ""
+    if not isinstance(action, str):
+        return ""
+    return action if action in CLIENT_ACTIONS else ""
 
 
 async def listen_client_actions(

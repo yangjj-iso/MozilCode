@@ -25,6 +25,17 @@ def _app(tmp_path):
     )
 
 
+class _CancellableTask:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def done(self) -> bool:
+        return False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
 def test_stream_unknown_session_reports_session_not_found(tmp_path):
     app = _app(tmp_path)
 
@@ -64,6 +75,23 @@ def test_parse_client_action_rejects_invalid_messages() -> None:
     assert parse_client_action("{bad") == ""
     assert parse_client_action("[]") == ""
     assert parse_client_action('{"action": 7}') == ""
+    assert parse_client_action('{"action": "unknown"}') == ""
+
+
+def test_stream_cancel_action_cancels_active_session_task(tmp_path):
+    app = _app(tmp_path)
+    sid = "busy-session"
+    task = _CancellableTask()
+    app.state.server._event_logs[sid] = []
+    app.state.server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
+    app.state.server._tasks[sid] = task
+
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/api/stream/{sid}") as websocket:
+            assert websocket.receive_json() == {"type": "ReplayDone", "data": {}}
+            websocket.send_json({"action": "cancel"})
+
+    assert task.cancelled
 
 
 def test_pending_prompt_events_after_replay_skips_replayed_requests() -> None:
