@@ -13,7 +13,6 @@ from mozilcode.daemon.config_settings import (
     write_user_config,
 )
 from mozilcode.daemon.request_body import read_json_object
-from mozilcode.daemon.workspace_payloads import task_to_dict
 from mozilcode.validator import ConfigError
 
 log = logging.getLogger(__name__)
@@ -132,23 +131,16 @@ async def cancel_active_task(request: Request) -> JSONResponse:
 async def list_background_tasks(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    tasks = deps.task_manager.list_tasks() if deps else []
-    return JSONResponse({"tasks": [task_to_dict(t) for t in tasks]})
+    result = await server.list_background_tasks(sid)
+    return JSONResponse(result.payload, status_code=result.status_code)
 
 
 async def cancel_background_task(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
     task_id = request.path_params["task_id"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    if deps is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    return JSONResponse({"cancelled": deps.task_manager.cancel(task_id)})
+    result = await server.cancel_background_task(sid, task_id)
+    return JSONResponse(result.payload, status_code=result.status_code)
 
 
 async def start_task(request: Request) -> JSONResponse:

@@ -34,7 +34,7 @@ from mozilcode.daemon.task_events import (
     task_error_event,
     user_message_event,
 )
-from mozilcode.daemon.workspace_payloads import worktree_to_dict
+from mozilcode.daemon.workspace_payloads import task_to_dict, worktree_to_dict
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
@@ -444,6 +444,33 @@ class DaemonServer:
             return DaemonActionResult({"error": str(e)}, status_code=400)
 
         return DaemonActionResult({"exited": True, "status": self.status(sid)})
+
+    async def list_background_tasks(self, sid: str) -> DaemonActionResult:
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        if deps is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        return DaemonActionResult(
+            {
+                "tasks": [
+                    task_to_dict(task)
+                    for task in deps.task_manager.list_tasks()
+                ]
+            }
+        )
+
+    async def cancel_background_task(
+        self,
+        sid: str,
+        task_id: str,
+    ) -> DaemonActionResult:
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        if deps is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        return DaemonActionResult({"cancelled": deps.task_manager.cancel(task_id)})
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
         configured_mode = (
