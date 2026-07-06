@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +23,12 @@ from mozilcode.daemon.session_status import (
     build_session_status,
     command_acceptance_mode,
     resolve_mode_transition,
+)
+from mozilcode.daemon.session_meta import (
+    new_session_meta,
+    session_info_from_meta,
+    session_work_dir_from_meta,
+    sort_session_ids_by_created_at,
 )
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
 from mozilcode.daemon.task_events import (
@@ -136,7 +141,7 @@ class DaemonServer:
             raise ValueError(f"workspace not found: {wd}")
         await self._create_session_runtime(sid, wd)
         self._event_logs[sid] = []
-        self._session_meta[sid] = {"work_dir": wd, "created_at": time.time(), "title": ""}
+        self._session_meta[sid] = new_session_meta(wd)
         self._persisted_count[sid] = 0
         self._persist_meta(sid)
         log.info("Session %s initialized (work_dir=%s)", sid, wd)
@@ -161,22 +166,27 @@ class DaemonServer:
         return True
 
     def session_info(self, sid: str) -> dict:
-        meta = self._session_meta.get(sid, {})
-        return {"id": sid, "work_dir": meta.get("work_dir", self.work_dir), "title": meta.get("title", "")}
+        return session_info_from_meta(
+            sid,
+            self._session_meta.get(sid),
+            self.work_dir,
+        )
 
     def has_session(self, sid: str) -> bool:
         return sid in self._event_logs
 
     def list_session_infos(self) -> list[dict]:
-        sids = list(self._event_logs.keys())
-        sids.sort(key=lambda s: self._session_meta.get(s, {}).get("created_at", 0), reverse=True)
+        sids = sort_session_ids_by_created_at(
+            self._event_logs.keys(),
+            self._session_meta,
+        )
         return [self.session_info(s) for s in sids]
 
     def session_work_dir(self, sid: str) -> str | None:
         meta = self._session_meta.get(sid)
         if meta is None:
             return None
-        return meta.get("work_dir") or self.work_dir
+        return session_work_dir_from_meta(meta, self.work_dir)
 
     def update_session_work_dir(self, sid: str, work_dir: str) -> None:
         self._session_meta.setdefault(sid, {})["work_dir"] = work_dir
