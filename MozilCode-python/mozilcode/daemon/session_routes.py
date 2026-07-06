@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.client import LLMError
-from mozilcode.daemon.config_settings import (
-    USER_CONFIG_FILE,
-    config_from_settings_payload,
-    public_config,
-    write_user_config,
-)
 from mozilcode.daemon.request_body import read_json_object
-from mozilcode.validator import ConfigError
 
 log = logging.getLogger(__name__)
+
+USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 
 
 async def health(request: Request) -> JSONResponse:
@@ -29,32 +25,6 @@ async def health(request: Request) -> JSONResponse:
             "config_path": str(USER_CONFIG_FILE),
         }
     )
-
-
-async def config_status(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    return JSONResponse(public_config(server.config))
-
-
-async def save_config(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    try:
-        parsed = await read_json_object(request)
-        if not parsed.ok:
-            return JSONResponse(
-                public_config(server.config, parsed.error),
-                status_code=parsed.status_code,
-            )
-        body = parsed.payload
-        raw = config_from_settings_payload(body or {}, server.config)
-        server.config = write_user_config(raw)
-        await server.invalidate_idle_agents()
-    except (ConfigError, ValueError, TypeError) as e:
-        return JSONResponse(public_config(server.config, str(e)), status_code=400)
-    except Exception as e:
-        log.exception("Failed to save config")
-        return JSONResponse(public_config(server.config, str(e)), status_code=500)
-    return JSONResponse(public_config(server.config))
 
 
 async def create_session(request: Request) -> JSONResponse:

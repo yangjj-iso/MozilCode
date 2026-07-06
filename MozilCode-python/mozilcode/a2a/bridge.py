@@ -356,7 +356,9 @@ class A2ABridge:
             elif event_type in {"PermissionRequest", "AskUserRequest"}:
                 if task.state not in TERMINAL_STATES:
                     task.state = TASK_INPUT_REQUIRED
-                    task.status_message = "The task requires interactive input in the MozilCode UI."
+                    task.status_message = (
+                        "The task requires interactive input from a MozilCode daemon client."
+                    )
                     task.updated_at = _iso_now()
             elif event_type == "LoopComplete":
                 if task.state not in {TASK_FAILED, TASK_CANCELED}:

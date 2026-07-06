@@ -1029,8 +1029,8 @@ class Agent:
         """并发执行前的授权预检。
 
         复用与 _execute_tool 完全相同的权限决策逻辑（deny / ask / allow_always），
-        但不执行工具本身。ask 决策通过 yield PermissionRequest 交回调用方（由 UI
-        弹窗处理），最终 yield 一个 _AuthResult 表示是否放行。
+        但不执行工具本身。ask 决策通过 yield PermissionRequest 交回调用方处理，
+        最终 yield 一个 _AuthResult 表示是否放行。
         """
         tool = self.registry.get(tc.tool_name)
         if tool is None:

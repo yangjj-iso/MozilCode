@@ -41,7 +41,7 @@
 
 ```text
 用户输入
-  -> App/CLI
+  -> daemon 客户端 / headless CLI
   -> ConversationManager.history
   -> Agent.run 或 Agent.run_to_completion
   -> serialization.py
@@ -240,7 +240,7 @@ assistant text + tool_uses 写入 conversation.history
 2. 如果存在 `compact_boundary`，只从最后一个 boundary 开始重放。
 3. 校验工具调用链，避免孤立的 tool_use/tool_result。
 4. 转回 `Message` 列表。
-5. 用新的 `ConversationManager` 替换 App 当前 conversation。
+5. 用新的 `ConversationManager` 替换 daemon session 当前 conversation。
 
 因此，长对话压缩后恢复不会把压缩前的完整前缀重新塞回上下文，而是恢复为“摘要 + 保留尾部 + 后续消息”。
 
@@ -317,11 +317,11 @@ The following deferred tools are available via ToolSearch...
 
 ```text
 ToolCallComplete
-  -> ToolUseEvent 发给 UI
+  -> ToolUseEvent 发给事件消费者
   -> assistant 消息写入 tool_uses
   -> partition_tool_calls 分批
   -> 执行权限检查 / hooks / 参数校验 / tool.execute
-  -> ToolResultEvent 发给 UI
+  -> ToolResultEvent 发给事件消费者
   -> ToolResultBlock 写回 history
   -> 下一轮模型读取工具结果
 ```
@@ -379,7 +379,7 @@ Agent._execute_batch_parallel
    - `bypassPermissions`：读写命令都允许
    - `custom`：都询问
    - `dontAsk`：都允许
-7. 如果结果是 `ask`，Agent 产生 `PermissionRequest`，由 UI 弹窗让用户选择允许、拒绝或总是允许。
+7. 如果结果是 `ask`，Agent 产生 `PermissionRequest`，由 daemon 客户端选择允许、拒绝或总是允许。
 
 非交互式 `run_to_completion` 中，如果权限结果是 `ask` 且当前模式不是 `dontAsk`，会直接返回权限错误，因为它不能弹窗询问用户。
 
@@ -454,7 +454,7 @@ print(last_result)
 
 ### 2. run_to_completion 的循环
 
-`run_to_completion` 和交互式 `run` 的核心逻辑相似，但它不向 UI 持续 yield `AgentEvent`。
+`run_to_completion` 和交互式 `run` 的核心逻辑相似，但它不向 daemon 事件流持续 yield `AgentEvent`。
 
 每轮：
 
@@ -531,7 +531,7 @@ auto_compact(...)
    - 当前可用工具列表
 4. 用“摘要消息 + 保留尾部原文”替换 `conversation.history`。
 5. 清理工具结果临时目录。
-6. 返回 `CompactEvent`，交互式 App 会把 `compact_boundary` 写入 session。
+6. 返回 `CompactEvent`，daemon 会把 `compact_boundary` 写入 session。
 
 这保证了长对话可以继续推进，同时恢复时不会丢失压缩边界。
 
@@ -548,7 +548,7 @@ auto_compact(...)
 - 如果 agent definition 要求 worktree isolation，则创建独立 worktree 后执行。
 - 如果提供 `team_name`，则作为 teammate 加入 team，可能在进程内、tmux 或 iTerm2 后端运行。
 
-后台任务完成后，`TaskManager` 会把 task id 放进通知队列。App 轮询到完成任务后，把结果注入当前 conversation：
+后台任务完成后，`TaskManager` 会把 task id 放进通知队列。daemon 轮询到完成任务后，把结果注入当前 conversation：
 
 ```text
 <task-notification>
@@ -556,7 +556,7 @@ auto_compact(...)
 </task-notification>
 ```
 
-随后 App 触发一次空消息 `_send_message("", is_notification=True)`，让主 Agent 根据任务通知继续处理。
+随后 daemon 触发一次通知消息，让主 Agent 根据任务通知继续处理。
 
 ## 九、关键退出和保护条件
 

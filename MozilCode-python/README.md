@@ -2,6 +2,8 @@
 
 This package contains the MozilCode core runtime, headless CLI, local daemon server, tools, MCP integration, and tests.
 
+MozilCode is intentionally file-configured and local-first: it does not ship a GUI, browser app, cloud account login, hosted model account management, or external bot adapters. Configure model providers, MCP servers, hooks, skills, and memory providers through `.mozilcode/config.yaml`.
+
 ## Development
 
 Run the non-daemon test suite:
