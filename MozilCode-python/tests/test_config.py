@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozilcode.config import load_config
+import pytest
+
+from mozilcode.config import ConfigError, load_config
 
 
 def _write_config(path: Path, extra: str = "", provider_name: str = "test") -> None:
@@ -119,3 +121,26 @@ def test_project_worktree_config_overrides_home_worktree(
     assert cfg.worktree.symlink_directories == ["project_modules"]
     assert cfg.worktree.stale_cleanup_interval == 1800
     assert cfg.worktree.stale_cutoff_hours == 6
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        "gui",
+        "frontend",
+        "cloud",
+        "hosted_models",
+        "official_models",
+        "qqbot",
+        "telegrambot",
+        "bot_adapters",
+    ],
+)
+def test_removed_gui_cloud_bot_config_sections_are_rejected(
+    tmp_path: Path, section: str
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path, f"{section}:\n  enabled: true\n")
+
+    with pytest.raises(ConfigError, match="Removed config section"):
+        load_config(config_path)

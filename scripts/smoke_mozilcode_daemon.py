@@ -10,6 +10,7 @@ import websockets
 
 
 REMOVED_MANAGEMENT_ENDPOINTS = (
+    ("GET", "/"),
     ("GET", "/api/config"),
     ("POST", "/api/config"),
     ("GET", "/api/settings/mcp"),
@@ -18,6 +19,10 @@ REMOVED_MANAGEMENT_ENDPOINTS = (
     ("POST", "/api/settings/memory"),
     ("GET", "/api/skills"),
     ("POST", "/api/skills"),
+    ("GET", "/api/settings/qqbot"),
+    ("GET", "/api/settings/telegrambot"),
+    ("GET", "/api/qq/official/status"),
+    ("GET", "/api/telegram/status"),
 )
 
 

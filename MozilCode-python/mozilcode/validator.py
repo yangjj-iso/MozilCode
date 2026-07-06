@@ -17,6 +17,21 @@ VALID_TEAMMATE_MODES = {"", "in-process"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
 
+REMOVED_CONFIG_SECTIONS = {
+    "accounts",
+    "auth",
+    "bot_adapters",
+    "bots",
+    "cloud",
+    "frontend",
+    "gui",
+    "hosted_models",
+    "login",
+    "official_models",
+    "qqbot",
+    "telegrambot",
+}
+
 # 内置的"模型名子串 -> context window（最大输入 token 数）"映射表，
 # 是 context window 回退链的第 3 层（见 ProviderConfig.get_context_window）。
 # 按从最具体到最通用排序，第一个子串命中即生效。值仅为合理起始点，
@@ -46,6 +61,18 @@ def lookup_model_context_window(model: str) -> int:
 
 class ConfigError(Exception):
     pass
+
+
+def reject_removed_config_sections(raw: dict) -> None:
+    removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
+    if not removed:
+        return
+    names = ", ".join(removed)
+    raise ConfigError(
+        f"Removed config section(s): {names}. "
+        "MozilCode is headless and local-first; configure model providers, "
+        "MCP, hooks, skills, and memory through config.yaml instead."
+    )
 
 
 def validate_providers(raw_providers: list) -> list[dict]:
@@ -284,6 +311,7 @@ def validate_config_structure(raw: object) -> dict:
     """
     if not isinstance(raw, dict) or "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
+    reject_removed_config_sections(raw)
 
     return {
         "providers": validate_providers(raw["providers"]),
