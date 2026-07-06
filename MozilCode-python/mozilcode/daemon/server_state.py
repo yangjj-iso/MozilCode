@@ -8,12 +8,12 @@ from pathlib import Path
 
 from mozilcode.agent import Agent, PermissionResponse
 from mozilcode.config import AppConfig
-from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
+    build_session_status,
     command_acceptance_mode,
     resolve_mode_transition,
 )
@@ -287,47 +287,23 @@ class DaemonServer:
         meta = self._session_meta.get(sid, {})
         task = self._tasks.get(sid)
         running = bool(task and not task.done())
-
-        enabled_tools: list[str] = []
-        if agent is not None:
-            enabled_tools = [
-                t.name for t in agent.registry.list_tools()
-                if agent.registry.is_enabled(t.name)
-            ]
-
         provider = deps.provider if deps is not None else (self.config.providers[0] if self.config and self.config.providers else None)
-        context_window = agent.context_window if agent is not None else (provider.get_context_window() if provider else 0)
-        auto_compact_threshold = max(0, compute_compact_threshold(context_window)) if context_window else 0
-        if conv is not None and hasattr(conv, "current_tokens"):
-            input_tokens = conv.current_tokens()
-        else:
-            input_tokens = agent.total_input_tokens if agent is not None else 0
-        output_tokens = agent.total_output_tokens if agent is not None else 0
-
-        return {
-            "id": sid,
-            "work_dir": meta.get("work_dir", self.work_dir),
-            "title": meta.get("title", ""),
-            "permission_mode": agent.permission_mode.value if agent else (self.config.permission_mode if self.config else "default"),
-            "command_acceptance_mode": self._command_acceptance_mode(sid, agent).value,
-            "plan_mode": bool(agent.plan_mode) if agent else False,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "context_window": context_window,
-            "auto_compact_threshold": auto_compact_threshold,
-            "token_percent": int(input_tokens / context_window * 100) if context_window else 0,
-            "tool_count": len(enabled_tools),
-            "tools": enabled_tools,
-            "active_task": {
-                "id": self._active_task_ids.get(sid, ""),
-                "running": running,
-            },
-            "provider": {
-                "name": provider.name if provider else "",
-                "protocol": provider.protocol if provider else "",
-                "model": provider.model if provider else "",
-            },
-        }
+        return build_session_status(
+            sid=sid,
+            server_work_dir=self.work_dir,
+            meta=meta,
+            agent=agent,
+            provider=provider,
+            conversation=conv,
+            configured_permission_mode=(
+                self.config.permission_mode
+                if self.config is not None
+                else "default"
+            ),
+            command_mode=self._command_acceptance_mode(sid, agent),
+            active_task_id=self._active_task_ids.get(sid, ""),
+            active_task_running=running,
+        )
 
     def cancel_active_task(self, sid: str) -> bool:
         task = self._tasks.get(sid)

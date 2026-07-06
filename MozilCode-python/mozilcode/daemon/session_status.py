@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
+from mozilcode.context import compute_compact_threshold
 from mozilcode.permissions import PermissionMode
 
 
@@ -70,3 +72,75 @@ def resolve_mode_transition(
         )
 
     return ModeTransition(next_mode=requested_mode, pre_plan_mode=None)
+
+
+def build_session_status(
+    *,
+    sid: str,
+    server_work_dir: str,
+    meta: dict[str, Any],
+    agent: Any | None,
+    provider: Any | None,
+    conversation: Any | None,
+    configured_permission_mode: str = "default",
+    command_mode: PermissionMode = PermissionMode.DEFAULT,
+    active_task_id: str = "",
+    active_task_running: bool = False,
+) -> dict[str, Any]:
+    enabled_tools: list[str] = []
+    if agent is not None:
+        enabled_tools = [
+            tool.name
+            for tool in agent.registry.list_tools()
+            if agent.registry.is_enabled(tool.name)
+        ]
+
+    context_window = 0
+    if agent is not None:
+        context_window = agent.context_window
+    elif provider is not None:
+        context_window = provider.get_context_window()
+
+    auto_compact_threshold = (
+        max(0, compute_compact_threshold(context_window))
+        if context_window
+        else 0
+    )
+    if conversation is not None and hasattr(conversation, "current_tokens"):
+        input_tokens = conversation.current_tokens()
+    else:
+        input_tokens = agent.total_input_tokens if agent is not None else 0
+    output_tokens = agent.total_output_tokens if agent is not None else 0
+
+    return {
+        "id": sid,
+        "work_dir": meta.get("work_dir", server_work_dir),
+        "title": meta.get("title", ""),
+        "permission_mode": (
+            agent.permission_mode.value
+            if agent is not None
+            else configured_permission_mode
+        ),
+        "command_acceptance_mode": command_mode.value,
+        "plan_mode": bool(agent.plan_mode) if agent is not None else False,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "context_window": context_window,
+        "auto_compact_threshold": auto_compact_threshold,
+        "token_percent": (
+            int(input_tokens / context_window * 100)
+            if context_window
+            else 0
+        ),
+        "tool_count": len(enabled_tools),
+        "tools": enabled_tools,
+        "active_task": {
+            "id": active_task_id,
+            "running": active_task_running,
+        },
+        "provider": {
+            "name": provider.name if provider else "",
+            "protocol": provider.protocol if provider else "",
+            "model": provider.model if provider else "",
+        },
+    }
