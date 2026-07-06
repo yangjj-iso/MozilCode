@@ -117,6 +117,20 @@ class TestLoadConfigMCP:
         assert srv.is_stdio is True
         assert srv.args == ["-y", "@modelcontextprotocol/server-github"]
 
+    def test_server_name_is_trimmed(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: " github "
+                command: npx
+        """)
+        config = load_config(path)
+        assert config.mcp_servers[0].name == "github"
+
     def test_http_server(self, tmp_path: Path) -> None:
         path = self._write_config(tmp_path, """\
             providers:
@@ -164,6 +178,22 @@ class TestLoadConfigMCP:
                   FOO: bar
         """)
         with pytest.raises(ConfigError, match="must have either"):
+            load_config(path)
+
+    def test_duplicate_server_names_are_rejected(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: github
+                command: npx
+              - name: " github "
+                url: "https://example.com/mcp"
+        """)
+        with pytest.raises(ConfigError, match="duplicate name"):
             load_config(path)
 
 # ===========================================================================

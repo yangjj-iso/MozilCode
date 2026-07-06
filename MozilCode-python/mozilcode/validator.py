@@ -63,6 +63,24 @@ class ConfigError(Exception):
     pass
 
 
+def _required_name(raw_name: object, item_label: str) -> str:
+    name = str(raw_name or "").strip()
+    if not name:
+        raise ConfigError(f"{item_label}: missing 'name'")
+    return name
+
+
+def _remember_unique_name(
+    name: str,
+    seen_names: set[str],
+    *,
+    item_label: str,
+) -> None:
+    if name in seen_names:
+        raise ConfigError(f"{item_label} '{name}': duplicate name")
+    seen_names.add(name)
+
+
 def reject_removed_config_sections(raw: dict) -> None:
     removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
     if not removed:
@@ -81,6 +99,7 @@ def validate_providers(raw_providers: list) -> list[dict]:
         raise ConfigError("At least one provider must be configured")
 
     providers: list[dict] = []
+    seen_names: set[str] = set()
     for i, entry in enumerate(raw_providers):
         if not isinstance(entry, dict):
             raise ConfigError(f"Provider #{i + 1}: must be a mapping")
@@ -88,6 +107,9 @@ def validate_providers(raw_providers: list) -> list[dict]:
         missing = [f for f in ("name", "protocol", "base_url", "model") if f not in entry]
         if missing:
             raise ConfigError(f"Provider #{i + 1}: missing fields: {', '.join(missing)}")
+
+        name = _required_name(entry["name"], f"Provider #{i + 1}")
+        _remember_unique_name(name, seen_names, item_label="Provider")
 
         protocol = entry["protocol"]
         if protocol not in VALID_PROTOCOLS:
@@ -118,7 +140,7 @@ def validate_providers(raw_providers: list) -> list[dict]:
 
         providers.append(
             {
-                "name": entry["name"],
+                "name": name,
                 "protocol": protocol,
                 "base_url": entry["base_url"],
                 "model": entry["model"],
@@ -151,12 +173,12 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
         raise ConfigError("'mcp_servers' must be a list of server configs")
 
     servers: list[dict] = []
+    seen_names: set[str] = set()
     for i, entry in enumerate(raw_mcp):
         if not isinstance(entry, dict):
             raise ConfigError(f"MCP server #{i + 1}: must be a mapping")
-        name = entry.get("name")
-        if not name:
-            raise ConfigError(f"MCP server #{i + 1}: missing 'name'")
+        name = _required_name(entry.get("name"), f"MCP server #{i + 1}")
+        _remember_unique_name(name, seen_names, item_label="MCP server")
         has_command = "command" in entry
         has_url = "url" in entry
         if has_command and has_url:
@@ -225,13 +247,9 @@ def validate_memory(raw_memory: object) -> dict:
     for i, entry in enumerate(raw_providers):
         if not isinstance(entry, dict):
             raise ConfigError(f"Memory provider #{i + 1}: must be a mapping")
-        name = str(entry.get("name") or "").strip()
+        name = _required_name(entry.get("name"), f"Memory provider #{i + 1}")
         provider_type = str(entry.get("type") or "").strip()
-        if not name:
-            raise ConfigError(f"Memory provider #{i + 1}: missing 'name'")
-        if name in seen_names:
-            raise ConfigError(f"Memory provider '{name}': duplicate name")
-        seen_names.add(name)
+        _remember_unique_name(name, seen_names, item_label="Memory provider")
         if not provider_type:
             raise ConfigError(f"Memory provider '{name}': missing 'type'")
         provider_enabled = entry.get("enabled", True)

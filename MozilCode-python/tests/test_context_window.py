@@ -220,6 +220,38 @@ class TestValidator:
         )
         assert cleaned[0]["context_window"] == 50_000
 
+    def test_provider_name_is_trimmed(self):
+        cleaned = validate_providers(
+            [
+                {
+                    "name": " p ",
+                    "protocol": "anthropic",
+                    "base_url": "u",
+                    "model": "claude-sonnet-4-6",
+                }
+            ]
+        )
+        assert cleaned[0]["name"] == "p"
+
+    def test_duplicate_provider_names_are_rejected(self):
+        with pytest.raises(ConfigError, match="duplicate name"):
+            validate_providers(
+                [
+                    {
+                        "name": "p",
+                        "protocol": "anthropic",
+                        "base_url": "u1",
+                        "model": "claude-sonnet-4-6",
+                    },
+                    {
+                        "name": " p ",
+                        "protocol": "openai",
+                        "base_url": "u2",
+                        "model": "gpt-4o",
+                    },
+                ]
+            )
+
     @pytest.mark.parametrize("bad", [-1, "200000", True, 3.5])
     def test_invalid_context_window_rejected(self, bad):
         with pytest.raises(ConfigError):
