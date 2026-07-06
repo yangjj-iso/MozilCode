@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from mozilcode.cache import FileCache
-from mozilcode.config import WorktreeConfig, load_config
+from mozilcode.config import ConfigError, WorktreeConfig, load_config
 from mozilcode.worktree.changes import count_worktree_changes, has_worktree_changes
 from mozilcode.worktree.integration import build_worktree_notice, generate_worktree_name
 from mozilcode.worktree.manager import WorktreeError, WorktreeManager
@@ -150,6 +150,25 @@ class TestWorktreeConfig:
         assert cfg.worktree.symlink_directories == [".venv"]
         assert cfg.worktree.stale_cleanup_interval == 1800
         assert cfg.worktree.stale_cutoff_hours == 12
+
+    @pytest.mark.parametrize(
+        "field",
+        ["stale_cleanup_interval", "stale_cutoff_hours"],
+    )
+    def test_worktree_integer_fields_reject_bool(self, tmp_path, field):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "providers:\n"
+            "  - name: test\n"
+            "    protocol: openai\n"
+            "    base_url: http://localhost\n"
+            "    model: gpt-4\n"
+            "worktree:\n"
+            f"  {field}: true\n"
+        )
+
+        with pytest.raises(ConfigError, match=field):
+            load_config(config_file)
 
 # =========================================================================
 # H. 会话持久化

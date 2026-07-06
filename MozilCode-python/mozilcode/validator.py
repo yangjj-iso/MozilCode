@@ -123,6 +123,24 @@ def _string_mapping_field(entry: dict, field_name: str, item_label: str) -> dict
     return value
 
 
+def _integer_field(
+    value: object,
+    field_label: str,
+    *,
+    min_value: int,
+    allow_zero: bool,
+) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        requirement = "non-negative" if allow_zero else "positive"
+        raise ConfigError(f"{field_label} must be a {requirement} integer")
+    if allow_zero:
+        if value < min_value:
+            raise ConfigError(f"{field_label} must be a non-negative integer")
+    elif value <= min_value:
+        raise ConfigError(f"{field_label} must be a positive integer")
+    return value
+
+
 def reject_removed_config_sections(raw: dict) -> None:
     removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
     if not removed:
@@ -169,20 +187,24 @@ def validate_providers(raw_providers: list) -> list[dict]:
         #（自动拉取 / 映射表 / 默认值）。配置中显式指定的值仍须为正整数，
         # 且作为最高优先级覆盖。
         context_window = entry.get("context_window", 0)
-        if not isinstance(context_window, int) or isinstance(context_window, bool) or context_window < 0:
-            raise ConfigError(
-                f"Provider #{i + 1}: context_window must be a positive integer"
-            )
+        context_window = _integer_field(
+            context_window,
+            f"Provider #{i + 1}: context_window",
+            min_value=0,
+            allow_zero=True,
+        )
 
         thinking = entry.get("thinking", False)
         if not isinstance(thinking, bool):
             raise ConfigError(f"Provider #{i + 1}: thinking must be a boolean")
 
         max_output_tokens = entry.get("max_output_tokens", 0)
-        if not isinstance(max_output_tokens, int) or max_output_tokens < 0:
-            raise ConfigError(
-                f"Provider #{i + 1}: max_output_tokens must be a non-negative integer"
-            )
+        max_output_tokens = _integer_field(
+            max_output_tokens,
+            f"Provider #{i + 1}: max_output_tokens",
+            min_value=0,
+            allow_zero=True,
+        )
 
         providers.append(
             {
@@ -364,12 +386,20 @@ def validate_worktree(raw_wt: dict | None) -> dict:
         raise ConfigError("'worktree.symlink_directories' must be a list of strings")
 
     interval = raw_wt.get("stale_cleanup_interval", defaults["stale_cleanup_interval"])
-    if not isinstance(interval, int) or interval <= 0:
-        raise ConfigError("'worktree.stale_cleanup_interval' must be a positive integer")
+    interval = _integer_field(
+        interval,
+        "'worktree.stale_cleanup_interval'",
+        min_value=0,
+        allow_zero=False,
+    )
 
     cutoff = raw_wt.get("stale_cutoff_hours", defaults["stale_cutoff_hours"])
-    if not isinstance(cutoff, int) or cutoff <= 0:
-        raise ConfigError("'worktree.stale_cutoff_hours' must be a positive integer")
+    cutoff = _integer_field(
+        cutoff,
+        "'worktree.stale_cutoff_hours'",
+        min_value=0,
+        allow_zero=False,
+    )
 
     return {
         "symlink_directories": sym,

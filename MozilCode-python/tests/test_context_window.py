@@ -284,6 +284,21 @@ class TestValidator:
                 ]
             )
 
+    @pytest.mark.parametrize("bad", [-1, "8192", True, 3.5])
+    def test_invalid_max_output_tokens_rejected(self, bad):
+        with pytest.raises(ConfigError, match="max_output_tokens"):
+            validate_providers(
+                [
+                    {
+                        "name": "p",
+                        "protocol": "anthropic",
+                        "base_url": "u",
+                        "model": "claude-sonnet-4-6",
+                        "max_output_tokens": bad,
+                    }
+                ]
+            )
+
     @pytest.mark.parametrize(
         "field, bad, message",
         [
