@@ -48,6 +48,28 @@ def test_session_store_appends_only_new_events(tmp_path):
     assert loaded[0].events == [{"type": "A"}, {"type": "B"}, {"type": "C"}]
 
 
+def test_session_store_does_not_partially_append_unserializable_event(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+
+    store.persist_meta(sid, {"title": "stable"})
+    persisted_count = store.persist_events(sid, [{"type": "A"}], 0)
+    next_count = store.persist_events(
+        sid,
+        [
+            {"type": "A"},
+            {"type": "B"},
+            {"type": "Bad", "data": {1, 2}},
+        ],
+        persisted_count,
+    )
+    loaded = store.load_sessions()
+
+    assert persisted_count == 1
+    assert next_count == 1
+    assert loaded[0].events == [{"type": "A"}]
+
+
 def test_session_store_clamps_negative_persisted_count(tmp_path):
     store = SessionStore(tmp_path)
     sid = "session-a"

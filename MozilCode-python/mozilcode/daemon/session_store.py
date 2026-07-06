@@ -80,6 +80,18 @@ def _write_json_atomically(path: Path, payload: dict) -> None:
         raise
 
 
+def _serialize_events_jsonl(events: list[dict]) -> str:
+    return "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events)
+
+
+def _append_text_durably(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+
+
 class SessionStore:
     """On-disk session store used to replay conversations after daemon restarts."""
 
@@ -180,11 +192,8 @@ class SessionStore:
             return len(log_list)
 
         try:
-            directory = self.session_dir(sid)
-            directory.mkdir(parents=True, exist_ok=True)
-            with (directory / EVENTS_FILE).open("a", encoding="utf-8") as f:
-                for event in new_events:
-                    f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            events_text = _serialize_events_jsonl(new_events)
+            _append_text_durably(self.session_dir(sid) / EVENTS_FILE, events_text)
             return len(log_list)
         except Exception as e:
             log.warning("Persist events failed for %s: %s", sid, e)
