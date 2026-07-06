@@ -32,6 +32,7 @@ from mozilcode.permissions import (
     Rule,
     RuleEngine,
     extract_content,
+    extract_sandbox_path,
     mode_decide,
     parse_rule,
 )
@@ -233,7 +234,16 @@ class TestRuleEngine:
         assert extract_content("WriteFile", {"file_path": "/tmp/y.txt", "content": "hi"}) == "/tmp/y.txt"
         assert extract_content("Glob", {"pattern": "**/*.py"}) == "**/*.py"
         assert extract_content("Grep", {"pattern": "TODO"}) == "TODO"
+        assert extract_content("Bash", {"command": None}) == ""
         assert extract_content("UnknownTool", {"x": 1}) == ""
+
+    def test_extract_sandbox_path(self) -> None:
+        assert extract_sandbox_path("ReadFile", {"file_path": "/tmp/x.txt"}) == "/tmp/x.txt"
+        assert extract_sandbox_path("WriteFile", {"file_path": None}) == ""
+        assert extract_sandbox_path("EditFile", {"file_path": []}) == ""
+        assert extract_sandbox_path("Glob", {"pattern": "**/*.py"}) == "."
+        assert extract_sandbox_path("Grep", {"path": "src"}) == "src"
+        assert extract_sandbox_path("Bash", {"command": "ls"}) is None
 
     def test_evaluate_single_tier(self) -> None:
         tmpdir = Path(tempfile.mkdtemp())
@@ -353,6 +363,33 @@ class TestPermissionChecker:
         d = self.checker.check(tool, {"file_path": "/etc/passwd"})
         assert d.effect == "deny"
         assert "沙箱" in d.reason
+
+    def test_missing_file_path_is_denied(self) -> None:
+        from mozilcode.tools.read_file import ReadFile
+        tool = ReadFile()
+        d = self.checker.check(tool, {})
+        assert d.effect == "deny"
+        assert "缺少路径参数" in d.reason
+
+    def test_grep_path_outside_sandbox_denied(self) -> None:
+        from mozilcode.tools.grep import Grep
+        tool = Grep()
+        d = self.checker.check(tool, {"pattern": "root", "path": "/etc"})
+        assert d.effect == "deny"
+        assert "沙箱" in d.reason
+
+    def test_glob_path_outside_sandbox_denied(self) -> None:
+        from mozilcode.tools.glob import Glob
+        tool = Glob()
+        d = self.checker.check(tool, {"pattern": "*", "path": "/etc"})
+        assert d.effect == "deny"
+        assert "沙箱" in d.reason
+
+    def test_grep_default_path_stays_in_sandbox(self) -> None:
+        from mozilcode.tools.grep import Grep
+        tool = Grep()
+        d = self.checker.check(tool, {"pattern": "TODO"})
+        assert d.effect == "allow"
 
     def test_read_tool_allowed_by_default_mode(self) -> None:
         from mozilcode.tools.read_file import ReadFile

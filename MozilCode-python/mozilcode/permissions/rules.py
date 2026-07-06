@@ -21,6 +21,14 @@ _CONTENT_FIELDS: dict[str, str] = {
     "Grep": "pattern",
 }
 
+_SANDBOX_PATH_FIELDS: dict[str, tuple[str, str]] = {
+    "ReadFile": ("file_path", ""),
+    "WriteFile": ("file_path", ""),
+    "EditFile": ("file_path", ""),
+    "Glob": ("path", "."),
+    "Grep": ("path", "."),
+}
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -46,7 +54,21 @@ def extract_content(tool_name: str, arguments: dict[str, Any]) -> str:
     field = _CONTENT_FIELDS.get(tool_name)
     if field is None:
         return ""
-    return str(arguments.get(field, ""))
+    value = arguments.get(field, "")
+    return "" if value is None else str(value)
+
+
+def extract_sandbox_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    field_spec = _SANDBOX_PATH_FIELDS.get(tool_name)
+    if field_spec is None:
+        return None
+    field, default = field_spec
+    value = arguments.get(field, default)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return ""
+    return value
 
 
 def _load_rules_file(path: Path) -> list[Rule]:

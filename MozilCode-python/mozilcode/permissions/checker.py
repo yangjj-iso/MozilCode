@@ -6,7 +6,11 @@ from typing import Any
 
 from mozilcode.permissions.dangerous import DangerousCommandDetector, is_safe_command
 from mozilcode.permissions.modes import DecisionEffect, PermissionMode, mode_decide
-from mozilcode.permissions.rules import RuleEngine, extract_content
+from mozilcode.permissions.rules import (
+    RuleEngine,
+    extract_content,
+    extract_sandbox_path,
+)
 from mozilcode.permissions.sandbox import PathSandbox
 from mozilcode.tools.base import Tool
 
@@ -48,8 +52,8 @@ class PermissionChecker:
         if decision is not None:
             return decision
 
-        # Layer 2: 路径沙箱（仅文件类工具）
-        decision = self._check_path_sandbox(tool, content)
+        # Layer 2: 路径沙箱（仅实际触达文件系统的工具）
+        decision = self._check_path_sandbox(tool, arguments)
         if decision is not None:
             return decision
 
@@ -89,10 +93,19 @@ class PermissionChecker:
             return Decision(effect="deny", reason=f"危险命令拦截: {reason}")
         return None
 
-    def _check_path_sandbox(self, tool: Tool, content: str) -> Decision | None:
-        if tool.category not in ("read", "write") or not content:
+    def _check_path_sandbox(
+        self,
+        tool: Tool,
+        arguments: dict[str, Any],
+    ) -> Decision | None:
+        if tool.category not in ("read", "write"):
             return None
-        ok, reason = self.sandbox.check(content)
+        target_path = extract_sandbox_path(tool.name, arguments)
+        if target_path is None:
+            return None
+        if not target_path.strip():
+            return Decision(effect="deny", reason="路径沙箱拦截: 缺少路径参数")
+        ok, reason = self.sandbox.check(target_path)
         if not ok:
             return Decision(effect="deny", reason=f"路径沙箱拦截: {reason}")
         return None
