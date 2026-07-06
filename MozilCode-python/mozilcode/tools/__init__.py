@@ -8,6 +8,10 @@ if TYPE_CHECKING:
     from mozilcode.cache import FileCache
 
 
+class ToolRegistryError(ValueError):
+    pass
+
+
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
@@ -15,6 +19,8 @@ class ToolRegistry:
         self._discovered: set[str] = set()
 
     def register(self, tool: Tool) -> None:
+        if tool.name in self._tools:
+            raise ToolRegistryError(f"tool already registered: {tool.name}")
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool | None:

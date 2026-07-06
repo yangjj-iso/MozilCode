@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from mozilcode.tools import ToolRegistry
+from mozilcode.tools import ToolRegistry, ToolRegistryError
 from mozilcode.tools.base import Tool, ToolResult
 from mozilcode.tools.impl.tool_search import ToolSearchTool
 
@@ -63,6 +63,13 @@ def test_should_defer_default_false():
     """Tool 基类的 should_defer 默认值应为 False。"""
     tool = _NormalTool()
     assert tool.should_defer is False
+
+def test_tool_registry_rejects_duplicate_tool_names():
+    reg = ToolRegistry()
+    reg.register(_NormalTool())
+
+    with pytest.raises(ToolRegistryError, match="tool already registered: NormalTool"):
+        reg.register(_NormalTool())
 
 def test_mcp_tool_deferred():
     """MCPToolWrapper 在构造时会把 should_defer 设为 True。"""
