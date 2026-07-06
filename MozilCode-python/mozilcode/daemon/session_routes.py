@@ -22,6 +22,15 @@ from mozilcode.daemon.responses import (
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 PERMISSION_RESPONSES = {"allow", "deny", "allow_always"}
+MODE_REQUESTS = {
+    "acceptEdits",
+    "bypassPermissions",
+    "custom",
+    "default",
+    "do",
+    "dontAsk",
+    "plan",
+}
 
 
 async def health(request: Request) -> JSONResponse:
@@ -93,7 +102,7 @@ async def set_session_mode(request: Request) -> JSONResponse:
         return parsed.error_response()
     body = parsed.payload
     try:
-        mode = string_field(body, "mode").strip()
+        mode = choice_field(body, "mode", MODE_REQUESTS).strip()
     except BodyFieldError as e:
         return bad_request_response(str(e))
     if not mode:

@@ -79,6 +79,14 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
         ("/api/session", {"work_dir": []}, "'work_dir' must be a string"),
         ("/api/session/missing/mode", {"mode": 1}, "'mode' must be a string"),
         (
+            "/api/session/missing/mode",
+            {"mode": "invalid"},
+            (
+                "'mode' must be one of: acceptEdits, bypassPermissions, "
+                "custom, default, do, dontAsk, plan"
+            ),
+        ),
+        (
             "/api/task",
             {"session_id": 1, "prompt": "go"},
             "'session_id' must be a string",
