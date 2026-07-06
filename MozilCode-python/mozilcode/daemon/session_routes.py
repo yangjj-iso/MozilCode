@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import (
     BodyFieldError,
+    choice_field,
     object_field,
     read_json_object,
     string_field,
@@ -20,6 +21,7 @@ from mozilcode.daemon.responses import (
 )
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
+PERMISSION_RESPONSES = {"allow", "deny", "allow_always"}
 
 
 async def health(request: Request) -> JSONResponse:
@@ -156,7 +158,7 @@ async def resolve_permission(request: Request) -> JSONResponse:
     body = parsed.payload
     try:
         request_id = string_field(body, "request_id")
-        response = string_field(body, "response", "deny")
+        response = choice_field(body, "response", PERMISSION_RESPONSES, "deny")
     except BodyFieldError as e:
         return bad_request_response(str(e))
     ok = await server.resolve_permission(sid, request_id, response)

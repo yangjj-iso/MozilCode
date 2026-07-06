@@ -99,6 +99,11 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
             "'response' must be a string",
         ),
         (
+            "/api/permission/missing",
+            {"request_id": "req", "response": "maybe"},
+            "'response' must be one of: allow, allow_always, deny",
+        ),
+        (
             "/api/askuser/missing",
             {"request_id": 1},
             "'request_id' must be a string",

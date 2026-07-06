@@ -54,6 +54,19 @@ def string_field(
     return value
 
 
+def choice_field(
+    payload: dict[str, Any],
+    name: str,
+    choices: set[str],
+    default: str = "",
+) -> str:
+    value = string_field(payload, name, default)
+    if value not in choices:
+        allowed = ", ".join(sorted(choices))
+        raise BodyFieldError(f"'{name}' must be one of: {allowed}")
+    return value
+
+
 def object_field(
     payload: dict[str, Any],
     name: str,
