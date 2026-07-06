@@ -12,6 +12,13 @@ from mozilcode.daemon.workspace_payloads import worktree_to_dict
 from mozilcode.worktree.models import Worktree
 
 
+def _symlink_dir_or_skip(link, target) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (NotImplementedError, OSError) as e:
+        pytest.skip(f"directory symlinks are not available: {e}")
+
+
 def test_task_to_dict_uses_running_clock_for_elapsed():
     task = SimpleNamespace(
         id="task-1",
@@ -82,6 +89,27 @@ def test_list_workspace_directory_sorts_directories_before_files(tmp_path):
         {"name": "b-file.txt", "is_dir": False},
         {"name": "z-file.txt", "is_dir": False},
     ]
+
+
+def test_list_workspace_directory_marks_internal_symlink_directory(tmp_path):
+    (tmp_path / "target").mkdir()
+    _symlink_dir_or_skip(tmp_path / "link-in", tmp_path / "target")
+
+    payload = list_workspace_directory(tmp_path)
+
+    assert {"name": "link-in", "is_dir": True} in payload["entries"]
+
+
+def test_list_workspace_directory_does_not_enter_external_symlink_directory(
+    tmp_path,
+) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir(exist_ok=True)
+    _symlink_dir_or_skip(tmp_path / "link-out", outside)
+
+    payload = list_workspace_directory(tmp_path)
+
+    assert {"name": "link-out", "is_dir": False} in payload["entries"]
 
 
 def test_list_workspace_directory_rejects_path_outside_workspace(tmp_path):

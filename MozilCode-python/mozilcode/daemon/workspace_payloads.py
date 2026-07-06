@@ -42,6 +42,18 @@ def worktree_to_dict(worktree: Any, current_name: str | None = None) -> dict:
     }
 
 
+def _entry_is_workspace_dir(path: Path, resolved_root: Path) -> bool:
+    if not path.is_dir():
+        return False
+    if not path.is_symlink():
+        return True
+    try:
+        path.resolve().relative_to(resolved_root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def list_workspace_directory(root: Path, relative_path: str = "") -> dict:
     resolved_root = root.resolve()
     target = (resolved_root / (relative_path or "")).resolve()
@@ -54,10 +66,15 @@ def list_workspace_directory(root: Path, relative_path: str = "") -> dict:
         raise WorkspacePathError("not a directory")
 
     try:
-        entries = [
-            {"name": path.name, "is_dir": path.is_dir()}
-            for path in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-        ]
+        entries = []
+        for path in target.iterdir():
+            entries.append(
+                {
+                    "name": path.name,
+                    "is_dir": _entry_is_workspace_dir(path, resolved_root),
+                }
+            )
+        entries.sort(key=lambda entry: (not entry["is_dir"], entry["name"].lower()))
     except OSError as e:
         raise WorkspacePathError(str(e), status_code=500) from e
 
