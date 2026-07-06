@@ -150,7 +150,7 @@ def test_settings_config_preserves_existing_api_key_when_provider_is_renamed():
         "providers": [
             {
                 "previous_name": "openai",
-                "name": "official-openai",
+                "name": "renamed-openai",
                 "protocol": "openai",
                 "base_url": "https://api.openai.com/v1",
                 "model": "gpt-4.1",
@@ -159,7 +159,7 @@ def test_settings_config_preserves_existing_api_key_when_provider_is_renamed():
         ],
     }, current)
 
-    assert raw["providers"][0]["name"] == "official-openai"
+    assert raw["providers"][0]["name"] == "renamed-openai"
     assert raw["providers"][0]["api_key"] == "openai-key"
 
 
@@ -224,7 +224,7 @@ def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
     ]
 
 
-def test_root_route_is_not_a_frontend_shell(tmp_path):
+def test_root_route_is_not_an_application_shell(tmp_path):
     provider = ProviderConfig(
         name="openai",
         protocol="openai",
@@ -237,6 +237,24 @@ def test_root_route_is_not_a_frontend_shell(tmp_path):
         response = client.get("/")
 
     assert response.status_code == 404
+
+
+def test_daemon_does_not_enable_browser_cors(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/health",
+            headers={"origin": "http://127.0.0.1:5173"},
+        )
+
+    assert "access-control-allow-origin" not in response.headers
 
 
 def test_a2a_agent_card_route_is_available(tmp_path):
@@ -269,7 +287,7 @@ def test_route_registry_keeps_local_daemon_surface_only():
     assert "/api/settings/telegrambot" not in paths
 
 
-def test_cloud_bot_settings_routes_are_removed(tmp_path):
+def test_external_bot_settings_routes_are_removed(tmp_path):
     provider = ProviderConfig(
         name="openai",
         protocol="openai",

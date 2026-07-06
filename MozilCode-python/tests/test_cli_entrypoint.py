@@ -10,7 +10,7 @@ from mozilcode import __main__ as cli
 from mozilcode.permissions import PermissionMode
 
 
-def test_main_without_prompt_rejects_removed_interactive_mode(
+def test_main_without_prompt_requires_headless_prompt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     capsys: pytest.CaptureFixture[str],
@@ -23,7 +23,7 @@ def test_main_without_prompt_rejects_removed_interactive_mode(
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "Interactive GUI/TUI mode has been removed" in err
+    assert "A prompt is required for headless CLI execution" in err
 
 
 @pytest.mark.asyncio

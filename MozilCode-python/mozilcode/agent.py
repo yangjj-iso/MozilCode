@@ -415,7 +415,7 @@ class Agent:
                        "glad", "keen", "kind", "lean", "mild", "neat", "pure", "safe",
                        "slim", "soft", "tall", "warm", "wise", "grand", "swift", "vivid"]
         _NOUNS = ["sketch", "draft", "spark", "bloom", "trail", "ridge", "creek", "grove",
-                  "cliff", "cloud", "field", "forge", "frost", "haven", "pearl", "stone",
+                  "cliff", "cove", "field", "forge", "frost", "haven", "pearl", "stone",
                   "storm", "river", "tower", "delta", "flame", "orbit", "pulse", "shore"]
         plans_dir = Path(self.work_dir) / ".mozilcode" / "plans"
         plans_dir.mkdir(parents=True, exist_ok=True)

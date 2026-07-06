@@ -40,8 +40,8 @@ def main() -> None:
 
     if args.p is None:
         print(
-            "Interactive GUI/TUI mode has been removed. "
-            'Use `mozilcode -p "your prompt"` for headless CLI execution '
+            "A prompt is required for headless CLI execution. "
+            'Use `mozilcode -p "your prompt"` '
             "or `mozilcode-daemon` for the local API daemon.",
             file=sys.stderr,
         )

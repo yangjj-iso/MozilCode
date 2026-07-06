@@ -16,7 +16,7 @@ Run the headless CLI:
 uv run mozilcode -p "summarize this repository"
 ```
 
-Plain `mozilcode` no longer launches a GUI/TUI.
+Plain `mozilcode` is intentionally headless; pass `-p` to run a prompt.
 
 Run the local daemon:
 
@@ -33,7 +33,7 @@ The daemon exposes a non-streaming local A2A bridge:
 - Agent card: `GET http://127.0.0.1:7800/.well-known/agent-card.json`
 - JSON-RPC: `POST http://127.0.0.1:7800/a2a/rpc`
 
-GUI/TUI and external bot/cloud adapters are intentionally not part of this package.
+External bot adapters and hosted account integrations are intentionally not part of this package.
 
 ## Memory plugins
 

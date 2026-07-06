@@ -41,15 +41,6 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
     app.state.server = server
     app.state.a2a_bridge = a2a_bridge
 
-    # CORS: allow local clients and browser-based API tools.
-    from starlette.middleware.cors import CORSMiddleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     return app
 
 

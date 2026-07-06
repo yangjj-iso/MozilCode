@@ -11,14 +11,6 @@ __pycache__/
 build/
 dist/
 
-# Node / Tauri
-mewcode-gui/node_modules/
-mewcode-gui/dist/
-mewcode-gui/src-tauri/target/
-
-# Java
-mewcode-cloud/target/
-
 # Local runtime state
 .mozilcode/
 .mewcode/
@@ -31,7 +23,6 @@ MozilCode-python/snake.html
 .env
 .env.*
 !.env.example
-!mewcode-gui/.env.example
 
 # Local databases
 *.db
