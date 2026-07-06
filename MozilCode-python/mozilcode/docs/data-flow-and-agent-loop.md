@@ -27,7 +27,7 @@
 
 5. **工具层**
    - `mozilcode/tools/base.py`：工具基类、工具结果、streaming 事件类型。
-   - `mozilcode/tools/__init__.py`：`ToolRegistry`，负责工具注册、启停、schema 输出、延迟工具发现。
+   - `mozilcode/tools/registry.py`：`ToolRegistry`，负责工具注册、启停、schema 输出、延迟工具发现。
    - `mozilcode/tools/*.py`：内置工具，如 `ReadFile`、`WriteFile`、`EditFile`、`Bash`、`Glob`、`Grep`、`Agent`、`ToolSearch`、`AskUserQuestion`。
    - `mozilcode/mcp/*`：把 MCP server 暴露的工具包装成统一 `Tool`。
 
@@ -623,7 +623,7 @@ _run_prompt or AgentTool or TaskManager
 2. `mozilcode/conversation.py`：理解内部消息结构。
 3. `mozilcode/serialization.py`：理解内部消息怎样映射到各家模型 API。
 4. `mozilcode/client.py`：理解 streaming 响应怎样归一化。
-5. `mozilcode/tools/__init__.py` 和 `mozilcode/tools/base.py`：理解工具注册和 schema。
+5. `mozilcode/tools/registry.py`、`mozilcode/tools/__init__.py` 和 `mozilcode/tools/base.py`：理解工具注册、默认工具装配和 schema。
 6. `mozilcode/permissions/checker.py`：理解工具调用安全边界。
 7. `mozilcode/context/manager.py`：理解长对话、工具大输出、compact。
 8. `mozilcode/memory/session.py`：理解多轮会话如何持久化和恢复。
