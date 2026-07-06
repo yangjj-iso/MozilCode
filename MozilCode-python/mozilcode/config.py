@@ -146,15 +146,21 @@ class MemoryConfig:
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
+    permission_mode_declared: bool = False
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     raw_hooks: list[dict] = field(default_factory=list)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     memory_declared: bool = False
     enable_fork: bool = False
+    enable_fork_declared: bool = False
     enable_verification_agent: bool = False
+    enable_verification_agent_declared: bool = False
     worktree: WorktreeConfig = field(default_factory=WorktreeConfig)
+    worktree_declared: bool = False
     teammate_mode: str = ""
+    teammate_mode_declared: bool = False
     enable_coordinator_mode: bool = False
+    enable_coordinator_mode_declared: bool = False
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -164,7 +170,8 @@ def _load_single_file(path: Path) -> AppConfig:
         raise ConfigError(f"Failed to parse config {path}: {e}") from e
 
     validated = validate_config_structure(raw)
-    memory_declared = isinstance(raw, dict) and "memory" in raw
+    raw_keys = raw if isinstance(raw, dict) else {}
+    memory_declared = "memory" in raw_keys
 
     providers = [
         ProviderConfig(
@@ -216,22 +223,28 @@ def _load_single_file(path: Path) -> AppConfig:
     return AppConfig(
         providers=providers,
         permission_mode=validated["permission_mode"],
+        permission_mode_declared="permission_mode" in raw_keys,
         mcp_servers=mcp_servers,
         raw_hooks=validated["hooks"],
         memory=memory_cfg,
         memory_declared=memory_declared,
         enable_fork=validated["enable_fork"],
+        enable_fork_declared="enable_fork" in raw_keys,
         enable_verification_agent=validated["enable_verification_agent"],
+        enable_verification_agent_declared="enable_verification_agent" in raw_keys,
         worktree=worktree_cfg,
+        worktree_declared="worktree" in raw_keys,
         teammate_mode=validated["teammate_mode"],
+        teammate_mode_declared="teammate_mode" in raw_keys,
         enable_coordinator_mode=validated["enable_coordinator_mode"],
+        enable_coordinator_mode_declared="enable_coordinator_mode" in raw_keys,
     )
 
 
 def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
     if override.providers:
         base.providers = override.providers
-    if override.permission_mode != "default":
+    if override.permission_mode_declared:
         base.permission_mode = override.permission_mode
 
     if override.mcp_servers:
@@ -247,14 +260,21 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
     if override.memory_declared:
         base.memory = override.memory
         base.memory_declared = True
-    if override.enable_fork:
-        base.enable_fork = True
-    if override.enable_verification_agent:
-        base.enable_verification_agent = True
-    if override.teammate_mode:
+    if override.enable_fork_declared:
+        base.enable_fork = override.enable_fork
+        base.enable_fork_declared = True
+    if override.enable_verification_agent_declared:
+        base.enable_verification_agent = override.enable_verification_agent
+        base.enable_verification_agent_declared = True
+    if override.worktree_declared:
+        base.worktree = override.worktree
+        base.worktree_declared = True
+    if override.teammate_mode_declared:
         base.teammate_mode = override.teammate_mode
-    if override.enable_coordinator_mode:
-        base.enable_coordinator_mode = True
+        base.teammate_mode_declared = True
+    if override.enable_coordinator_mode_declared:
+        base.enable_coordinator_mode = override.enable_coordinator_mode
+        base.enable_coordinator_mode_declared = True
     return base
 
 
