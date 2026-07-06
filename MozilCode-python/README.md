@@ -1,6 +1,6 @@
 # MozilCode Python
 
-This package contains the MozilCode core runtime, CLI, daemon server, tools, MCP integration, and tests.
+This package contains the MozilCode core runtime, headless CLI, local daemon server, tools, MCP integration, and tests.
 
 ## Development
 
@@ -10,11 +10,13 @@ Run the non-daemon test suite:
 uv run pytest -q -k "not daemon"
 ```
 
-Run the CLI:
+Run the headless CLI:
 
 ```powershell
-uv run mozilcode
+uv run mozilcode -p "summarize this repository"
 ```
+
+Plain `mozilcode` no longer launches a GUI/TUI.
 
 Run the local daemon:
 
@@ -31,7 +33,7 @@ The daemon exposes a non-streaming local A2A bridge:
 - Agent card: `GET http://127.0.0.1:7800/.well-known/agent-card.json`
 - JSON-RPC: `POST http://127.0.0.1:7800/a2a/rpc`
 
-GUI and external bot/cloud adapters are intentionally not part of this package.
+GUI/TUI and external bot/cloud adapters are intentionally not part of this package.
 
 ## Memory plugins
 

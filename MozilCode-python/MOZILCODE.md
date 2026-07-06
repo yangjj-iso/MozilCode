@@ -2,8 +2,8 @@
 
 ## 技术栈
 - Python 3.12+
-- TUI 框架：Textual
 - 异步：asyncio
+- 本地 daemon：Starlette / Uvicorn
 
 ## 代码规范
 - commit message 用英文

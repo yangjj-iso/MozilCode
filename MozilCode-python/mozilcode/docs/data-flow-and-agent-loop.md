@@ -1,6 +1,6 @@
 # MozilCode 数据传输与流程框架总结
 
-本文总结当前项目里一次用户请求从 UI/CLI 进入、经过多轮模型交互、触发工具调用、写回对话历史、最终收敛为答案的完整路径。重点覆盖三个功能面：
+本文总结当前项目里一次用户请求从 daemon/headless CLI 进入、经过多轮模型交互、触发工具调用、写回对话历史、最终收敛为答案的完整路径。重点覆盖三个功能面：
 
 - 多轮对话功能
 - 工具调用功能
@@ -11,8 +11,8 @@
 当前代码可以按 6 层理解：
 
 1. **入口层**
-   - `mozilcode/__main__.py`：CLI 入口，负责读取配置、初始化 hooks、进入交互 TUI 或 `-p` 非交互模式。
-   - `mozilcode/app.py`：Textual TUI，负责用户输入、命令分发、渲染流式输出、权限弹窗、会话保存/恢复。
+   - `mozilcode/__main__.py`：headless CLI 入口，负责读取配置、初始化 hooks，并执行 `-p` 非交互任务。
+   - `mozilcode/daemon/server.py`：本地 daemon 入口，提供 HTTP/WebSocket API、会话管理和 A2A 桥接。
 
 2. **对话状态层**
    - `mozilcode/conversation.py`：定义内部消息结构 `Message`、工具调用块 `ToolUseBlock`、工具结果块 `ToolResultBlock`，以及 `ConversationManager`。
@@ -121,7 +121,7 @@ llm_stream = self.client.stream(api_conv, system=system, tools=tools)
 - `ToolCallStart` / `ToolCallDelta` / `ToolCallComplete`：工具调用增量和完成事件
 - `StreamEnd`：本次模型响应结束，携带 token 用量和停止原因
 
-`agent.py` 里的 `StreamCollector` 一边把这些 `StreamEvent` 汇总成 `LLMResponse`，一边再转换成 UI/上层可消费的 `AgentEvent`：
+`agent.py` 里的 `StreamCollector` 一边把这些 `StreamEvent` 汇总成 `LLMResponse`，一边再转换成 daemon / headless CLI 可消费的 `AgentEvent`：
 
 - 文本流：`StreamText`
 - 思考流：`ThinkingText`
@@ -135,33 +135,33 @@ llm_stream = self.client.stream(api_conv, system=system, tools=tools)
 
 ## 四、多轮对话功能
 
-交互模式的多轮对话主要由 `MozilCodeApp` 和同一个 `ConversationManager` 实例共同维持。
+daemon 会话和 headless CLI 都通过同一个 `ConversationManager` 实例维持多轮上下文。
 
 ### 1. 用户输入进入系统
 
-`ChatInput` 提交后进入：
+daemon 任务请求进入：
 
 ```text
-ChatInput.Submitted
-  -> MozilCodeApp.on_chat_input_submitted
-  -> MozilCodeApp._dispatch_command
+POST /api/task
+  -> DaemonServer.start_task
+  -> Agent.run(conversation)
 ```
 
-如果输入是 `/xxx`，走命令系统；如果不是命令，走：
+headless CLI 入口进入：
 
 ```text
-MozilCodeApp._send_message(text)
+mozilcode -p PROMPT
+  -> _run_prompt
+  -> Agent.run_to_completion
 ```
 
-`_send_message` 会做几件事：
+发送一条用户消息时会做几件事：
 
-1. 如果 MCP 还在连接，先等待。
-2. 如果文本里有 `@file` 引用，用 `expand_at_refs` 把文件内容展开进用户消息。
-3. 异步预取相关长期记忆。
-4. 把用户消息追加到 `conversation.history`。
-5. 把用户消息追加到当前 session JSONL。
-6. 注入 MCP instructions 和记忆召回结果。
-7. 调用：
+1. 异步预取相关长期记忆。
+2. 把用户消息追加到 `conversation.history`。
+3. 把用户消息追加到当前 session JSONL（daemon 会话）。
+4. 注入 MCP instructions 和记忆召回结果。
+5. 调用：
 
 ```python
 async for event in self.agent.run(self.conversation):
@@ -481,16 +481,16 @@ print(last_result)
 
 最后返回 `last_text`，也就是最近一次模型文本输出。
 
-### 3. 与交互式 run 的主要区别
+### 3. `run` 与 `run_to_completion` 的主要区别
 
 | 对比点 | `Agent.run` | `Agent.run_to_completion` |
 | --- | --- | --- |
 | 返回方式 | async iterator，持续 yield `AgentEvent` | 返回最终文本 |
-| UI 渲染 | App 根据事件实时渲染 | 无 UI，只有可选 `event_callback` |
-| 权限询问 | 可以 yield `PermissionRequest` 等待 UI | 不能弹窗，ask 通常转为错误 |
+| 事件消费 | daemon/WebSocket 根据事件实时转发 | 只有可选 `event_callback` |
+| 权限询问 | 可以 yield `PermissionRequest` 等待调用方响应 | 不能交互询问，ask 通常转为错误 |
 | 工具执行 | 支持并发安全工具批量并发 | 当前实现中按工具顺序执行 |
-| 会话保存 | App 在 `TurnComplete` / `LoopComplete` 增量保存 | 调用方自行决定是否保存 |
-| 典型用途 | TUI 多轮聊天 | CLI、子 Agent、后台任务 |
+| 会话保存 | daemon 在 `TurnComplete` / `LoopComplete` 增量保存 | 调用方自行决定是否保存 |
+| 典型用途 | daemon 多轮任务 | CLI、子 Agent、后台任务 |
 
 ## 七、上下文压缩与长对话控制
 
@@ -572,10 +572,10 @@ Agent 循环不会无限跑，主要保护包括：
 
 ## 十、最核心的调用链速记
 
-### 交互式多轮聊天
+### daemon 多轮任务
 
 ```text
-MozilCodeApp._send_message
+DaemonServer.start_task
   -> conversation.add_user_message
   -> session.append(user)
   -> Agent.run(conversation)
@@ -587,7 +587,7 @@ MozilCodeApp._send_message
      -> execute tools if any
      -> conversation.add_tool_results_message
      -> repeat until no tool calls
-  -> App consumes AgentEvent
+  -> daemon stream routes consume AgentEvent
   -> session.append(new messages)
 ```
 

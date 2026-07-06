@@ -170,7 +170,7 @@ class PermissionRequest:
 class AskUserRequest:
     """Yielded when AskUserQuestion tool needs user input.
 
-    The caller (TUI / daemon) must resolve ``future`` with a dict of
+    The caller (daemon / embedding runtime) must resolve ``future`` with a dict of
     {question_name: answer} via ``future.set_result(answers)``.
     """
     questions: list[dict[str, Any]]
@@ -1157,8 +1157,8 @@ class Agent:
             params = tool.params_model.model_validate(tc.arguments)
 
             # AskUserQuestion: yield an AskUserRequest event so the caller
-            # (TUI / daemon) can handle it via the event stream, instead of
-            # the old _pending_event side-channel that only worked in TUI.
+            # (daemon / embedding runtime) can handle it via the event stream,
+            # instead of the old _pending_event side-channel.
             if tc.tool_name == "AskUserQuestion":
                 from mozilcode.tools.ask_user import AskUserParams
 

@@ -1,10 +1,9 @@
 [project]
 name = "mozilcode"
 version = "0.2.0"
-description = "A terminal AI coding assistant"
+description = "A headless AI coding assistant runtime"
 requires-python = ">=3.11"
 dependencies = [
-    "textual>=2.1.0",
     "anthropic>=0.42.0",
     "openai>=1.60.0",
     "pyyaml>=6.0",

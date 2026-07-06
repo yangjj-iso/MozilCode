@@ -7,9 +7,9 @@
 
 ## 项目概况（一句话）
 
-**MozilCode** —— 基于 Python 从零实现的终端 AI 编码助手，支持 Anthropic / OpenAI 三协议，包含完整的 Agent 循环、工具系统、子 Agent、双层上下文压缩、权限控制、Skills/Hooks/MCP 扩展与多 Agent 协作。
+**MozilCode** —— 基于 Python 从零实现的无界面 AI 编码运行时，支持 Anthropic / OpenAI 三协议，包含完整的 Agent 循环、工具系统、子 Agent、双层上下文压缩、权限控制、Skills/Hooks/MCP 扩展与多 Agent 协作。
 
-- 技术栈：Python 3.12 · asyncio · Textual(TUI) · Pydantic · MCP
+- 技术栈：Python 3.12 · asyncio · Starlette/Uvicorn · Pydantic · MCP
 - 规模：主包约 1.8 万行 / 131 个模块，含约 7,700 行测试
 - 角色：独立设计与实现
 
@@ -17,14 +17,14 @@
 
 ## 版本 A：一段式（适合简历空间紧张）
 
-> **MozilCode — 终端 AI 编码助手（Python / 个人项目）**
+> **MozilCode — 无界面 AI 编码运行时（Python / 个人项目）**
 > 从零设计并实现了一套类 Claude Code 的 AI Agent 系统。核心包括：模型↔工具流式 Agent 循环（支持工具批量并行、流式期预执行、max_tokens 中断恢复）；统一 Anthropic / OpenAI Responses / Chat Completions 三协议的模型适配层；双层上下文压缩（超大 tool 结果按预算替换+落盘 / 接近窗口自动摘要并保留恢复快照，支持 200K 窗口下的无限长对话）；6 种权限模式 + 规则引擎 + 全生命周期 Hooks；Skills / MCP 扩展体系；基于 mailbox 的多 Agent 协作框架（进程内 / tmux / iTerm2 三后端）。主包约 1.8 万行。
 
 ---
 
 ## 版本 B：Bullet 式（推荐，信息密度高）
 
-**MozilCode — 终端 AI 编码助手** ｜ Python 3.12 · asyncio · Textual · Pydantic · MCP ｜ 个人项目
+**MozilCode — 无界面 AI 编码运行时** ｜ Python 3.12 · asyncio · Starlette/Uvicorn · Pydantic · MCP ｜ 个人项目
 
 - **设计并实现 Agent 核心循环**：模型↔工具流式交互至收敛；按"并发安全"对工具调用分区，安全工具批量并行执行；在 LLM streaming 期间预启动工具执行，减少串行等待；实现 max_tokens 触顶后的分级恢复（提额 + 分段续写），避免长输出被截断。
 - **自研双层上下文压缩**：Layer 1 对超大工具结果按 token 预算替换为"摘要 + 落盘文件"并记录替换快照；Layer 2 在接近 context window 时自动摘要历史对话，并通过 RecoveryState 重新附加最近的文件读取内容，保证压缩后工作上下文不丢失，支持 200K 窗口下无限长对话。
@@ -32,13 +32,13 @@
 - **实现 6 种权限模式 + 规则引擎**：覆盖 default / acceptEdits / plan / bypassPermissions / custom / dontAsk；支持 allow_always 自动生成规则；pre/post hooks 可在工具执行前后拦截、改写或拒绝。
 - **构建扩展体系**：23 个内置工具 + 17 个斜杠命令；Skills（含 commit/review/test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
 - **设计 Teams 多 Agent 协作框架**：通过 mailbox 实现 Agent 间异步消息通信，支持进程内 / tmux / iTerm2 三种后端，可派生子 Agent 后台执行并共享任务列表。
-- **工程化**：基于 Textual 构建 TUI；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
+- **工程化**：提供 headless CLI 与本地 daemon；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
 
 ---
 
 ## 版本 C：总分式（总起 + 分条展开，推荐用于简历正文主体）
 
-**MozilCode — 终端 AI 编码助手** ｜ Python 3.12 · asyncio · Textual · Pydantic · MCP ｜ 个人项目
+**MozilCode — 无界面 AI 编码运行时** ｜ Python 3.12 · asyncio · Starlette/Uvicorn · Pydantic · MCP ｜ 个人项目
 
 从零设计并实现了一套类 Claude Code 的 AI Agent 系统，主包约 1.8 万行 / 131 个模块。系统以"模型↔工具流式交互至收敛"为核心循环，向上抽象出统一三协议（Anthropic / OpenAI Responses / Chat Completions）的模型适配层，向下提供 23 个内置工具与可扩展的 Skills / MCP / Hooks 体系；通过双层上下文压缩在 200K 窗口下支持无限长对话，并以 6 种权限模式 + 规则引擎保障执行安全。具体技术工作如下：
 
@@ -48,13 +48,13 @@
 - **权限模式 + 规则引擎**：覆盖 default / acceptEdits / plan / bypassPermissions / custom / dontAsk 六种模式；支持 allow_always 自动生成规则；pre/post hooks 可在工具执行前后拦截、改写或拒绝。
 - **扩展体系**：23 个内置工具 + 17 个斜杠命令；Skills（含 commit / review / test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
 - **Teams 多 Agent 协作**：通过 mailbox 实现 Agent 间异步消息通信，支持进程内 / tmux / iTerm2 三种后端，可派生子 Agent 后台执行并共享任务列表。
-- **工程化**：基于 Textual 构建 TUI；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
+- **工程化**：提供 headless CLI 与本地 daemon；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
 
 ---
 
 ## 版本 D：精简版（3 条，适合简历空间紧张）
 
-**MozilCode — 终端 AI 编码助手** ｜ Python · asyncio · Textual · MCP ｜ 个人项目（~1.8 万行）
+**MozilCode — 无界面 AI 编码运行时** ｜ Python · asyncio · Starlette/Uvicorn · MCP ｜ 个人项目（~1.8 万行）
 
 从零实现类 Claude Code 的 AI Agent 系统，核心是模型↔工具流式交互至收敛的 Agent 循环，支持 Anthropic / OpenAI 三协议统一适配。
 
@@ -66,7 +66,7 @@
 
 ## 版本 E：极简版（2 条，空间极紧时用）
 
-**MozilCode — 终端 AI 编码助手** ｜ Python · asyncio · Textual · MCP ｜ 个人项目（~1.8 万行）
+**MozilCode — 无界面 AI 编码运行时** ｜ Python · asyncio · Starlette/Uvicorn · MCP ｜ 个人项目（~1.8 万行）
 
 从零实现类 Claude Code 的 AI Agent 系统，核心为模型↔工具流式交互至收敛的 Agent 循环，统一适配 Anthropic / OpenAI 三协议。
 
@@ -77,7 +77,7 @@
 
 ## 版本 F：逐条压缩版（6 条，每条一行）
 
-**MozilCode — 终端 AI 编码助手** ｜ Python · asyncio · Textual · MCP ｜ 个人项目（~1.8 万行）
+**MozilCode — 无界面 AI 编码运行时** ｜ Python · asyncio · Starlette/Uvicorn · MCP ｜ 个人项目（~1.8 万行）
 
 从零实现类 Claude Code 的 AI Agent 系统：模型↔工具流式交互循环为核心，向上统一 Anthropic / OpenAI 三协议，向下提供 23 工具 + Skills / MCP / Hooks 扩展；双层上下文压缩支持 200K 窗口无限长对话，6 种权限模式 + 规则引擎保障执行安全。
 
