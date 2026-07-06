@@ -23,7 +23,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import yaml
 from starlette.applications import Starlette
@@ -33,7 +32,7 @@ from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig, WorktreeConfig
-from mozilcode.validator import ConfigError, validate_config_structure, validate_memory
+from mozilcode.validator import ConfigError, validate_config_structure
 from mozilcode.client import LLMError, create_client, resolve_context_window
 from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
@@ -63,7 +62,6 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.gui_settings import (
-    coerce_bool as _coerce_bool,
     load_gui_settings as _load_gui_settings,
     public_qqbot_status as _public_qqbot_status,
     public_telegrambot_status as _public_telegrambot_status,
@@ -72,6 +70,15 @@ from mozilcode.daemon.gui_settings import (
     resolve_telegrambot_config as _resolve_telegrambot_config,
     save_gui_settings as _save_gui_settings,
     telegrambot_settings_from_payload as _telegrambot_settings_from_payload,
+)
+from mozilcode.daemon.config_settings import (
+    USER_CONFIG_FILE as _USER_CONFIG_FILE,
+    app_config_to_raw as _app_config_to_raw,
+    config_from_gui_payload as _config_from_gui_payload,
+    memory_settings_from_payload as _memory_settings_from_payload,
+    public_config as _public_config,
+    public_memory_settings as _public_memory_settings,
+    write_user_config as _write_user_config,
 )
 from mozilcode.a2a.bridge import A2ABridge, A2AError
 from mozilcode.a2a.qq_official import create_official_qq_gateway
@@ -84,339 +91,9 @@ log = logging.getLogger(__name__)
 # (append-only serialized events used to replay the conversation on connect).
 _SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
 
-# First-run model configuration written by the GUI.
-_USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
-
 
 def _session_dir(sid: str) -> Path:
     return _SESSIONS_DIR / sid
-
-
-def _default_base_url(protocol: str) -> str:
-    if protocol == "anthropic":
-        return "https://api.anthropic.com"
-    if protocol == "openai":
-        return "https://api.openai.com/v1"
-    return ""
-
-
-def _normalize_base_url(protocol: str, base_url: str) -> str:
-    if protocol not in {"openai", "openai-compat"}:
-        return base_url
-    parsed = urlparse(base_url)
-    if (
-        parsed.scheme in {"http", "https"}
-        and (parsed.hostname or "").lower() in {"127.0.0.1", "localhost", "::1"}
-        and parsed.path in {"", "/"}
-    ):
-        return base_url.rstrip("/") + "/v1"
-    return base_url
-
-
-def _public_config(config: AppConfig | None, error: str = "") -> dict:
-    providers = []
-    if config is not None:
-        for provider in config.providers:
-            providers.append({
-                "name": provider.name,
-                "protocol": provider.protocol,
-                "base_url": provider.base_url,
-                "model": provider.model,
-                "api_key_set": bool(provider.api_key),
-                "thinking": provider.thinking,
-                "context_window": provider.context_window,
-                "max_output_tokens": provider.max_output_tokens,
-            })
-    return {
-        "configured": config is not None and bool(config.providers),
-        "config_path": str(_USER_CONFIG_FILE),
-        "error": error,
-        "providers": providers,
-        "permission_mode": config.permission_mode if config is not None else "default",
-    }
-
-
-def _provider_from_gui_entry(
-    entry: dict,
-    current_by_name: dict[str, Any],
-    fallback: Any | None = None,
-) -> dict:
-    if not isinstance(entry, dict):
-        raise ConfigError("Provider entries must be mappings")
-    protocol = str(entry.get("protocol") or "openai").strip()
-    base_url = _normalize_base_url(
-        protocol,
-        str(entry.get("base_url") or _default_base_url(protocol)).strip(),
-    )
-    model = str(entry.get("model") or "").strip()
-    name = str(entry.get("name") or protocol or model or "default").strip()
-    api_key = str(entry.get("api_key") or "").strip()
-    previous_name = str(entry.get("previous_name") or entry.get("_previous_name") or "").strip()
-    current_provider = current_by_name.get(name)
-    if current_provider is None and previous_name:
-        current_provider = current_by_name.get(previous_name)
-    if not api_key and current_provider is not None:
-        api_key = current_provider.api_key
-    elif not api_key and fallback is not None:
-        api_key = fallback.api_key
-
-    return {
-        "name": name,
-        "protocol": protocol,
-        "base_url": base_url,
-        "model": model,
-        "api_key": api_key,
-        "thinking": _coerce_bool(entry.get("thinking"), False),
-        "context_window": int(entry.get("context_window") or 0),
-        "max_output_tokens": int(entry.get("max_output_tokens") or 0),
-    }
-
-
-def _providers_from_gui_payload(body: dict, current: AppConfig | None = None) -> list[dict]:
-    current_providers = current.providers if current is not None else []
-    current_by_name = {provider.name: provider for provider in current_providers}
-    fallback = current_providers[0] if current_providers else None
-    raw_providers = body.get("providers")
-    if raw_providers is None:
-        providers = [_provider_from_gui_entry(body, current_by_name, fallback)]
-    else:
-        if not isinstance(raw_providers, list):
-            raise ConfigError("'providers' must be a list")
-        providers = [
-            _provider_from_gui_entry(entry, current_by_name)
-            for entry in raw_providers
-        ]
-
-    names = [provider["name"] for provider in providers]
-    duplicates = sorted({name for name in names if names.count(name) > 1})
-    if duplicates:
-        raise ConfigError(f"Duplicate provider names: {', '.join(duplicates)}")
-    return providers
-
-
-def _config_from_gui_payload(body: dict, current: AppConfig | None = None) -> dict:
-    providers = _providers_from_gui_payload(body, current)
-    raw = _app_config_to_raw(current) if current is not None else {
-        "providers": [],
-        "permission_mode": "default",
-        "mcp_servers": [],
-        "hooks": [],
-        "enable_fork": False,
-        "enable_verification_agent": False,
-        "worktree": {
-            "symlink_directories": ["node_modules", ".venv", "vendor"],
-            "stale_cleanup_interval": 3600,
-            "stale_cutoff_hours": 24,
-        },
-        "memory": {
-            "enabled": True,
-            "providers": [
-                {
-                    "name": "markdown",
-                    "type": "builtin.markdown",
-                    "enabled": True,
-                    "config": {},
-                    "module": "",
-                    "class": "",
-                }
-            ],
-        },
-        "teammate_mode": "",
-        "enable_coordinator_mode": False,
-    }
-    raw["providers"] = providers
-    raw["permission_mode"] = str(body.get("permission_mode") or raw.get("permission_mode") or "default").strip()
-    if "enable_fork" in body:
-        raw["enable_fork"] = _coerce_bool(body.get("enable_fork"), False)
-    if "enable_verification_agent" in body:
-        raw["enable_verification_agent"] = _coerce_bool(body.get("enable_verification_agent"), False)
-    if "enable_coordinator_mode" in body:
-        raw["enable_coordinator_mode"] = _coerce_bool(body.get("enable_coordinator_mode"), False)
-    validate_config_structure(raw)
-    return raw
-
-
-def _write_user_config(raw: dict) -> AppConfig:
-    _USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _USER_CONFIG_FILE.write_text(
-        yaml.safe_dump(raw, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-    return load_config(_USER_CONFIG_FILE)
-
-
-_MEMORY_SECRET_KEY_PARTS = ("api_key", "apikey", "secret", "token", "password", "authorization")
-
-
-def _is_memory_secret_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(part in lowered for part in _MEMORY_SECRET_KEY_PARTS)
-
-
-def _memory_config_to_raw(memory: Any) -> dict:
-    return {
-        "enabled": bool(getattr(memory, "enabled", True)),
-        "providers": [
-            {
-                "name": provider.name,
-                "type": provider.type,
-                "enabled": provider.enabled,
-                "config": dict(provider.config or {}),
-                "module": provider.module,
-                "class": provider.class_name,
-            }
-            for provider in getattr(memory, "providers", [])
-        ],
-    }
-
-
-def _app_config_to_raw(config: AppConfig) -> dict:
-    return {
-        "providers": [
-            {
-                "name": provider.name,
-                "protocol": provider.protocol,
-                "base_url": provider.base_url,
-                "model": provider.model,
-                "api_key": provider.api_key,
-                "thinking": provider.thinking,
-                "context_window": provider.context_window,
-                "max_output_tokens": provider.max_output_tokens,
-            }
-            for provider in config.providers
-        ],
-        "permission_mode": config.permission_mode,
-        "mcp_servers": [
-            {
-                "name": server.name,
-                "command": server.command,
-                "args": server.args,
-                "url": server.url,
-                "headers": server.headers,
-                "env": server.env,
-            }
-            for server in config.mcp_servers
-        ],
-        "hooks": list(config.raw_hooks),
-        "memory": _memory_config_to_raw(config.memory),
-        "enable_fork": config.enable_fork,
-        "enable_verification_agent": config.enable_verification_agent,
-        "worktree": {
-            "symlink_directories": config.worktree.symlink_directories,
-            "stale_cleanup_interval": config.worktree.stale_cleanup_interval,
-            "stale_cutoff_hours": config.worktree.stale_cutoff_hours,
-        },
-        "teammate_mode": config.teammate_mode,
-        "enable_coordinator_mode": config.enable_coordinator_mode,
-    }
-
-
-def _sanitize_memory_config(value: Any) -> Any:
-    if isinstance(value, dict):
-        out = {}
-        for key, item in value.items():
-            out[key] = "" if _is_memory_secret_key(str(key)) else _sanitize_memory_config(item)
-        return out
-    if isinstance(value, list):
-        return [_sanitize_memory_config(item) for item in value]
-    return value
-
-
-def _memory_secret_fields(value: Any, prefix: str = "") -> list[str]:
-    if not isinstance(value, dict):
-        return []
-    fields: list[str] = []
-    for key, item in value.items():
-        path = f"{prefix}.{key}" if prefix else str(key)
-        if _is_memory_secret_key(str(key)):
-            fields.append(path)
-        elif isinstance(item, dict):
-            fields.extend(_memory_secret_fields(item, path))
-    return fields
-
-
-def _merge_memory_secrets(new_config: dict, current_config: dict) -> dict:
-    merged = dict(new_config)
-    for key, value in list(merged.items()):
-        current_value = current_config.get(key) if isinstance(current_config, dict) else None
-        if _is_memory_secret_key(str(key)):
-            if value is None or str(value).strip() in {"", "********"}:
-                if current_value not in (None, ""):
-                    merged[key] = current_value
-        elif isinstance(value, dict) and isinstance(current_value, dict):
-            merged[key] = _merge_memory_secrets(value, current_value)
-    return merged
-
-
-def _public_memory_settings(config: AppConfig | None, error: str = "") -> dict:
-    cfg = config.memory if config is not None else None
-    if cfg is None:
-        return {
-            "enabled": False,
-            "providers": [],
-            "config_path": str(_USER_CONFIG_FILE),
-            "error": error,
-        }
-    return {
-        "enabled": cfg.enabled,
-        "providers": [
-            {
-                "name": provider.name,
-                "type": provider.type,
-                "enabled": provider.enabled,
-                "module": provider.module,
-                "class": provider.class_name,
-                "config": _sanitize_memory_config(provider.config or {}),
-                "secret_fields": _memory_secret_fields(provider.config or {}),
-            }
-            for provider in cfg.providers
-        ],
-        "config_path": str(_USER_CONFIG_FILE),
-        "error": error,
-    }
-
-
-def _memory_settings_from_payload(body: dict, current: AppConfig) -> dict:
-    if not isinstance(body, dict):
-        raise ConfigError("'memory' payload must be a mapping")
-    raw_providers = body.get("providers")
-    if raw_providers is None:
-        raw_providers = _memory_config_to_raw(current.memory)["providers"]
-    if not isinstance(raw_providers, list):
-        raise ConfigError("'memory.providers' must be a list")
-
-    current_by_name = {
-        provider.name: provider.config or {}
-        for provider in current.memory.providers
-    }
-    providers: list[dict] = []
-    for entry in raw_providers:
-        if not isinstance(entry, dict):
-            raise ConfigError("Memory provider entries must be mappings")
-        name = str(entry.get("name") or "").strip()
-        config_value = entry.get("config", {})
-        if isinstance(config_value, str):
-            try:
-                config_value = json.loads(config_value or "{}")
-            except json.JSONDecodeError as e:
-                raise ConfigError(f"Memory provider '{name}': config must be JSON") from e
-        if not isinstance(config_value, dict):
-            raise ConfigError(f"Memory provider '{name}': 'config' must be a mapping")
-        providers.append(
-            {
-                "name": name,
-                "type": str(entry.get("type") or "").strip(),
-                "enabled": _coerce_bool(entry.get("enabled"), True),
-                "config": _merge_memory_secrets(config_value, current_by_name.get(name, {})),
-                "module": str(entry.get("module") or "").strip(),
-                "class": str(entry.get("class") or entry.get("class_name") or "").strip(),
-            }
-        )
-
-    return validate_memory({
-        "enabled": _coerce_bool(body.get("enabled"), current.memory.enabled),
-        "providers": providers,
-    })
 
 
 # ---------------------------------------------------------------------------
@@ -997,7 +674,12 @@ async def save_config(request: Request) -> JSONResponse:
 
 async def create_session(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
-    body = await request.json()
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+    if body is not None and not isinstance(body, dict):
+        return JSONResponse({"error": "JSON object is required"}, status_code=400)
     session_id = body.get("session_id") if body else None
     work_dir = body.get("work_dir") if body else None
     try:
