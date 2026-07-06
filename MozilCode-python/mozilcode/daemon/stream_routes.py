@@ -3,10 +3,42 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
+
+
+def parse_client_action(raw: str) -> str:
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    action = payload.get("action")
+    return action if isinstance(action, str) else ""
+
+
+async def listen_client_actions(
+    websocket: WebSocket,
+    *,
+    server: Any,
+    sid: str,
+    disconnected: asyncio.Event,
+) -> None:
+    try:
+        while True:
+            action = parse_client_action(await websocket.receive_text())
+            if action == "cancel":
+                server.cancel_active_task(sid)
+    except WebSocketDisconnect:
+        disconnected.set()
+    except Exception:
+        disconnected.set()
 
 
 async def stream_events(websocket: WebSocket) -> None:
@@ -25,24 +57,14 @@ async def stream_events(websocket: WebSocket) -> None:
 
     log.info("WS client connected to session %s", sid)
     disconnected = asyncio.Event()
-
-    async def _listen_client() -> None:
-        try:
-            while True:
-                raw = await websocket.receive_text()
-                if not raw:
-                    continue
-                try:
-                    if json.loads(raw).get("action") == "cancel":
-                        server.cancel_active_task(sid)
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-        except WebSocketDisconnect:
-            disconnected.set()
-        except Exception:
-            disconnected.set()
-
-    listener = asyncio.create_task(_listen_client())
+    listener = asyncio.create_task(
+        listen_client_actions(
+            websocket,
+            server=server,
+            sid=sid,
+            disconnected=disconnected,
+        )
+    )
     idx = 0
     replay_marked = False
     try:

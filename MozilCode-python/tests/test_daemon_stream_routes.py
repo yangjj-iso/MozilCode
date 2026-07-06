@@ -4,6 +4,7 @@ from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
+from mozilcode.daemon.stream_routes import parse_client_action
 
 
 def _app(tmp_path):
@@ -44,3 +45,14 @@ def test_stream_replays_existing_events_then_marks_replay_done(tmp_path):
 
     assert replayed == {"type": "UserMessage", "data": {"content": "hello"}}
     assert replay_done == {"type": "ReplayDone", "data": {}}
+
+
+def test_parse_client_action_accepts_cancel_action() -> None:
+    assert parse_client_action('{"action": "cancel"}') == "cancel"
+
+
+def test_parse_client_action_rejects_invalid_messages() -> None:
+    assert parse_client_action("") == ""
+    assert parse_client_action("{bad") == ""
+    assert parse_client_action("[]") == ""
+    assert parse_client_action('{"action": 7}') == ""
