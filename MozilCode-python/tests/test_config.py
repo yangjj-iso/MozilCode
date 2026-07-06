@@ -124,6 +124,65 @@ def test_project_worktree_config_overrides_home_worktree(
     assert cfg.worktree.stale_cutoff_hours == 6
 
 
+def test_local_config_can_override_without_redeclaring_providers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = tmp_path / "project"
+
+    _write_config(
+        project / ".mozilcode" / "config.yaml",
+        "permission_mode: default\n"
+        "mcp_servers:\n"
+        "  - name: local-tools\n"
+        "    command: old-command\n",
+        provider_name="project",
+    )
+    (project / ".mozilcode" / "config.local.yaml").write_text(
+        "permission_mode: plan\n"
+        "mcp_servers:\n"
+        "  - name: local-tools\n"
+        "    command: new-command\n"
+        "memory:\n"
+        "  enabled: false\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.chdir(project)
+
+    cfg = load_config()
+
+    assert cfg.providers[0].name == "project"
+    assert cfg.permission_mode == "plan"
+    assert [(server.name, server.command) for server in cfg.mcp_servers] == [
+        ("local-tools", "new-command")
+    ]
+    assert cfg.memory.enabled is False
+
+
+def test_merged_config_still_requires_at_least_one_provider(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = tmp_path / "project"
+    local_config = project / ".mozilcode" / "config.local.yaml"
+    local_config.parent.mkdir(parents=True, exist_ok=True)
+    local_config.write_text("permission_mode: plan\n", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    monkeypatch.chdir(project)
+
+    with pytest.raises(ConfigError, match="At least one provider"):
+        load_config()
+
+
+def test_explicit_config_file_still_requires_providers(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("permission_mode: plan\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="Config must contain a 'providers' list"):
+        load_config(config_path)
+
+
 @pytest.mark.parametrize("section", sorted(REMOVED_CONFIG_SECTIONS))
 def test_removed_gui_cloud_bot_config_sections_are_rejected(
     tmp_path: Path, section: str

@@ -418,7 +418,7 @@ def validate_teammate_mode(mode: object) -> str:
     return mode
 
 
-def validate_config_structure(raw: object) -> dict:
+def validate_config_structure(raw: object, *, require_providers: bool = True) -> dict:
     """校验的主入口。校验解析后的原始配置，返回清洗后的字典。
 
     返回的字典包含以下键：
@@ -426,12 +426,16 @@ def validate_config_structure(raw: object) -> dict:
         enable_fork、enable_verification_agent、worktree、
         teammate_mode、enable_coordinator_mode
     """
-    if not isinstance(raw, dict) or "providers" not in raw:
+    if not isinstance(raw, dict):
+        raise ConfigError("Config must be a mapping")
+    if require_providers and "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
     reject_removed_config_sections(raw)
 
+    providers = validate_providers(raw["providers"]) if "providers" in raw else []
+
     return {
-        "providers": validate_providers(raw["providers"]),
+        "providers": providers,
         "permission_mode": validate_permission_mode(raw.get("permission_mode", "default")),
         "mcp_servers": validate_mcp_servers(raw.get("mcp_servers")),
         "hooks": validate_hooks(raw.get("hooks")),

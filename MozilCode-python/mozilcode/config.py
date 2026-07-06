@@ -163,13 +163,13 @@ class AppConfig:
     enable_coordinator_mode_declared: bool = False
 
 
-def _load_single_file(path: Path) -> AppConfig:
+def _load_single_file(path: Path, *, require_providers: bool = True) -> AppConfig:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise ConfigError(f"Failed to parse config {path}: {e}") from e
 
-    validated = validate_config_structure(raw)
+    validated = validate_config_structure(raw, require_providers=require_providers)
     raw_keys = raw if isinstance(raw, dict) else {}
     memory_declared = "memory" in raw_keys
 
@@ -296,7 +296,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     for p in candidates:
         if not p.exists():
             continue
-        layer = _load_single_file(p)
+        layer = _load_single_file(p, require_providers=False)
         if merged is None:
             merged = layer
         else:
@@ -307,4 +307,6 @@ def load_config(path: Path | None = None) -> AppConfig:
             "No config file found. Expected .mozilcode/config.yaml "
             "in project or ~/.mozilcode/config.yaml"
         )
+    if not merged.providers:
+        raise ConfigError("At least one provider must be configured")
     return merged
