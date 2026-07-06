@@ -196,6 +196,23 @@ def test_create_session_accepts_safe_custom_session_id(tmp_path):
     assert (tmp_path / "sessions" / "custom-1" / "meta.json").exists()
 
 
+def test_create_session_rejects_duplicate_session_id_without_resetting_state(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        first = client.post("/api/session", json={"session_id": "custom-1"})
+        app.state.server._event_logs["custom-1"].append({"type": "Existing"})
+        app.state.server._session_meta["custom-1"]["title"] = "kept"
+
+        second = client.post("/api/session", json={"session_id": "custom-1"})
+
+    assert first.status_code == 200
+    assert second.status_code == 400
+    assert second.json()["error"] == "session already exists: custom-1"
+    assert app.state.server._event_logs["custom-1"] == [{"type": "Existing"}]
+    assert app.state.server._session_meta["custom-1"]["title"] == "kept"
+
+
 def test_start_task_rejects_active_session_task(tmp_path):
     app = _app(tmp_path)
     app.state.server._tasks["busy"] = _RunningTask()

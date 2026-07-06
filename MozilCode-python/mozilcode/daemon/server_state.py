@@ -129,6 +129,8 @@ class DaemonServer:
         if self.config is None:
             raise ValueError("model provider is not configured")
         sid = validate_session_id(session_id or uuid.uuid4().hex[:12])
+        if self.has_session(sid):
+            raise ValueError(f"session already exists: {sid}")
         wd = work_dir or self.work_dir
         if not Path(wd).is_dir():
             raise ValueError(f"workspace not found: {wd}")
