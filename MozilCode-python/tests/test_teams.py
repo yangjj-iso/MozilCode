@@ -124,6 +124,64 @@ class TestModels:
         assert len(loaded.members) == 1
         assert loaded.members[0].name == "alice"
 
+    def test_agent_team_load_skips_invalid_members(self, tmp_dir):
+        config_path = Path(tmp_dir) / "team" / "config.json"
+        config_path.parent.mkdir()
+        config_path.write_text(
+            json.dumps(
+                {
+                    "name": "test-team",
+                    "lead_agent_id": "lead-001",
+                    "members": [
+                        {
+                            "name": "alice",
+                            "agent_id": "a1",
+                            "agent_type": "worker",
+                            "model": "sonnet",
+                            "worktree_path": "/tmp/wt1",
+                            "backend_type": "tmux",
+                        },
+                        {
+                            "name": "bad-backend",
+                            "agent_id": "bad1",
+                            "agent_type": "worker",
+                            "backend_type": "bad",
+                        },
+                        {
+                            "name": "bad-active",
+                            "agent_id": "bad2",
+                            "agent_type": "worker",
+                            "backend_type": "in-process",
+                            "is_active": "yes",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = AgentTeam.load(str(config_path))
+
+        assert [member.name for member in loaded.members] == ["alice"]
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {},
+            {"name": "team", "lead_agent_id": "../escape"},
+            {"name": "team", "lead_agent_id": "lead", "members": {}},
+            {"name": "team", "lead_agent_id": "lead", "description": []},
+        ],
+    )
+    def test_agent_team_load_rejects_bad_config(self, tmp_dir, payload):
+        config_path = Path(tmp_dir) / "team" / "config.json"
+        config_path.parent.mkdir()
+        config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            AgentTeam.load(str(config_path))
+
     def test_get_member(self):
         team = AgentTeam(name="t", lead_agent_id="l")
         team.add_member(TeammateInfo(
@@ -189,6 +247,16 @@ class TestTeamManager:
 
             assert manager.has_teams() is True
             assert manager.team_names() == [team.name]
+
+    def test_get_team_returns_none_for_bad_config(self, tmp_dir):
+        with patch("mozilcode.teams.models.Path.home", return_value=Path(tmp_dir)):
+            team_dir = Path(tmp_dir) / ".mozilcode" / "teams" / "broken"
+            team_dir.mkdir(parents=True)
+            (team_dir / "config.json").write_text("{bad", encoding="utf-8")
+
+            manager = TeamManager()
+
+            assert manager.get_team("broken") is None
 
 # =====================================================================
 # 2. SharedTaskStore

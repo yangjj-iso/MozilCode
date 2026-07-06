@@ -94,7 +94,11 @@ class TeamManager:
         team_dir = resolve_team_dir(name)
         config_path = team_dir / "config.json"
         if config_path.exists():
-            team = AgentTeam.load(str(config_path))
+            try:
+                team = AgentTeam.load(str(config_path))
+            except (OSError, json.JSONDecodeError, ValueError) as e:
+                log.warning("Failed to load team '%s': %s", name, e)
+                return None
             self._teams[name] = team
             return team
         return None
