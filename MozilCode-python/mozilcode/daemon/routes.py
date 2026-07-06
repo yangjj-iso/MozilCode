@@ -54,7 +54,7 @@ def build_routes() -> list[BaseRoute]:
         Route("/api/session/{sid}/tasks/{task_id}/cancel", cancel_background_task, methods=["POST"]),
         Route("/api/session/{sid}/worktrees", list_worktrees, methods=["GET"]),
         Route("/api/session/{sid}/worktrees", create_worktree, methods=["POST"]),
-        Route("/api/session/{sid}/worktrees/{name}/enter", enter_worktree, methods=["POST"]),
+        Route("/api/session/{sid}/worktrees/{name:path}/enter", enter_worktree, methods=["POST"]),
         Route("/api/session/{sid}/worktrees/exit", exit_worktree, methods=["POST"]),
         Route("/api/permission/{sid}", resolve_permission, methods=["POST"]),
         Route("/api/askuser/{sid}", resolve_askuser, methods=["POST"]),

@@ -252,3 +252,29 @@ def test_worktree_route_uses_server_action_result(tmp_path, monkeypatch):
 
     assert response.status_code == 201
     assert response.json() == {"created": True}
+
+
+def test_enter_worktree_route_accepts_nested_worktree_name(tmp_path, monkeypatch):
+    provider = ProviderConfig(
+        name="local",
+        protocol="openai-compat",
+        base_url="http://127.0.0.1:9999/v1",
+        model="smoke-model",
+    )
+    app = create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
+
+    async def fake_enter_worktree(sid: str, name: str):
+        assert (sid, name) == ("sid-1", "team/alice")
+        return DaemonActionResult({"entered": True})
+
+    monkeypatch.setattr(app.state.server, "enter_worktree", fake_enter_worktree)
+
+    with TestClient(app) as client:
+        response = client.post("/api/session/sid-1/worktrees/team/alice/enter")
+
+    assert response.status_code == 200
+    assert response.json() == {"entered": True}
