@@ -208,6 +208,31 @@ def test_route_registry_keeps_local_daemon_surface_only():
     ]
 
 
+def test_route_registry_excludes_gui_cloud_and_bot_management():
+    forbidden_terms = {
+        "auth",
+        "cloud",
+        "frontend",
+        "gui",
+        "hosted",
+        "login",
+        "official",
+        "qqbot",
+        "settings",
+        "telegrambot",
+    }
+    route_paths = [
+        spec.path.lower()
+        for spec in (*HTTP_ROUTES, *WEBSOCKET_ROUTES)
+    ]
+
+    assert [
+        path
+        for path in route_paths
+        if any(term in path for term in forbidden_terms)
+    ] == []
+
+
 def test_build_routes_matches_declared_route_specs():
     actual_http = []
     actual_websocket = []
