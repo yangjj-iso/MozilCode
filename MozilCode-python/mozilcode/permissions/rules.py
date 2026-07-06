@@ -64,6 +64,8 @@ def _load_rules_file(path: Path) -> list[Rule]:
             continue
         rule_str = entry.get("rule", "")
         effect = entry.get("effect", "")
+        if not isinstance(rule_str, str):
+            continue
         if effect not in ("allow", "deny"):
             continue
         try:

@@ -256,6 +256,17 @@ class TestRuleEngine:
         )
         assert engine.evaluate("Bash", "anything") is None
 
+    def test_invalid_rule_field_type_is_ignored(self) -> None:
+        tmpdir = Path(tempfile.mkdtemp())
+        rules_file = tmpdir / "rules.yaml"
+        rules_file.write_text(yaml.dump([
+            {"rule": ["Bash(git *)"], "effect": "deny"},
+            {"rule": "Bash(git *)", "effect": "allow"},
+        ]))
+        engine = RuleEngine(project_rules_path=rules_file)
+
+        assert engine.evaluate("Bash", "git status") == "allow"
+
     def test_append_local_rule(self) -> None:
         tmpdir = Path(tempfile.mkdtemp())
         local_path = tmpdir / ".mozilcode" / "permissions.local.yaml"
