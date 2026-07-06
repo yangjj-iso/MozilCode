@@ -26,7 +26,6 @@ from starlette.applications import Starlette
 from starlette.routing import Route, WebSocketRoute
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig
 from mozilcode.validator import ConfigError
@@ -83,6 +82,7 @@ from mozilcode.daemon.management_routes import (
     skill_toggle,
     skills_list,
 )
+from mozilcode.daemon.stream_routes import stream_events
 from mozilcode.a2a.bridge import A2ABridge
 
 log = logging.getLogger(__name__)
@@ -815,101 +815,6 @@ async def close_session(request: Request) -> JSONResponse:
     sid = request.path_params["sid"]
     await server.close_session(sid)
     return JSONResponse({"closed": True})
-
-
-async def stream_events(websocket: WebSocket) -> None:
-    """WebSocket: replay a session's full event history, then tail it live.
-
-    On connect the client receives every event recorded for the session so far
-    (so switching to / reopening a conversation shows its full content), then
-    continues to receive new events as they are produced. The event log is
-    shared and append-only, so multiple clients can watch the same session
-    concurrently — no connection cancels another (which previously caused a
-    reconnect ping-pong storm). Client may send {"action": "cancel"} to abort
-    the running task.
-    """
-    await websocket.accept()
-    sid = websocket.path_params["sid"]
-    server: DaemonServer = websocket.app.state.server
-
-    log_list = server.get_event_log(sid)
-    if log_list is None:
-        # Session unknown (typically the daemon was restarted since the client
-        # last connected). Emit an explicit, typed signal plus an application
-        # close code so the client can self-heal (recreate a session) instead of
-        # hammering blind reconnects forever.
-        await websocket.send_json(
-            {"type": "SessionNotFound", "data": {"session_id": sid}}
-        )
-        await websocket.close(code=4404)
-        return
-
-    log.info("WS client connected to session %s", sid)
-    disconnected = asyncio.Event()
-
-    async def _listen_client() -> None:
-        # Watch for client → server messages (cancel) and detect disconnects.
-        try:
-            while True:
-                raw = await websocket.receive_text()
-                if not raw:
-                    continue
-                try:
-                    if json.loads(raw).get("action") == "cancel":
-                        t = server._tasks.get(sid)
-                        if t and not t.done():
-                            t.cancel()
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-        except WebSocketDisconnect:
-            disconnected.set()
-        except Exception:
-            disconnected.set()
-
-    listener = asyncio.create_task(_listen_client())
-    idx = 0
-    replay_marked = False
-    try:
-        while not disconnected.is_set():
-            if idx < len(log_list):
-                # Send everything appended since we last looked (replay + live).
-                batch = log_list[idx:]
-                idx = len(log_list)
-                stop = False
-                for ev in batch:
-                    if ev is None:  # sentinel（会话销毁）
-                        stop = True
-                        break
-                    await websocket.send_json(ev)
-                if stop:
-                    break
-            else:
-                if not replay_marked:
-                    # History fully replayed. Mark the boundary so the client can
-                    # ignore historical permission/askuser prompts, then re-send
-                    # any prompt that is *still* awaiting an answer as a live one.
-                    replay_marked = True
-                    try:
-                        await websocket.send_json({"type": "ReplayDone", "data": {}})
-                        for ev in list(server._pending_prompts.get(sid, {}).values()):
-                            await websocket.send_json(ev)
-                    except Exception:
-                        pass
-                # Idle: poll for new events. 20ms keeps streaming smooth (each
-                # tick flushes ALL pending events, so throughput is unbounded)
-                # while remaining responsive to disconnects.
-                await asyncio.sleep(0.02)
-    except WebSocketDisconnect:
-        log.info("WS client disconnected from session %s", sid)
-    except Exception:
-        log.exception("WS stream error for session %s", sid)
-    finally:
-        listener.cancel()
-        try:
-            await listener
-        except (asyncio.CancelledError, Exception):
-            pass
-        log.info("WS stream ended for session %s", sid)
 
 
 # ---------------------------------------------------------------------------
