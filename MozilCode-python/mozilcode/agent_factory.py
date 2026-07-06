@@ -137,7 +137,7 @@ def _create_agent_deps(
         TeamCreateTool(
             team_manager=team_manager,
             parent_agent=agent,
-            teammate_mode="in-process",
+            teammate_mode=config.teammate_mode,
             is_interactive=False,
             enable_coordinator_mode=config.enable_coordinator_mode,
         )

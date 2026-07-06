@@ -44,3 +44,35 @@ async def test_create_agent_from_config_wires_core_tools_and_deps(tmp_path, monk
         "Agent",
     }.issubset(tool_names)
     assert deps.worktree_manager.repo_root == str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_create_agent_from_config_passes_team_mode_to_team_create_tool(
+    tmp_path,
+    monkeypatch,
+):
+    async def fake_resolve_context_window(_provider):
+        return None
+
+    monkeypatch.setattr(
+        agent_factory,
+        "resolve_context_window",
+        fake_resolve_context_window,
+    )
+    provider = ProviderConfig(
+        name="local",
+        protocol="openai-compat",
+        base_url="http://127.0.0.1:9999/v1",
+        model="smoke-model",
+        api_key="test-key",
+    )
+
+    agent, _deps = await create_agent_from_config(
+        AppConfig(providers=[provider], teammate_mode="in-process"),
+        str(tmp_path),
+        PermissionMode.DEFAULT,
+    )
+
+    team_create = agent.registry.get("TeamCreate")
+    assert team_create is not None
+    assert team_create._teammate_mode == "in-process"
