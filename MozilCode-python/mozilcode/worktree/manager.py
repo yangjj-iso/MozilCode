@@ -19,6 +19,7 @@ from mozilcode.worktree.slug import flatten_slug, validate_slug
 log = logging.getLogger(__name__)
 
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
+VALID_EXIT_ACTIONS = {"keep", "remove"}
 
 
 class WorktreeError(Exception):
@@ -196,9 +197,18 @@ class WorktreeManager:
         action: str = "keep",
         discard_changes: bool = False,
     ) -> None:
+        if action not in VALID_EXIT_ACTIONS:
+            raise WorktreeError(f"invalid worktree exit action: {action}")
+
         wt = self.active.get(name)
         if wt is None:
             raise WorktreeError(f"worktree not found: {name}")
+
+        session = self.current_session
+        if session is None:
+            raise WorktreeError("not in a worktree")
+        if session.worktree_name != name:
+            raise WorktreeError(f"not in worktree: {name}")
 
         if action == "remove" and not discard_changes:
             changes = count_worktree_changes(wt.path, wt.head_commit)

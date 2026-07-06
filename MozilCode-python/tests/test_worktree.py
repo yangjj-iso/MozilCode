@@ -337,6 +337,29 @@ class TestWorktreeManager:
         assert manager.current_session is None
         assert "exit-keep" in manager.active
 
+    def test_exit_requires_active_session(self, manager):
+        _run(manager.create("exit-no-session"))
+        with pytest.raises(WorktreeError, match="not in a worktree"):
+            _run(manager.exit("exit-no-session"))
+
+    def test_exit_requires_current_worktree(self, manager):
+        _run(manager.create("exit-current"))
+        _run(manager.create("exit-other"))
+        _run(manager.enter("exit-current"))
+
+        with pytest.raises(WorktreeError, match="not in worktree: exit-other"):
+            _run(manager.exit("exit-other"))
+
+        assert manager.current_session is not None
+        assert manager.current_session.worktree_name == "exit-current"
+
+    def test_exit_rejects_invalid_action(self, manager):
+        _run(manager.create("exit-invalid-action"))
+        _run(manager.enter("exit-invalid-action"))
+
+        with pytest.raises(WorktreeError, match="invalid worktree exit action: archive"):
+            _run(manager.exit("exit-invalid-action", action="archive"))
+
     def test_exit_remove_clean(self, manager):
         wt = _run(manager.create("exit-rm"))
         _run(manager.enter("exit-rm"))
