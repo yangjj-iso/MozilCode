@@ -153,6 +153,52 @@ async def test_a2a_task_ignores_foreign_events_before_failure():
 
 
 @pytest.mark.asyncio
+async def test_a2a_completed_task_ignores_later_session_close_marker():
+    bridge = A2ABridge(
+        _ScriptedDaemon(
+            lambda task_id, _prompt: [
+                {"type": "StreamText", "task_id": task_id, "data": {"text": "done"}},
+                {"type": "LoopComplete", "task_id": task_id, "data": {}},
+                None,
+            ]
+        ),
+        default_wait_timeout=1,
+    )
+
+    result = await bridge.send_message({
+        "message": {"parts": [{"kind": "text", "text": "complete"}]},
+        "configuration": {"returnImmediately": True},
+    })
+
+    assert result["status"]["state"] == TASK_COMPLETED
+    assert result["artifacts"][0]["parts"][0]["text"] == "done"
+    assert "error" not in result["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_a2a_failed_task_ignores_later_output_events():
+    bridge = A2ABridge(
+        _ScriptedDaemon(
+            lambda task_id, _prompt: [
+                {"type": "ErrorEvent", "task_id": task_id, "data": {"message": "boom"}},
+                {"type": "StreamText", "task_id": task_id, "data": {"text": "late"}},
+                {"type": "LoopComplete", "task_id": task_id, "data": {}},
+            ]
+        ),
+        default_wait_timeout=1,
+    )
+
+    result = await bridge.send_message({
+        "message": {"parts": [{"kind": "text", "text": "fail"}]},
+        "configuration": {"returnImmediately": True},
+    })
+
+    assert result["status"]["state"] == TASK_FAILED
+    assert result["metadata"]["error"] == "boom"
+    assert "artifacts" not in result
+
+
+@pytest.mark.asyncio
 async def test_a2a_task_ignores_malformed_event_data():
     bridge = A2ABridge(
         _ScriptedDaemon(

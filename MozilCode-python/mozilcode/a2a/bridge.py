@@ -102,6 +102,8 @@ def _event_data(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_task_log_event(task: A2ATask, event: object) -> None:
+    if task.state in TERMINAL_STATES:
+        return
     if event is None:
         _set_task_state(
             task,
