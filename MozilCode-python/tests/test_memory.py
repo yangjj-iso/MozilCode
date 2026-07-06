@@ -621,6 +621,64 @@ class TestSessionMeta:
         path.write_text("not json", encoding="utf-8")
         assert SessionMeta.load(path) is None
 
+    def test_load_uses_defaults_for_optional_fields(self, tmp_path: Path) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        path = tmp_path / "minimal.meta"
+        path.write_text(
+            (
+                '{"id":"minimal",'
+                f'"created_at":"{now}",'
+                f'"last_active":"{now}"'
+                "}"
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = SessionMeta.load(path)
+
+        assert loaded is not None
+        assert loaded.id == "minimal"
+        assert loaded.title == ""
+        assert loaded.summary == ""
+        assert loaded.message_count == 0
+        assert loaded.total_tokens == 0
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "[]",
+            "{}",
+            '{"id":"","created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":123,"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","title":[],"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","summary":[],"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","message_count":true,"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","message_count":-1,"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","total_tokens":[],"created_at":"2025-01-01T00:00:00","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","created_at":123,"last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","created_at":"bad","last_active":"2025-01-01T00:00:00"}',
+            '{"id":"s","created_at":"2025-01-01T00:00:00","last_active":[]}',
+        ],
+    )
+    def test_load_rejects_bad_field_types(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        path = tmp_path / "bad.meta"
+        path.write_text(content, encoding="utf-8")
+
+        assert SessionMeta.load(path) is None
+
+    def test_list_ignores_malformed_meta_files(self, tmp_path: Path) -> None:
+        mgr = SessionManager(str(tmp_path))
+        good = mgr.create()
+        good_id = good.session_id
+        good.close()
+        (mgr._sessions_dir / "broken.meta").write_text("[]", encoding="utf-8")
+
+        metas = mgr.list()
+
+        assert [meta.id for meta in metas] == [good_id]
+
 # =========================================================================
 # G. 记忆管理器 MemoryManager
 # =========================================================================

@@ -82,6 +82,38 @@ def _record_from_mapping(
     )
 
 
+def _meta_string_field(
+    data: dict[str, Any],
+    field_name: str,
+    *,
+    default: str | None = None,
+    require_non_empty: bool = False,
+) -> str | None:
+    value = data.get(field_name, default)
+    if not isinstance(value, str):
+        return None
+    if require_non_empty and not value:
+        return None
+    return value
+
+
+def _meta_int_field(data: dict[str, Any], field_name: str) -> int | None:
+    value = data.get(field_name, 0)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        return None
+    return value
+
+
+def _meta_datetime_field(data: dict[str, Any], field_name: str) -> datetime | None:
+    value = data.get(field_name)
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 @dataclass
 class SessionRecord:
     type: RecordType
@@ -364,17 +396,38 @@ class SessionMeta:
     def load(cls, path: Path) -> SessionMeta | None:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return cls(
-                id=data["id"],
-                title=data.get("title", ""),
-                summary=data.get("summary", ""),
-                message_count=data.get("message_count", 0),
-                total_tokens=data.get("total_tokens", 0),
-                created_at=datetime.fromisoformat(data["created_at"]),
-                last_active=datetime.fromisoformat(data["last_active"]),
-            )
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (OSError, json.JSONDecodeError):
             return None
+        if not isinstance(data, dict):
+            return None
+
+        session_id = _meta_string_field(data, "id", require_non_empty=True)
+        title = _meta_string_field(data, "title", default="")
+        summary = _meta_string_field(data, "summary", default="")
+        message_count = _meta_int_field(data, "message_count")
+        total_tokens = _meta_int_field(data, "total_tokens")
+        created_at = _meta_datetime_field(data, "created_at")
+        last_active = _meta_datetime_field(data, "last_active")
+        if (
+            session_id is None
+            or title is None
+            or summary is None
+            or message_count is None
+            or total_tokens is None
+            or created_at is None
+            or last_active is None
+        ):
+            return None
+
+        return cls(
+            id=session_id,
+            title=title,
+            summary=summary,
+            message_count=message_count,
+            total_tokens=total_tokens,
+            created_at=created_at,
+            last_active=last_active,
+        )
 
 
 # ---------------------------------------------------------------------------
