@@ -83,3 +83,38 @@ def test_a2a_json_rpc_keeps_json_rpc_parse_error_shape(tmp_path):
         "id": None,
         "error": {"code": -32700, "message": "Parse error"},
     }
+
+
+def test_a2a_message_send_maps_bridge_error(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/a2a/message:send",
+            json={"message": {"parts": []}},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "message must contain a text part",
+        "code": -32602,
+    }
+
+
+def test_a2a_task_routes_map_missing_task_error(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        get_response = client.get("/a2a/tasks/missing")
+        cancel_response = client.post("/a2a/tasks/missing:cancel")
+
+    assert get_response.status_code == 404
+    assert get_response.json() == {
+        "error": "Task not found: missing",
+        "code": -32003,
+    }
+    assert cancel_response.status_code == 404
+    assert cancel_response.json() == {
+        "error": "Task not found: missing",
+        "code": -32003,
+    }

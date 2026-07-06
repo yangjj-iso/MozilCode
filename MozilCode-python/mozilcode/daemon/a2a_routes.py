@@ -13,6 +13,24 @@ def public_base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def json_rpc_parse_error_response() -> JSONResponse:
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32700, "message": "Parse error"},
+        },
+        status_code=400,
+    )
+
+
+def a2a_error_response(error: A2AError, status_code: int) -> JSONResponse:
+    return JSONResponse(
+        {"error": error.message, "code": error.code},
+        status_code=status_code,
+    )
+
+
 async def a2a_agent_card(request: Request) -> JSONResponse:
     bridge: A2ABridge = request.app.state.a2a_bridge
     return JSONResponse(bridge.agent_card(public_base_url(request)))
@@ -23,10 +41,7 @@ async def a2a_rpc(request: Request) -> JSONResponse:
     try:
         payload = await request.json()
     except json.JSONDecodeError:
-        return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
-            status_code=400,
-        )
+        return json_rpc_parse_error_response()
     return JSONResponse(await bridge.handle_json_rpc(payload))
 
 
@@ -39,7 +54,7 @@ async def a2a_message_send(request: Request) -> JSONResponse:
         body = parsed.payload
         result = await bridge.send_message(body or {})
     except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
+        return a2a_error_response(e, 400)
     return JSONResponse(result)
 
 
@@ -48,7 +63,7 @@ async def a2a_task_get(request: Request) -> JSONResponse:
     try:
         task = bridge.get_task(request.path_params["task_id"])
     except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+        return a2a_error_response(e, 404)
     return JSONResponse(bridge.task_to_a2a(task))
 
 
@@ -57,5 +72,5 @@ async def a2a_task_cancel(request: Request) -> JSONResponse:
     try:
         task = await bridge.cancel_task(request.path_params["task_id"])
     except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+        return a2a_error_response(e, 404)
     return JSONResponse(bridge.task_to_a2a(task))
