@@ -125,6 +125,18 @@ async def test_manual_compact_failure_emits_error_without_usage(tmp_path):
     ]
 
 
+@pytest.mark.asyncio
+async def test_manual_compact_missing_session_returns_404(tmp_path):
+    server = DaemonServer(AppConfig(providers=[]), str(tmp_path))
+
+    result = await server.manual_compact("missing")
+
+    assert result == DaemonActionResult(
+        {"error": "session not found"},
+        status_code=404,
+    )
+
+
 def test_manual_compact_route_uses_server_action_result(tmp_path, monkeypatch):
     provider = ProviderConfig(
         name="local",

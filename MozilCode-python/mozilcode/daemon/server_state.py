@@ -197,6 +197,44 @@ class DaemonServer:
     def pending_prompt_events(self, sid: str) -> list[dict]:
         return list(self._pending_prompts.get(sid, {}).values())
 
+    def _session_not_found(self) -> DaemonActionResult:
+        return DaemonActionResult({"error": "session not found"}, status_code=404)
+
+    async def _require_deps(
+        self,
+        sid: str,
+    ) -> tuple[AgentDeps | None, DaemonActionResult | None]:
+        if not await self.ensure_agent(sid):
+            return None, self._session_not_found()
+        deps = self.get_deps(sid)
+        if deps is None:
+            return None, self._session_not_found()
+        return deps, None
+
+    async def _require_agent_and_deps(
+        self,
+        sid: str,
+    ) -> tuple[Agent | None, AgentDeps | None, DaemonActionResult | None]:
+        deps, error = await self._require_deps(sid)
+        if error is not None:
+            return None, None, error
+        agent = self.get_agent(sid)
+        if agent is None or deps is None:
+            return None, None, self._session_not_found()
+        return agent, deps, None
+
+    async def _require_agent_and_conversation(
+        self,
+        sid: str,
+    ) -> tuple[Agent | None, ConversationManager | None, DaemonActionResult | None]:
+        if not await self.ensure_agent(sid):
+            return None, None, self._session_not_found()
+        agent = self.get_agent(sid)
+        conv = self.get_conversation(sid)
+        if agent is None or conv is None:
+            return None, None, self._session_not_found()
+        return agent, conv, None
+
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
         await self.ensure_agent(sid)
@@ -286,14 +324,10 @@ class DaemonServer:
 
     async def manual_compact(self, sid: str) -> DaemonActionResult:
         """Run manual context compaction and persist the resulting event stream."""
-        await self.ensure_agent(sid)
-        agent = self.get_agent(sid)
-        conv = self.get_conversation(sid)
-        if agent is None or conv is None:
-            return DaemonActionResult(
-                {"error": "session not found"},
-                status_code=404,
-            )
+        agent, conv, error = await self._require_agent_and_conversation(sid)
+        if error is not None:
+            return error
+        assert agent is not None and conv is not None
 
         before_tokens = conv.current_tokens()
         self._emit(
@@ -344,11 +378,10 @@ class DaemonServer:
         )
 
     async def list_worktrees(self, sid: str) -> DaemonActionResult:
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        if deps is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps, error = await self._require_deps(sid)
+        if error is not None:
+            return error
+        assert deps is not None
 
         manager = deps.worktree_manager
         session = manager.get_current_session()
@@ -374,12 +407,10 @@ class DaemonServer:
         if not name:
             return DaemonActionResult({"error": "name is required"}, status_code=400)
 
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        agent = self.get_agent(sid)
-        if deps is None or agent is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        agent, deps, error = await self._require_agent_and_deps(sid)
+        if error is not None:
+            return error
+        assert agent is not None and deps is not None
 
         try:
             worktree = await deps.worktree_manager.create(name, base_branch)
@@ -397,12 +428,10 @@ class DaemonServer:
         )
 
     async def enter_worktree(self, sid: str, name: str) -> DaemonActionResult:
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        agent = self.get_agent(sid)
-        if deps is None or agent is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        agent, deps, error = await self._require_agent_and_deps(sid)
+        if error is not None:
+            return error
+        assert agent is not None and deps is not None
 
         try:
             session = await deps.worktree_manager.enter(name)
@@ -420,12 +449,10 @@ class DaemonServer:
         remove: bool = False,
         discard: bool = False,
     ) -> DaemonActionResult:
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        agent = self.get_agent(sid)
-        if deps is None or agent is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        agent, deps, error = await self._require_agent_and_deps(sid)
+        if error is not None:
+            return error
+        assert agent is not None and deps is not None
 
         manager = deps.worktree_manager
         session = manager.get_current_session()
@@ -446,11 +473,10 @@ class DaemonServer:
         return DaemonActionResult({"exited": True, "status": self.status(sid)})
 
     async def list_background_tasks(self, sid: str) -> DaemonActionResult:
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        if deps is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps, error = await self._require_deps(sid)
+        if error is not None:
+            return error
+        assert deps is not None
         return DaemonActionResult(
             {
                 "tasks": [
@@ -465,11 +491,10 @@ class DaemonServer:
         sid: str,
         task_id: str,
     ) -> DaemonActionResult:
-        if not await self.ensure_agent(sid):
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
-        deps = self.get_deps(sid)
-        if deps is None:
-            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps, error = await self._require_deps(sid)
+        if error is not None:
+            return error
+        assert deps is not None
         return DaemonActionResult({"cancelled": deps.task_manager.cancel(task_id)})
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:

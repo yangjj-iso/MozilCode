@@ -180,6 +180,25 @@ async def test_exit_worktree_without_active_session_returns_error(tmp_path):
     )
 
 
+@pytest.mark.asyncio
+async def test_worktree_actions_return_404_for_missing_session(tmp_path):
+    server = DaemonServer(AppConfig(providers=[]), str(tmp_path))
+
+    listed = await server.list_worktrees("missing")
+    created = await server.create_worktree("missing", "feature")
+    entered = await server.enter_worktree("missing", "feature")
+    exited = await server.exit_worktree("missing")
+
+    expected = DaemonActionResult(
+        {"error": "session not found"},
+        status_code=404,
+    )
+    assert listed == expected
+    assert created == expected
+    assert entered == expected
+    assert exited == expected
+
+
 def test_worktree_route_uses_server_action_result(tmp_path, monkeypatch):
     provider = ProviderConfig(
         name="local",
