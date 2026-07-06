@@ -492,6 +492,30 @@ class TestCompactBoundaryRoundTrip:
         assert keep_msgs[1].tool_results[0].content == "file.txt"
         assert keep_msgs[2].content == "done"
 
+    def test_boundary_truncates_incomplete_keep_tail(self) -> None:
+        keep = [
+            Message(role="user", content="stable keep"),
+            Message(
+                role="assistant",
+                content="started tool",
+                tool_uses=[
+                    ToolUseBlock(
+                        tool_use_id="missing-result",
+                        tool_name="Bash",
+                        arguments={"command": "pwd"},
+                    )
+                ],
+            ),
+        ]
+        rec = make_compact_boundary("sum", keep)
+        restored = SessionRecord.from_jsonl(rec.to_jsonl())
+        assert restored is not None
+
+        _, keep_msgs = parse_compact_boundary(restored)
+
+        assert [msg.content for msg in keep_msgs] == ["stable keep"]
+        assert all(not msg.tool_uses for msg in keep_msgs)
+
     def test_parse_malformed_boundary_degrades(self) -> None:
         bad = SessionRecord(
             type=RecordType.COMPACT_BOUNDARY, content="not a dict",
@@ -576,6 +600,42 @@ class TestCompactBoundaryRoundTrip:
         keep_idx = contents.index("KEPT recent question")
         post_idx = contents.index("NEW followup")
         assert summary_idx < keep_idx < post_idx
+        result.session.close()
+
+    def test_resume_truncates_incomplete_tool_call_inside_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        mgr = SessionManager(str(tmp_path))
+        s = mgr.create()
+        sid = s.session_id
+
+        keep = [
+            Message(role="user", content="KEPT stable message"),
+            Message(
+                role="assistant",
+                content="KEPT incomplete call",
+                tool_uses=[
+                    ToolUseBlock(
+                        tool_use_id="orphan",
+                        tool_name="ReadFile",
+                        arguments={"file_path": "missing.py"},
+                    )
+                ],
+            ),
+        ]
+        s.append_record(make_compact_boundary("SUMMARY survives", keep))
+        s.append(Message(role="user", content="NEW followup"))
+        s.close()
+
+        result = mgr.resume(sid)
+        assert result is not None
+        contents = [m.content for m in result.messages]
+
+        assert any("SUMMARY survives" in content for content in contents)
+        assert "KEPT stable message" in contents
+        assert "KEPT incomplete call" not in contents
+        assert "NEW followup" in contents
+        assert all(not msg.tool_uses for msg in result.messages)
         result.session.close()
 
     def test_resume_uses_last_boundary_when_multiple(self, tmp_path: Path) -> None:

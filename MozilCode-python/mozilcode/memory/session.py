@@ -247,6 +247,7 @@ def parse_compact_boundary(record: SessionRecord) -> tuple[str, list[Message]]:
         keep_record = _record_from_mapping(item, timestamp_override=record.timestamp)
         if keep_record is not None:
             keep_records.append(keep_record)
+    keep_records = _truncate_to_valid_message_chain(keep_records)
     return summary, records_to_messages(keep_records)
 
 
@@ -386,6 +387,28 @@ def validate_message_chain(records: list[SessionRecord]) -> int:
             last_valid = i + 1
 
     return last_valid
+
+
+def _truncate_to_valid_message_chain(
+    records: list[SessionRecord],
+) -> list[SessionRecord]:
+    return records[:validate_message_chain(records)]
+
+
+def _records_from_last_compact_boundary(
+    records: list[SessionRecord],
+) -> list[SessionRecord]:
+    # 重建压缩后的状态：仅从最后一个 compact_boundary 开始重放。
+    # 该标记之前的 record 是已被摘要过的原始前缀——保留在磁盘上供审计，
+    # 但不再重放。标记本身内联了摘要 + 原样 keep 尾部，标记之后追加的
+    # 普通消息（续写）照常重放。没有 boundary 则全量重放（兼容旧 session）。
+    last_boundary = -1
+    for i, rec in enumerate(records):
+        if rec.type == RecordType.COMPACT_BOUNDARY:
+            last_boundary = i
+    if last_boundary < 0:
+        return records
+    return records[last_boundary:]
 
 
 # ---------------------------------------------------------------------------
@@ -617,19 +640,8 @@ class SessionManager:
                 if record is not None:
                     records.append(record)
 
-        # 重建压缩后的状态：仅从最后一个 compact_boundary 开始重放。
-        # 该标记之前的 record 是已被摘要过的原始前缀——保留在磁盘上供审计，
-        # 但不再重放。标记本身内联了摘要 + 原样 keep 尾部，标记之后追加的
-        # 普通消息（续写）照常重放。没有 boundary 则全量重放（兼容旧 session）。
-        last_boundary = -1
-        for i, rec in enumerate(records):
-            if rec.type == RecordType.COMPACT_BOUNDARY:
-                last_boundary = i
-        if last_boundary >= 0:
-            records = records[last_boundary:]
-
-        valid_count = validate_message_chain(records)
-        records = records[:valid_count]
+        records = _records_from_last_compact_boundary(records)
+        records = _truncate_to_valid_message_chain(records)
         messages = records_to_messages(records)
 
         file = open(jsonl_path, "a", encoding="utf-8")  # noqa: SIM115
