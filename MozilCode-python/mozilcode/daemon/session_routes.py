@@ -6,16 +6,13 @@ import logging
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mozilcode.agent import ErrorEvent
 from mozilcode.client import LLMError
-from mozilcode.context import compute_compact_threshold
 from mozilcode.daemon.config_settings import (
     USER_CONFIG_FILE,
     config_from_settings_payload,
     public_config,
     write_user_config,
 )
-from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.workspace_payloads import task_to_dict
 from mozilcode.validator import ConfigError
 
@@ -190,41 +187,8 @@ async def resolve_askuser(request: Request) -> JSONResponse:
 async def manual_compact(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    await server.ensure_agent(sid)
-    agent = server.get_agent(sid)
-    conv = server.get_conversation(sid)
-    if agent is None or conv is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    before_tokens = conv.current_tokens()
-    server.emit_event(sid, {
-        "type": "CompactStarted",
-        "data": {
-            "current_tokens": before_tokens,
-            "threshold": max(0, compute_compact_threshold(agent.context_window, manual=True)),
-            "context_window": agent.context_window,
-            "message": "正在压缩上下文",
-        },
-    })
-    result = await agent.manual_compact(conv)
-    event = serialize_event(result)
-    server.emit_event(sid, event)
-    if not isinstance(result, ErrorEvent):
-        server.emit_event(sid, {
-            "type": "UsageEvent",
-            "data": {
-                "input_tokens": agent.total_input_tokens,
-                "output_tokens": agent.total_output_tokens,
-                "context_tokens": conv.current_tokens(),
-            },
-        })
-    server.persist_events(sid)
-    if isinstance(result, ErrorEvent):
-        return JSONResponse({"error": result.message}, status_code=400)
-    return JSONResponse({
-        "type": type(result).__name__,
-        "data": event.get("data", {}),
-        "status": server.status(sid),
-    })
+    result = await server.manual_compact(sid)
+    return JSONResponse(result.payload, status_code=result.status_code)
 
 
 async def close_session(request: Request) -> JSONResponse:

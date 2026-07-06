@@ -4,12 +4,22 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from mozilcode.agent import Agent, PermissionResponse
+from mozilcode.agent import (
+    Agent,
+    CompactStarted,
+    ErrorEvent,
+    PermissionResponse,
+    UsageEvent,
+)
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
+from mozilcode.context import compute_compact_threshold
+from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
     build_session_status,
@@ -28,6 +38,12 @@ from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DaemonActionResult:
+    payload: dict[str, Any]
+    status_code: int = 200
 
 
 class DaemonServer:
@@ -266,6 +282,65 @@ class DaemonServer:
             },
         })
         return status
+
+    async def manual_compact(self, sid: str) -> DaemonActionResult:
+        """Run manual context compaction and persist the resulting event stream."""
+        await self.ensure_agent(sid)
+        agent = self.get_agent(sid)
+        conv = self.get_conversation(sid)
+        if agent is None or conv is None:
+            return DaemonActionResult(
+                {"error": "session not found"},
+                status_code=404,
+            )
+
+        before_tokens = conv.current_tokens()
+        self._emit(
+            sid,
+            serialize_event(
+                CompactStarted(
+                    current_tokens=before_tokens,
+                    threshold=max(
+                        0,
+                        compute_compact_threshold(
+                            agent.context_window,
+                            manual=True,
+                        ),
+                    ),
+                    context_window=agent.context_window,
+                    message="正在压缩上下文",
+                )
+            ),
+        )
+
+        result = await agent.manual_compact(conv)
+        event = serialize_event(result)
+        self._emit(sid, event)
+        if not isinstance(result, ErrorEvent):
+            self._emit(
+                sid,
+                serialize_event(
+                    UsageEvent(
+                        input_tokens=agent.total_input_tokens,
+                        output_tokens=agent.total_output_tokens,
+                        context_tokens=conv.current_tokens(),
+                    )
+                ),
+            )
+        self._persist_events(sid)
+
+        if isinstance(result, ErrorEvent):
+            return DaemonActionResult(
+                {"error": result.message},
+                status_code=400,
+            )
+        return DaemonActionResult(
+            {
+                "type": type(result).__name__,
+                "data": event.get("data", {}),
+                "status": self.status(sid),
+            }
+        )
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
         configured_mode = (
