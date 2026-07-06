@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from mozilcode.agent import (
@@ -40,6 +41,13 @@ from mozilcode.permissions import PermissionMode
 log = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class DaemonSessionRuntime:
+    agent: Agent
+    deps: AgentDeps
+    conversation: ConversationManager
+
+
 class DaemonServer:
     """Holds shared daemon state across HTTP and WebSocket requests."""
 
@@ -55,7 +63,7 @@ class DaemonServer:
         self.hook_engine = hook_engine
         self.session_store = session_store or SessionStore()
         self.session_mgr = SessionManager()
-        self._agents: dict[str, tuple[Agent, AgentDeps, ConversationManager]] = {}
+        self._agents: dict[str, DaemonSessionRuntime] = {}
         self._event_logs: dict[str, list[dict | None]] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._active_task_ids: dict[str, str] = {}
@@ -104,7 +112,7 @@ class DaemonServer:
         )
         agent.session_id = sid
         conv = ConversationManager()
-        self._agents[sid] = (agent, deps, conv)
+        self._agents[sid] = DaemonSessionRuntime(agent, deps, conv)
         self._event_logs[sid] = []
         self._session_meta[sid] = {"work_dir": wd, "created_at": time.time(), "title": ""}
         self._persisted_count[sid] = 0
@@ -131,7 +139,7 @@ class DaemonServer:
         )
         agent.session_id = sid
         conv = ConversationManager()
-        self._agents[sid] = (agent, deps, conv)
+        self._agents[sid] = DaemonSessionRuntime(agent, deps, conv)
         if sid not in self._event_logs:
             self._event_logs[sid] = []
         await self.session_mgr.create_session(sid, agent, conv)
@@ -162,15 +170,15 @@ class DaemonServer:
 
     def get_agent(self, sid: str) -> Agent | None:
         entry = self._agents.get(sid)
-        return entry[0] if entry else None
+        return entry.agent if entry else None
 
     def get_conversation(self, sid: str) -> ConversationManager | None:
         entry = self._agents.get(sid)
-        return entry[2] if entry else None
+        return entry.conversation if entry else None
 
     def get_deps(self, sid: str) -> AgentDeps | None:
         entry = self._agents.get(sid)
-        return entry[1] if entry else None
+        return entry.deps if entry else None
 
     def get_event_log(self, sid: str) -> list[dict | None] | None:
         return self._event_logs.get(sid)
@@ -577,8 +585,9 @@ class DaemonServer:
 
         await self.session_mgr.close_session(sid)
         entry = self._agents.pop(sid, None)
-        if entry is not None and entry[0].memory_hub is not None:
-            await entry[0].memory_hub.shutdown()
+        hub = getattr(entry.agent, "memory_hub", None) if entry is not None else None
+        if hub is not None:
+            await hub.shutdown()
         self._session_meta.pop(sid, None)
         self._persisted_count.pop(sid, None)
         self._active_task_ids.pop(sid, None)

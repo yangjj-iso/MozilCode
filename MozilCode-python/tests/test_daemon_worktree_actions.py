@@ -8,7 +8,7 @@ from starlette.testclient import TestClient
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.responses import DaemonActionResult
-from mozilcode.daemon.server_state import DaemonServer
+from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
 from mozilcode.permissions import PermissionMode
 from mozilcode.worktree.models import Worktree, WorktreeSession
 
@@ -105,7 +105,7 @@ def _server_with_worktrees(tmp_path) -> tuple[DaemonServer, str, _Agent, _Worktr
     sid = "session-worktree"
     agent = _Agent(str(tmp_path))
     manager = _WorktreeManager(str(tmp_path))
-    server._agents[sid] = (
+    server._agents[sid] = DaemonSessionRuntime(
         agent,
         SimpleNamespace(provider=_Provider(), worktree_manager=manager),
         _Conversation(),

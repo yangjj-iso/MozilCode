@@ -8,6 +8,7 @@ from mozilcode.config import (
 from mozilcode.daemon.routes import build_routes
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
+from mozilcode.daemon.server_state import DaemonSessionRuntime
 from mozilcode.permissions.modes import PermissionMode
 
 
@@ -183,7 +184,7 @@ async def test_command_acceptance_stays_separate_from_plan_mode(tmp_path):
     server = DaemonServer(AppConfig(providers=[provider]), str(tmp_path))
     agent = _FakeAgent(PermissionMode.ACCEPT_EDITS)
     sid = "test-session"
-    server._agents[sid] = (agent, _FakeDeps(provider), object())
+    server._agents[sid] = DaemonSessionRuntime(agent, _FakeDeps(provider), object())
     server._event_logs[sid] = []
     server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
 
@@ -204,3 +205,22 @@ async def test_command_acceptance_stays_separate_from_plan_mode(tmp_path):
     assert status["permission_mode"] == "bypassPermissions"
     assert status["command_acceptance_mode"] == "bypassPermissions"
     assert status["plan_mode"] is False
+
+
+def test_session_runtime_accessors_use_named_fields(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    server = DaemonServer(AppConfig(providers=[provider]), str(tmp_path))
+    agent = _FakeAgent(PermissionMode.DEFAULT)
+    deps = _FakeDeps(provider)
+    conversation = object()
+
+    server._agents["sid-1"] = DaemonSessionRuntime(agent, deps, conversation)
+
+    assert server.get_agent("sid-1") is agent
+    assert server.get_deps("sid-1") is deps
+    assert server.get_conversation("sid-1") is conversation
