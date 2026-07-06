@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from mozilcode.tools import rebase_file_tools
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -172,6 +173,10 @@ class AgentTool(Tool):
         _base_registry = getattr(self._parent_agent, '_full_registry', None) or self._parent_agent.registry
         filtered_registry = resolve_agent_tools(
             _base_registry, definition, is_background
+        )
+        filtered_registry = rebase_file_tools(
+            filtered_registry,
+            self._parent_agent.work_dir,
         )
 
         # 为子 agent 创建权限检查器
@@ -371,6 +376,7 @@ class AgentTool(Tool):
             backend_type=backend.value,
             definition=definition,
         )
+        teammate_registry = rebase_file_tools(teammate_registry, wt.path)
         _tm_tools = [t.name for t in teammate_registry.list_tools()]
         log.info("[teammate] result_tools=%d names=%s", len(_tm_tools), _tm_tools)
 
@@ -573,6 +579,7 @@ class AgentTool(Tool):
         filtered_registry = resolve_agent_tools(
             _base_registry, definition, False
         )
+        filtered_registry = rebase_file_tools(filtered_registry, wt.path)
 
         pm_str = definition.permission_mode
         pm_enum = getattr(

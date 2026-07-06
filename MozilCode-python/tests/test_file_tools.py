@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from mozilcode.tools import create_default_registry, rebase_file_tools
 from mozilcode.tools.glob import Glob
 from mozilcode.tools.glob import Params as GlobParams
 from mozilcode.tools.grep import Grep
@@ -72,6 +73,40 @@ async def test_file_tools_resolve_relative_paths_from_base_dir(tmp_path, monkeyp
     )
     assert not glob.is_error
     assert glob.output.replace("\\", "/") == "out.txt"
+
+
+@pytest.mark.asyncio
+async def test_rebase_file_tools_roots_cloned_tools_at_new_base_dir(tmp_path):
+    parent_dir = tmp_path / "parent"
+    child_dir = tmp_path / "child"
+    parent_dir.mkdir()
+    child_dir.mkdir()
+    (parent_dir / "note.txt").write_text("parent", encoding="utf-8")
+    (child_dir / "note.txt").write_text("child", encoding="utf-8")
+    parent_registry = create_default_registry(base_dir=parent_dir)
+    bash = parent_registry.get("Bash")
+    parent_registry.disable("Grep")
+    parent_registry.mark_discovered("Glob")
+
+    child_registry = rebase_file_tools(parent_registry, child_dir)
+    read_file = child_registry.get("ReadFile")
+    write_file = child_registry.get("WriteFile")
+    assert read_file is not None
+    assert write_file is not None
+    assert child_registry.get("Bash") is bash
+    assert not child_registry.is_enabled("Grep")
+    assert child_registry.is_discovered("Glob")
+
+    read = await read_file.execute(read_file.params_model(file_path="note.txt"))
+    assert not read.is_error
+    assert read.output == "1\tchild"
+
+    write = await write_file.execute(
+        write_file.params_model(file_path="note.txt", content="updated")
+    )
+    assert not write.is_error
+    assert (child_dir / "note.txt").read_text(encoding="utf-8") == "updated"
+    assert (parent_dir / "note.txt").read_text(encoding="utf-8") == "parent"
 
 
 @pytest.mark.parametrize(
