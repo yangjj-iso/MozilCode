@@ -576,27 +576,48 @@ class DaemonServer:
         self, sid: str, request_id: str, response: str
     ) -> bool:
         """Resolve a pending permission request. response: allow|deny|allow_always."""
-        session = await self.session_mgr.get_session(sid)
-        if session is None:
-            return False
-        perm_response = PermissionResponse(response)
-        ok = session.resolve_future(request_id, perm_response)
-        if ok:
-            self._pending_prompts.get(sid, {}).pop(request_id, None)
-            self._emit(sid, {"type": "PermissionResolved", "data": {"request_id": request_id}})
-        return ok
+        return await self._resolve_pending_request(
+            sid,
+            request_id,
+            PermissionResponse(response),
+            "PermissionResolved",
+        )
 
     async def resolve_askuser(
         self, sid: str, request_id: str, answers: dict[str, str]
     ) -> bool:
         """Resolve a pending ask_user request."""
+        return await self._resolve_pending_request(
+            sid,
+            request_id,
+            answers,
+            "AskUserResolved",
+        )
+
+    async def _resolve_pending_request(
+        self,
+        sid: str,
+        request_id: str,
+        result: object,
+        resolved_event_type: str,
+    ) -> bool:
         session = await self.session_mgr.get_session(sid)
         if session is None:
             return False
-        ok = session.resolve_future(request_id, answers)
+        ok = session.resolve_future(request_id, result)
         if ok:
-            self._pending_prompts.get(sid, {}).pop(request_id, None)
-            self._emit(sid, {"type": "AskUserResolved", "data": {"request_id": request_id}})
+            prompts = self._pending_prompts.get(sid)
+            if prompts is not None:
+                prompts.pop(request_id, None)
+                if not prompts:
+                    self._pending_prompts.pop(sid, None)
+            self._emit(
+                sid,
+                {
+                    "type": resolved_event_type,
+                    "data": {"request_id": request_id},
+                },
+            )
         return ok
 
     async def close_session(self, sid: str) -> None:

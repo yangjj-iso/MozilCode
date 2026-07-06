@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozilcode.agent import PermissionRequest, StreamText
+from mozilcode.agent import PermissionRequest, PermissionResponse, StreamText
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
 from mozilcode.daemon.session_store import SessionStore
@@ -134,5 +134,68 @@ async def test_start_task_registers_pending_permission_prompt(tmp_path):
                 "request_id": request_id,
                 "resolved": False,
             },
+        }
+    ]
+
+
+async def _register_pending_future(
+    server: DaemonServer,
+    sid: str,
+    request_id: str,
+    event_type: str = "PermissionRequest",
+) -> asyncio.Future:
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    session = await server.session_mgr.get_session(sid)
+    assert session is not None
+    session.register_future(request_id, future)
+    server._pending_prompts[sid] = {
+        request_id: {
+            "type": event_type,
+            "data": {"request_id": request_id, "resolved": False},
+        }
+    }
+    return future
+
+
+@pytest.mark.asyncio
+async def test_resolve_permission_clears_pending_prompt_and_emits_event(tmp_path):
+    conversation = _Conversation()
+    server, sid = await _create_server_with_agent(tmp_path, _Agent(), conversation)
+    future = await _register_pending_future(server, sid, "req-permission")
+
+    ok = await server.resolve_permission(sid, "req-permission", "allow")
+
+    assert ok is True
+    assert future.result() is PermissionResponse.ALLOW
+    assert server.pending_prompt_events(sid) == []
+    assert server._event_logs[sid] == [
+        {
+            "type": "PermissionResolved",
+            "data": {"request_id": "req-permission"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_askuser_clears_pending_prompt_and_emits_event(tmp_path):
+    conversation = _Conversation()
+    server, sid = await _create_server_with_agent(tmp_path, _Agent(), conversation)
+    future = await _register_pending_future(
+        server,
+        sid,
+        "req-ask",
+        "AskUserRequest",
+    )
+
+    ok = await server.resolve_askuser(sid, "req-ask", {"language": "Python"})
+
+    assert ok is True
+    assert future.result() == {"language": "Python"}
+    assert server.pending_prompt_events(sid) == []
+    assert server._event_logs[sid] == [
+        {
+            "type": "AskUserResolved",
+            "data": {"request_id": "req-ask"},
         }
     ]
