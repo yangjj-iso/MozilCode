@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import logging
@@ -14,6 +15,26 @@ from mozilcode.tools.base import Tool, ToolResult
 log = logging.getLogger(__name__)
 
 
+def normalize_tool_schemas(raw: Any, path: Path) -> list[dict[str, Any]]:
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        log.warning("tool.json at %s must be a JSON array or object", path)
+        return []
+
+    schemas: list[dict[str, Any]] = []
+    for index, item in enumerate(raw, start=1):
+        if isinstance(item, dict):
+            schemas.append(item)
+        else:
+            log.warning(
+                "Skipping non-object tool schema #%d in %s",
+                index,
+                path,
+            )
+    return schemas
+
+
 def parse_tool_json(path: Path) -> list[dict[str, Any]]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -21,13 +42,7 @@ def parse_tool_json(path: Path) -> list[dict[str, Any]]:
         log.warning("Failed to parse tool.json at %s: %s", path, e)
         return []
 
-    if isinstance(raw, dict):
-        raw = [raw]
-    if not isinstance(raw, list):
-        log.warning("tool.json at %s must be a JSON array or object", path)
-        return []
-
-    return raw
+    return normalize_tool_schemas(raw, path)
 
 
 def load_tool_implementation(
@@ -63,8 +78,6 @@ class _DynamicParams(BaseModel):
 
 
 class SkillCustomTool(Tool):
-
-
     def __init__(
         self,
         tool_name: str,
@@ -80,7 +93,6 @@ class SkillCustomTool(Tool):
         self._schema = schema
         self._impl = impl
 
-
     def get_schema(self) -> dict[str, Any]:
         input_schema = self._schema.get("parameters", self._schema.get("input_schema", {}))
         return {
@@ -88,7 +100,6 @@ class SkillCustomTool(Tool):
             "description": self.description,
             "input_schema": input_schema,
         }
-
 
     async def execute(self, params: BaseModel) -> ToolResult:
         if self._impl is None:
@@ -98,7 +109,6 @@ class SkillCustomTool(Tool):
             )
         try:
             kwargs = params.model_dump()
-            import asyncio
             if asyncio.iscoroutinefunction(self._impl):
                 result = await self._impl(**kwargs)
             else:

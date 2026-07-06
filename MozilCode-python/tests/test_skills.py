@@ -378,6 +378,28 @@ class TestDirectorySkill:
         schemas = parse_tool_json(tool_json)
         assert len(schemas) == 1
 
+    def test_parse_tool_json_filters_non_object_entries(self, tmp_path: Path) -> None:
+        from mozilcode.skills.directory import parse_tool_json
+
+        tool_json = tmp_path / "tool.json"
+        tool_json.write_text(json.dumps([
+            {"name": "valid", "description": "ok", "parameters": {}},
+            "bad",
+            7,
+        ]))
+
+        schemas = parse_tool_json(tool_json)
+
+        assert schemas == [{"name": "valid", "description": "ok", "parameters": {}}]
+
+    def test_parse_tool_json_rejects_scalar_root(self, tmp_path: Path) -> None:
+        from mozilcode.skills.directory import parse_tool_json
+
+        tool_json = tmp_path / "tool.json"
+        tool_json.write_text(json.dumps("bad"))
+
+        assert parse_tool_json(tool_json) == []
+
     def test_register_skill_tools(self, tmp_path: Path) -> None:
         from mozilcode.skills.directory import register_skill_tools
 
