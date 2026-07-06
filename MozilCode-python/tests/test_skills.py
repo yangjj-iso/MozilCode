@@ -141,6 +141,66 @@ class TestParseSkillFile:
         with pytest.raises(SkillParseError, match="Invalid mode"):
             parse_skill_file(f)
 
+    def test_description_must_be_string(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: foo\ndescription:\n  - bad\n---\nbody")
+        with pytest.raises(SkillParseError, match="description.*string"):
+            parse_skill_file(f)
+
+    def test_description_must_not_be_empty(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: foo\ndescription: '   '\n---\nbody")
+        with pytest.raises(SkillParseError, match="description.*non-empty string"):
+            parse_skill_file(f)
+
+    @pytest.mark.parametrize(
+        "frontmatter",
+        [
+            "allowedTools: Bash",
+            "allowedTools:\n  - ReadFile\n  - 7",
+            "allowedTools:\n  - ''",
+        ],
+    )
+    def test_allowed_tools_must_be_non_empty_string_list(
+        self, tmp_path: Path, frontmatter: str
+    ) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text(
+            "---\n"
+            "name: foo\n"
+            "description: x\n"
+            f"{frontmatter}\n"
+            "---\n"
+            "body"
+        )
+        with pytest.raises(SkillParseError, match="allowedTools.*list"):
+            parse_skill_file(f)
+
+    def test_model_must_be_string(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: foo\ndescription: x\nmodel: 7\n---\nbody")
+        with pytest.raises(SkillParseError, match="model.*string"):
+            parse_skill_file(f)
+
+    def test_optional_metadata_is_trimmed(self, tmp_path: Path) -> None:
+        f = tmp_path / "trimmed.md"
+        f.write_text(textwrap.dedent("""\
+            ---
+            name: custom
+            description: "  Custom skill  "
+            model: "  local-model  "
+            allowedTools:
+              - "  ReadFile  "
+            ---
+            Body
+        """))
+
+        skill = parse_skill_file(f)
+
+        assert skill.description == "Custom skill"
+        assert skill.model == "local-model"
+        assert skill.allowed_tools == ["ReadFile"]
+
     def test_nonexistent_file(self, tmp_path: Path) -> None:
         with pytest.raises(SkillParseError, match="Cannot read"):
             parse_skill_file(tmp_path / "nope.md")

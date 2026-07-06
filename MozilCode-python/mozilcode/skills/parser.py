@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import yaml
 
@@ -55,28 +55,79 @@ def parse_frontmatter(raw: str) -> tuple[dict, str]:
     return meta, body
 
 
+def _source_context(source: str = "") -> str:
+    return f" in {source}" if source else ""
+
+
+def _required_string(meta: dict, field_name: str, ctx: str) -> str:
+    if field_name not in meta:
+        raise SkillParseError(f"Missing required field '{field_name}'{ctx}")
+    value = meta[field_name]
+    if not isinstance(value, str) or not value.strip():
+        raise SkillParseError(f"Field '{field_name}'{ctx} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_string(meta: dict, field_name: str, ctx: str) -> str | None:
+    value = meta.get(field_name)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise SkillParseError(f"Field '{field_name}'{ctx} must be a string")
+    value = value.strip()
+    return value or None
+
+
+def _optional_string_list(meta: dict, field_name: str, ctx: str) -> list[str]:
+    value = meta.get(field_name, [])
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SkillParseError(f"Field '{field_name}'{ctx} must be a list of strings")
+
+    cleaned: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise SkillParseError(
+                f"Field '{field_name}'{ctx} must be a list of non-empty strings"
+            )
+        cleaned.append(item.strip())
+    return cleaned
+
+
+def _optional_choice(
+    meta: dict,
+    field_name: str,
+    default: str,
+    valid_values: set[str],
+    ctx: str,
+) -> str:
+    value = meta.get(field_name, default)
+    if not isinstance(value, str):
+        raise SkillParseError(f"Field '{field_name}'{ctx} must be a string")
+    value = value.strip()
+    if value not in valid_values:
+        raise SkillParseError(
+            f"Invalid {field_name} '{value}'{ctx}: must be one of {valid_values}"
+        )
+    return value
+
+
 def _validate_meta(meta: dict, source: str = "") -> None:
-    ctx = f" in {source}" if source else ""
+    ctx = _source_context(source)
 
-    if "name" not in meta:
-        raise SkillParseError(f"Missing required field 'name'{ctx}")
-    if "description" not in meta:
-        raise SkillParseError(f"Missing required field 'description'{ctx}")
-
-    name = meta["name"]
-    if not isinstance(name, str) or not VALID_NAME_RE.match(name):
+    name = _required_string(meta, "name", ctx)
+    _required_string(meta, "description", ctx)
+    if not VALID_NAME_RE.match(name):
         raise SkillParseError(
             f"Invalid skill name '{name}'{ctx}: "
             "must be lowercase letters, digits, and hyphens, starting with a letter"
         )
 
-    mode = meta.get("mode", "inline")
-    if mode not in VALID_MODES:
-        raise SkillParseError(f"Invalid mode '{mode}'{ctx}: must be one of {VALID_MODES}")
-
-    context = meta.get("context", "full")
-    if context not in VALID_CONTEXTS:
-        raise SkillParseError(f"Invalid context '{context}'{ctx}: must be one of {VALID_CONTEXTS}")
+    _optional_choice(meta, "mode", "inline", VALID_MODES, ctx)
+    _optional_choice(meta, "context", "full", VALID_CONTEXTS, ctx)
+    _optional_string(meta, "model", ctx)
+    _optional_string_list(meta, "allowedTools", ctx)
 
 
 def build_skill_def(
@@ -88,14 +139,17 @@ def build_skill_def(
     is_directory: bool = False,
 ) -> SkillDef:
     _validate_meta(meta, source)
+    ctx = _source_context(source)
+    mode = _optional_choice(meta, "mode", "inline", VALID_MODES, ctx)
+    context = _optional_choice(meta, "context", "full", VALID_CONTEXTS, ctx)
     return SkillDef(
-        name=meta["name"],
-        description=meta["description"],
+        name=_required_string(meta, "name", ctx),
+        description=_required_string(meta, "description", ctx),
         prompt_body=body,
-        allowed_tools=meta.get("allowedTools", []),
-        mode=meta.get("mode", "inline"),
-        model=meta.get("model"),
-        context=meta.get("context", "full"),
+        allowed_tools=_optional_string_list(meta, "allowedTools", ctx),
+        mode=cast(Literal["inline", "fork"], mode),
+        model=_optional_string(meta, "model", ctx),
+        context=cast(Literal["full", "recent", "none"], context),
         source_path=source_path,
         is_directory=is_directory,
     )
