@@ -395,6 +395,51 @@ class TestLoadHooks:
         with pytest.raises(HookConfigError, match="requires.*prompt"):
             load_hooks([{"event": "startup", "action": {"type": "agent"}}])
 
+    @pytest.mark.parametrize("field_name", ["reject", "async", "once"])
+    def test_boolean_fields_must_be_booleans(self, field_name):
+        with pytest.raises(HookConfigError, match=f"{field_name}.*boolean"):
+            load_hooks([
+                {
+                    "event": "post_tool_use",
+                    "action": {"type": "command", "command": "echo ok"},
+                    field_name: "false",
+                }
+            ])
+
+    def test_action_string_fields_must_be_strings(self):
+        with pytest.raises(HookConfigError, match="command.*string"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {"type": "command", "command": ["echo", "bad"]},
+                }
+            ])
+
+    def test_http_headers_must_be_string_mapping(self):
+        with pytest.raises(HookConfigError, match="headers.*mapping"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "http",
+                        "url": "https://example.test",
+                        "headers": [],
+                    },
+                }
+            ])
+
+        with pytest.raises(HookConfigError, match="headers.*strings to strings"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "http",
+                        "url": "https://example.test",
+                        "headers": {"X-Test": 1},
+                    },
+                }
+            ])
+
 # ---------------------------------------------------------------------------
 # HookEngine
 # ---------------------------------------------------------------------------

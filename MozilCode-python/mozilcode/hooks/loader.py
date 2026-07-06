@@ -13,6 +13,7 @@ _REQUIRED_FIELDS: dict[str, list[str]] = {
     "http": ["url"],
     "agent": ["prompt"],
 }
+_ACTION_STRING_FIELDS = ("command", "message", "url", "method", "body", "prompt")
 
 
 class HookConfigError(Exception):
@@ -22,6 +23,41 @@ class HookConfigError(Exception):
 def _identify(entry: object, index: int) -> str:
     hook_id = entry.get("id", "") if isinstance(entry, dict) else ""
     return f"hook '{hook_id}'" if hook_id else f"hook #{index + 1}"
+
+
+def _string_field(
+    data: dict,
+    field_name: str,
+    label: str,
+    default: str = "",
+) -> str:
+    value = data.get(field_name, default)
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise HookConfigError(f"{label}: '{field_name}' must be a string")
+    return value
+
+
+def _bool_field(data: dict, field_name: str, label: str) -> bool:
+    value = data.get(field_name, False)
+    if not isinstance(value, bool):
+        raise HookConfigError(f"{label}: '{field_name}' must be a boolean")
+    return value
+
+
+def _headers_field(data: dict, label: str) -> dict[str, str]:
+    value = data.get("headers", {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise HookConfigError(f"{label}: 'headers' must be a mapping")
+    for key, header_value in value.items():
+        if not isinstance(key, str) or not isinstance(header_value, str):
+            raise HookConfigError(
+                f"{label}: 'headers' must map strings to strings"
+            )
+    return dict(value)
 
 
 def _load_action(raw_action: object, label: str) -> Action:
@@ -35,9 +71,18 @@ def _load_action(raw_action: object, label: str) -> Action:
             f"must be one of: {', '.join(sorted(_VALID_ACTION_TYPES))}"
         )
 
+    string_fields = {
+        field_name: _string_field(
+            raw_action,
+            field_name,
+            label,
+            default="POST" if field_name == "method" else "",
+        )
+        for field_name in _ACTION_STRING_FIELDS
+    }
     required = _REQUIRED_FIELDS[action_type]
     for field_name in required:
-        if not raw_action.get(field_name):
+        if not string_fields[field_name]:
             raise HookConfigError(
                 f"{label}: action type '{action_type}' requires "
                 f"'{field_name}' field"
@@ -49,13 +94,13 @@ def _load_action(raw_action: object, label: str) -> Action:
 
     return Action(
         type=action_type,
-        command=raw_action.get("command", ""),
-        message=raw_action.get("message", ""),
-        url=raw_action.get("url", ""),
-        method=raw_action.get("method", "POST"),
-        body=raw_action.get("body", ""),
-        headers=raw_action.get("headers", {}),
-        prompt=raw_action.get("prompt", ""),
+        command=string_fields["command"],
+        message=string_fields["message"],
+        url=string_fields["url"],
+        method=string_fields["method"],
+        body=string_fields["body"],
+        headers=_headers_field(raw_action, label),
+        prompt=string_fields["prompt"],
         timeout=timeout,
     )
 
@@ -82,13 +127,13 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
 
         action = _load_action(entry.get("action"), label)
 
-        reject = bool(entry.get("reject", False))
+        reject = _bool_field(entry, "reject", label)
         if reject and event != "pre_tool_use":
             raise HookConfigError(
                 f"{label}: 'reject' can only be used with 'pre_tool_use' event"
             )
 
-        async_exec = bool(entry.get("async", False))
+        async_exec = _bool_field(entry, "async", label)
         if async_exec and event == "pre_tool_use":
             raise HookConfigError(
                 f"{label}: 'async' cannot be used with 'pre_tool_use' event"
@@ -111,7 +156,7 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
                 action=action,
                 condition=condition,
                 reject=reject,
-                once=bool(entry.get("once", False)),
+                once=_bool_field(entry, "once", label),
                 async_exec=async_exec,
             )
         )
