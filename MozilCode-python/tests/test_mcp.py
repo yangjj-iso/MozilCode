@@ -326,3 +326,48 @@ class TestMCPManagerPartialFailure:
         assert len(errors) == 1
         assert "bad" in errors[0]
         assert registry.get("mcp_good_test_tool") is not None
+
+    @pytest.mark.asyncio
+    async def test_list_tools_failure_closes_unregistered_client(self) -> None:
+        from mozilcode.mcp.manager import MCPManager
+        from mozilcode.tools import ToolRegistry
+
+        config = MCPServerConfig(name="bad", command="echo")
+        manager = MCPManager()
+        manager.load_configs([config])
+        registry = ToolRegistry()
+
+        with patch("mozilcode.mcp.manager.MCPClient") as MockClient:
+            client = AsyncMock()
+            client.list_tools.side_effect = RuntimeError("list failed")
+            MockClient.return_value = client
+
+            errors = await manager.register_all_tools(registry)
+
+        assert len(errors) == 1
+        assert "list failed" in errors[0]
+        client.close.assert_awaited_once()
+        assert manager._clients == {}
+        assert registry.list_tools() == []
+
+    @pytest.mark.asyncio
+    async def test_cleanup_failure_does_not_mask_registration_error(self) -> None:
+        from mozilcode.mcp.manager import MCPManager
+        from mozilcode.tools import ToolRegistry
+
+        config = MCPServerConfig(name="bad", command="echo")
+        manager = MCPManager()
+        manager.load_configs([config])
+
+        with patch("mozilcode.mcp.manager.MCPClient") as MockClient:
+            client = AsyncMock()
+            client.list_tools.side_effect = RuntimeError("list failed")
+            client.close.side_effect = RuntimeError("close failed")
+            MockClient.return_value = client
+
+            errors = await manager.register_all_tools(ToolRegistry())
+
+        assert len(errors) == 1
+        assert "list failed" in errors[0]
+        assert "close failed" not in errors[0]
+        assert manager._clients == {}

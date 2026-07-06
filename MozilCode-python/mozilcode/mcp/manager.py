@@ -11,32 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 class MCPManager:
-
-
     def __init__(self) -> None:
         self._configs: dict[str, MCPServerConfig] = {}
         self._clients: dict[str, MCPClient] = {}
-
 
     def load_configs(self, configs: list[MCPServerConfig]) -> None:
         for cfg in configs:
             self._configs[cfg.name] = cfg
 
-
     async def register_all_tools(self, registry: ToolRegistry) -> list[str]:
         errors: list[str] = []
         for name, config in self._configs.items():
             try:
-                client = MCPClient(config)
-                await client.connect()
-                self._clients[name] = client
-
-                tools = await client.list_tools()
-                for tool_def in tools:
-                    wrapper = MCPToolWrapper(name, tool_def, client)
-                    registry.register(wrapper)
-                    logger.info("Registered MCP tool: %s", wrapper.name)
-
+                await self._register_server_tools(name, config, registry)
             except Exception as e:
                 msg = f"MCP server '{name}': {e}"
                 logger.warning(msg)
@@ -44,6 +31,27 @@ class MCPManager:
 
         return errors
 
+    async def _register_server_tools(
+        self,
+        name: str,
+        config: MCPServerConfig,
+        registry: ToolRegistry,
+    ) -> None:
+        client = MCPClient(config)
+        try:
+            await client.connect()
+            tools = await client.list_tools()
+            for tool_def in tools:
+                wrapper = MCPToolWrapper(name, tool_def, client)
+                registry.register(wrapper)
+                logger.info("Registered MCP tool: %s", wrapper.name)
+            self._clients[name] = client
+        except Exception:
+            try:
+                await client.close()
+            except Exception:
+                logger.debug("Error closing failed MCP server '%s'", name, exc_info=True)
+            raise
 
     async def get_client(self, name: str) -> MCPClient | None:
         client = self._clients.get(name)
@@ -64,7 +72,6 @@ class MCPManager:
             self._clients[name] = client
 
         return client
-
 
     async def shutdown(self) -> None:
         for name, client in self._clients.items():
