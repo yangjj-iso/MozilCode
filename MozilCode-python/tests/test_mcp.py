@@ -329,6 +329,59 @@ class TestMCPToolWrapper:
         assert schema["name"] == "mcp_srv_search"
         assert schema["input_schema"] == input_schema
 
+    def test_malformed_input_schema_is_normalized(self) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.tool_wrapper import MCPToolWrapper
+
+        tool_def = mcp_types.Tool(
+            name="search",
+            description="Search",
+            inputSchema={
+                "type": "array",
+                "properties": [],
+                "required": "query",
+            },
+        )
+        wrapper = MCPToolWrapper("srv", tool_def, MagicMock())
+
+        schema = wrapper.get_schema()["input_schema"]
+        assert schema == {"type": "object", "properties": {}, "required": []}
+        assert wrapper.params_model.model_validate({}).model_dump() == {}
+
+    def test_input_schema_properties_are_normalized(self) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.tool_wrapper import MCPToolWrapper
+
+        tool_def = mcp_types.Tool(
+            name="search",
+            description="Search",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": ["string", "null"]},
+                    "count": {"type": "integer"},
+                    "fallback": True,
+                    "": {"type": "string"},
+                },
+                "required": ["query", "missing", 7],
+            },
+        )
+        wrapper = MCPToolWrapper("srv", tool_def, MagicMock())
+
+        schema = wrapper.get_schema()["input_schema"]
+        assert schema["required"] == ["query"]
+        assert schema["properties"]["fallback"] == {"type": "string"}
+        assert "" not in schema["properties"]
+
+        params = wrapper.params_model.model_validate(
+            {"query": "bugs", "count": 2, "fallback": "ok"}
+        )
+        assert params.model_dump() == {
+            "query": "bugs",
+            "count": 2,
+            "fallback": "ok",
+        }
+
 # ===========================================================================
 # _extract_text
 # ===========================================================================

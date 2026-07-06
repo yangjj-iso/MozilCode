@@ -9,6 +9,41 @@ from mozilcode.mcp.client import MCPClient
 from mozilcode.tools.base import Tool, ToolResult
 
 
+def _normalize_input_schema(input_schema: Any) -> dict[str, Any]:
+    if not isinstance(input_schema, dict):
+        return {"type": "object", "properties": {}, "required": []}
+
+    schema = dict(input_schema)
+    if not isinstance(schema.get("type", "object"), str):
+        schema["type"] = "object"
+    if schema.get("type") != "object":
+        schema["type"] = "object"
+
+    raw_properties = schema.get("properties", {})
+    properties: dict[str, dict[str, Any]] = {}
+    if isinstance(raw_properties, dict):
+        for name, prop_schema in raw_properties.items():
+            if not isinstance(name, str) or not name:
+                continue
+            if isinstance(prop_schema, dict):
+                properties[name] = dict(prop_schema)
+            else:
+                properties[name] = {"type": "string"}
+    schema["properties"] = properties
+
+    raw_required = schema.get("required", [])
+    if isinstance(raw_required, list):
+        schema["required"] = [
+            item
+            for item in raw_required
+            if isinstance(item, str) and item in properties
+        ]
+    else:
+        schema["required"] = []
+
+    return schema
+
+
 def _build_params_model(
     tool_name: str, input_schema: dict[str, Any]
 ) -> type[BaseModel]:
@@ -26,7 +61,12 @@ def _build_params_model(
     return create_model(f"{tool_name}Params", **field_definitions)
 
 
-def _json_type_to_python(json_type: str) -> type:
+def _json_type_to_python(json_type: object) -> type:
+    if isinstance(json_type, list):
+        json_type = next(
+            (item for item in json_type if isinstance(item, str) and item != "null"),
+            "string",
+        )
     mapping: dict[str, type] = {
         "string": str,
         "integer": int,
@@ -64,13 +104,14 @@ class MCPToolWrapper(Tool):
         self._server_name = server_name
         self._tool_def = tool_def
         self._client = client
+        self._input_schema = _normalize_input_schema(tool_def.inputSchema)
         self.name = f"mcp_{server_name}_{tool_def.name}"
         self.description = tool_def.description or tool_def.name
         self.category = "command"
         self.is_concurrency_safe = False
         self.should_defer = True
         self.params_model = _build_params_model(
-            tool_def.name, tool_def.inputSchema
+            tool_def.name, self._input_schema
         )
 
     @property
@@ -82,7 +123,7 @@ class MCPToolWrapper(Tool):
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": self._tool_def.inputSchema,
+            "input_schema": self._input_schema,
         }
 
 
