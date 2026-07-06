@@ -160,6 +160,20 @@ class TestSessionRecord:
         assert SessionRecord.from_jsonl("{bad json") is None
         assert SessionRecord.from_jsonl('{"type":"unknown","content":"x","timestamp":"2025-01-01T00:00:00"}') is None
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "[]",
+            '{"type":123,"content":"x","timestamp":"2025-01-01T00:00:00"}',
+            '{"type":"user","timestamp":"2025-01-01T00:00:00"}',
+            '{"type":"user","content":"x","timestamp":123}',
+            '{"type":"tool_result","content":"x","timestamp":"2025-01-01T00:00:00","tool_use_id":123}',
+            '{"type":"tool_result","content":"x","timestamp":"2025-01-01T00:00:00","is_error":"true"}',
+        ],
+    )
+    def test_malformed_jsonl_rejects_bad_field_types(self, line: str) -> None:
+        assert SessionRecord.from_jsonl(line) is None
+
     def test_plain_assistant_message(self) -> None:
         msg = Message(role="assistant", content="done")
         records = SessionRecord.from_message(msg)
@@ -445,6 +459,33 @@ class TestCompactBoundaryRoundTrip:
         summary, keep_msgs = parse_compact_boundary(bad)
         assert summary == ""
         assert keep_msgs == []
+
+    def test_parse_boundary_skips_malformed_keep_records(self) -> None:
+        bad_keep = SessionRecord(
+            type=RecordType.COMPACT_BOUNDARY,
+            content={
+                "summary": ["not", "text"],
+                "keep": [
+                    {"type": "user", "content": "valid user"},
+                    {"type": "assistant", "content": "valid assistant"},
+                    {"type": "tool_result", "content": "bad id", "tool_use_id": 123},
+                    {
+                        "type": "tool_result",
+                        "content": "bad flag",
+                        "tool_use_id": "t1",
+                        "is_error": "true",
+                    },
+                    {"type": "user"},
+                    [],
+                ],
+            },
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        summary, keep_msgs = parse_compact_boundary(bad_keep)
+
+        assert summary == ""
+        assert [msg.content for msg in keep_msgs] == ["valid user", "valid assistant"]
 
     def test_resume_rebuilds_compacted_state(self, tmp_path: Path) -> None:
         """核心往返流程：原始前缀 + 边界（摘要 + 保留消息）+ 边界之后的消息。

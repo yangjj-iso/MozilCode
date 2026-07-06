@@ -39,6 +39,49 @@ class RecordType(str, Enum):
     COMPACT_BOUNDARY = "compact_boundary"
 
 
+def _record_from_mapping(
+    data: object,
+    *,
+    timestamp_override: datetime | None = None,
+) -> SessionRecord | None:
+    if not isinstance(data, dict):
+        return None
+    raw_type = data.get("type")
+    if not isinstance(raw_type, str):
+        return None
+    if "content" not in data:
+        return None
+    try:
+        record_type = RecordType(raw_type)
+    except ValueError:
+        return None
+
+    timestamp = timestamp_override
+    if timestamp is None:
+        raw_timestamp = data.get("timestamp")
+        if not isinstance(raw_timestamp, str):
+            return None
+        try:
+            timestamp = datetime.fromisoformat(raw_timestamp)
+        except ValueError:
+            return None
+
+    tool_use_id = data.get("tool_use_id")
+    if tool_use_id is not None and not isinstance(tool_use_id, str):
+        return None
+    is_error = data.get("is_error", False)
+    if not isinstance(is_error, bool):
+        return None
+
+    return SessionRecord(
+        type=record_type,
+        content=data["content"],
+        timestamp=timestamp,
+        tool_use_id=tool_use_id,
+        is_error=is_error,
+    )
+
+
 @dataclass
 class SessionRecord:
     type: RecordType
@@ -64,15 +107,9 @@ class SessionRecord:
     def from_jsonl(cls, line: str) -> SessionRecord | None:
         try:
             data = json.loads(line)
-            return cls(
-                type=RecordType(data["type"]),
-                content=data["content"],
-                timestamp=datetime.fromisoformat(data["timestamp"]),
-                tool_use_id=data.get("tool_use_id"),
-                is_error=data.get("is_error", False),
-            )
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except json.JSONDecodeError:
             return None
+        return _record_from_mapping(data)
 
     @classmethod
     def from_message(cls, message: Message) -> list[SessionRecord]:
@@ -170,24 +207,14 @@ def parse_compact_boundary(record: SessionRecord) -> tuple[str, list[Message]]:
     content = record.content
     if not isinstance(content, dict):
         return "", []
-    summary = content.get("summary", "")
+    raw_summary = content.get("summary", "")
+    summary = raw_summary if isinstance(raw_summary, str) else ""
     keep_raw = content.get("keep", [])
     keep_records: list[SessionRecord] = []
     for item in keep_raw if isinstance(keep_raw, list) else []:
-        if not isinstance(item, dict) or "type" not in item:
-            continue
-        try:
-            keep_records.append(
-                SessionRecord(
-                    type=RecordType(item["type"]),
-                    content=item.get("content"),
-                    timestamp=record.timestamp,
-                    tool_use_id=item.get("tool_use_id"),
-                    is_error=item.get("is_error", False),
-                )
-            )
-        except ValueError:
-            continue
+        keep_record = _record_from_mapping(item, timestamp_override=record.timestamp)
+        if keep_record is not None:
+            keep_records.append(keep_record)
     return summary, records_to_messages(keep_records)
 
 
