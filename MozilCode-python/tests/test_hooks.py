@@ -348,6 +348,10 @@ class TestLoadHooks:
         assert load_hooks(None) == []
         assert load_hooks([]) == []
 
+    def test_non_mapping_entry(self):
+        with pytest.raises(HookConfigError, match="hook #1: must be a mapping"):
+            load_hooks(["bad"])
+
     def test_invalid_event(self):
         with pytest.raises(HookConfigError, match="invalid event"):
             load_hooks([{"event": "bad_event", "action": {"type": "command", "command": "x"}}])

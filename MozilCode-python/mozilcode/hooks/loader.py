@@ -19,12 +19,48 @@ class HookConfigError(Exception):
     pass
 
 
-def _identify(entry: dict, index: int) -> str:
-    hook_id = entry.get("id", "")
+def _identify(entry: object, index: int) -> str:
+    hook_id = entry.get("id", "") if isinstance(entry, dict) else ""
     return f"hook '{hook_id}'" if hook_id else f"hook #{index + 1}"
 
 
-def load_hooks(raw_hooks: list[dict] | None) -> list[Hook]:
+def _load_action(raw_action: object, label: str) -> Action:
+    if not isinstance(raw_action, dict):
+        raise HookConfigError(f"{label}: missing or invalid 'action' field")
+
+    action_type = raw_action.get("type")
+    if action_type not in _VALID_ACTION_TYPES:
+        raise HookConfigError(
+            f"{label}: invalid action type '{action_type}', "
+            f"must be one of: {', '.join(sorted(_VALID_ACTION_TYPES))}"
+        )
+
+    required = _REQUIRED_FIELDS[action_type]
+    for field_name in required:
+        if not raw_action.get(field_name):
+            raise HookConfigError(
+                f"{label}: action type '{action_type}' requires "
+                f"'{field_name}' field"
+            )
+
+    timeout = raw_action.get("timeout", 30)
+    if not isinstance(timeout, int) or timeout <= 0:
+        raise HookConfigError(f"{label}: timeout must be a positive integer")
+
+    return Action(
+        type=action_type,
+        command=raw_action.get("command", ""),
+        message=raw_action.get("message", ""),
+        url=raw_action.get("url", ""),
+        method=raw_action.get("method", "POST"),
+        body=raw_action.get("body", ""),
+        headers=raw_action.get("headers", {}),
+        prompt=raw_action.get("prompt", ""),
+        timeout=timeout,
+    )
+
+
+def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
     if not raw_hooks:
         return []
 
@@ -44,24 +80,7 @@ def load_hooks(raw_hooks: list[dict] | None) -> list[Hook]:
                 f"must be one of: {', '.join(sorted(_VALID_EVENTS))}"
             )
 
-        raw_action = entry.get("action")
-        if not isinstance(raw_action, dict):
-            raise HookConfigError(f"{label}: missing or invalid 'action' field")
-
-        action_type = raw_action.get("type")
-        if action_type not in _VALID_ACTION_TYPES:
-            raise HookConfigError(
-                f"{label}: invalid action type '{action_type}', "
-                f"must be one of: {', '.join(sorted(_VALID_ACTION_TYPES))}"
-            )
-
-        required = _REQUIRED_FIELDS[action_type]
-        for field_name in required:
-            if not raw_action.get(field_name):
-                raise HookConfigError(
-                    f"{label}: action type '{action_type}' requires "
-                    f"'{field_name}' field"
-                )
+        action = _load_action(entry.get("action"), label)
 
         reject = bool(entry.get("reject", False))
         if reject and event != "pre_tool_use":
@@ -85,22 +104,6 @@ def load_hooks(raw_hooks: list[dict] | None) -> list[Hook]:
 
         hook_id = entry.get("id", f"{event}_{i}")
 
-        timeout = raw_action.get("timeout", 30)
-        if not isinstance(timeout, int) or timeout <= 0:
-            raise HookConfigError(f"{label}: timeout must be a positive integer")
-
-        action = Action(
-            type=action_type,
-            command=raw_action.get("command", ""),
-            message=raw_action.get("message", ""),
-            url=raw_action.get("url", ""),
-            method=raw_action.get("method", "POST"),
-            body=raw_action.get("body", ""),
-            headers=raw_action.get("headers", {}),
-            prompt=raw_action.get("prompt", ""),
-            timeout=timeout,
-        )
-
         hooks.append(
             Hook(
                 id=hook_id,
@@ -114,4 +117,3 @@ def load_hooks(raw_hooks: list[dict] | None) -> list[Hook]:
         )
 
     return hooks
-
