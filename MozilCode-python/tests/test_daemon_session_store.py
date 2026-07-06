@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
@@ -8,7 +10,7 @@ from mozilcode.daemon.session_store import SessionStore, validate_session_id
 def test_session_store_persists_and_loads_meta_and_events(tmp_path):
     store = SessionStore(tmp_path)
     sid = "session-a"
-    meta = {"work_dir": "D:/work", "title": "hello"}
+    meta = {"work_dir": "D:/work", "title": "hello", "created_at": 123.5}
     events = [
         {"type": "UserMessage", "data": {"content": "hi"}},
         None,
@@ -100,6 +102,41 @@ def test_session_store_skips_non_object_meta(tmp_path):
     (session_dir / "meta.json").write_text("[]", encoding="utf-8")
 
     assert store.load_sessions() == []
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"title": []},
+        {"work_dir": []},
+        {"created_at": True},
+        {"created_at": "123"},
+        {"created_at": -1},
+    ],
+)
+def test_session_store_skips_meta_with_invalid_known_fields(tmp_path, meta):
+    store = SessionStore(tmp_path)
+    store.persist_meta("valid", {"title": "ok"})
+    session_dir = store.session_dir("bad")
+    session_dir.mkdir(parents=True)
+    (session_dir / "meta.json").write_text(
+        json.dumps(meta),
+        encoding="utf-8",
+    )
+
+    loaded = store.load_sessions()
+
+    assert [session.sid for session in loaded] == ["valid"]
+
+
+def test_session_store_preserves_unknown_meta_fields(tmp_path):
+    store = SessionStore(tmp_path)
+    meta = {"title": "ok", "custom": {"x": 1}}
+
+    store.persist_meta("session-a", meta)
+    loaded = store.load_sessions()
+
+    assert loaded[0].meta == meta
 
 
 @pytest.mark.parametrize(

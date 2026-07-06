@@ -30,6 +30,24 @@ def validate_session_id(sid: str) -> str:
     return sid
 
 
+def _clean_meta(meta: object) -> dict:
+    if not isinstance(meta, dict):
+        raise ValueError(f"{META_FILE} must contain a JSON object")
+    cleaned = dict(meta)
+    for field_name in ("title", "work_dir"):
+        if field_name in cleaned and not isinstance(cleaned[field_name], str):
+            raise ValueError(f"{META_FILE}.{field_name} must be a string")
+    if "created_at" in cleaned:
+        created_at = cleaned["created_at"]
+        if (
+            not isinstance(created_at, (int, float))
+            or isinstance(created_at, bool)
+            or created_at < 0
+        ):
+            raise ValueError(f"{META_FILE}.created_at must be a non-negative number")
+    return cleaned
+
+
 class SessionStore:
     """On-disk session store used to replay conversations after daemon restarts."""
 
@@ -70,9 +88,7 @@ class SessionStore:
 
     def _read_meta(self, directory: Path) -> dict:
         meta = json.loads((directory / META_FILE).read_text(encoding="utf-8"))
-        if not isinstance(meta, dict):
-            raise ValueError(f"{META_FILE} must contain a JSON object")
-        return meta
+        return _clean_meta(meta)
 
     def _read_events(self, directory: Path) -> list[dict]:
         events: list[dict] = []
