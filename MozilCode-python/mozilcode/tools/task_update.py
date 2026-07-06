@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from mozilcode.teams.shared_task import VALID_TASK_STATUSES
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -17,9 +18,6 @@ class TaskUpdateParams(BaseModel):
     description: str | None = None
     add_blocks: list[str] | None = None
     add_blocked_by: list[str] | None = None
-
-
-VALID_STATUSES = {"pending", "in_progress", "completed", "blocked"}
 
 
 class TaskUpdateTool(Tool):
@@ -41,9 +39,12 @@ class TaskUpdateTool(Tool):
     async def execute(self, params: BaseModel) -> ToolResult:
         p: TaskUpdateParams = params  # type: ignore[assignment]
 
-        if p.status and p.status not in VALID_STATUSES:
+        if p.status and p.status not in VALID_TASK_STATUSES:
             return ToolResult(
-                output=f"Invalid status '{p.status}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+                output=(
+                    f"Invalid status '{p.status}'. Must be one of: "
+                    f"{', '.join(sorted(VALID_TASK_STATUSES))}"
+                ),
                 is_error=True,
             )
 

@@ -6,6 +6,31 @@ from pathlib import Path
 from typing import Any
 
 
+VALID_TASK_STATUSES = {"pending", "in_progress", "completed", "blocked"}
+
+
+def _string_field(
+    data: dict[str, Any],
+    name: str,
+    *,
+    default: str = "",
+    required: bool = False,
+) -> str:
+    value = data.get(name, default)
+    if not isinstance(value, str):
+        raise ValueError(f"task.{name} must be a string")
+    if required and not value:
+        raise ValueError(f"task.{name} is required")
+    return value
+
+
+def _string_list_field(data: dict[str, Any], name: str) -> list[str]:
+    value = data.get(name, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"task.{name} must be a list of strings")
+    return value
+
+
 @dataclass
 class SharedTask:
     id: str
@@ -23,7 +48,24 @@ class SharedTask:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SharedTask:
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if not isinstance(data, dict):
+            raise ValueError("task must be an object")
+        status = _string_field(data, "status", default="pending")
+        if status not in VALID_TASK_STATUSES:
+            raise ValueError(
+                f"task.status must be one of: "
+                f"{', '.join(sorted(VALID_TASK_STATUSES))}"
+            )
+        return cls(
+            id=_string_field(data, "id", required=True),
+            title=_string_field(data, "title", required=True),
+            description=_string_field(data, "description"),
+            status=status,
+            assignee=_string_field(data, "assignee"),
+            blocks=_string_list_field(data, "blocks"),
+            blocked_by=_string_list_field(data, "blocked_by"),
+            created_by=_string_field(data, "created_by"),
+        )
 
 
 class SharedTaskStore:
@@ -36,13 +78,37 @@ class SharedTaskStore:
         self._load()
 
     def _load(self) -> None:
+        self._next_id = 1
+        self._tasks = {}
         if not self._path.exists():
             return
-        data = json.loads(self._path.read_text(encoding="utf-8"))
-        self._next_id = data.get("next_id", 1)
-        for t in data.get("tasks", []):
-            task = SharedTask.from_dict(t)
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(data, dict):
+            return
+
+        max_numeric_id = 0
+        raw_tasks = data.get("tasks", [])
+        for item in raw_tasks if isinstance(raw_tasks, list) else []:
+            try:
+                task = SharedTask.from_dict(item)
+            except ValueError:
+                continue
             self._tasks[task.id] = task
+            if task.id.isdigit():
+                max_numeric_id = max(max_numeric_id, int(task.id))
+
+        raw_next_id = data.get("next_id", max_numeric_id + 1)
+        if (
+            isinstance(raw_next_id, int)
+            and not isinstance(raw_next_id, bool)
+            and raw_next_id > 0
+        ):
+            self._next_id = max(raw_next_id, max_numeric_id + 1)
+        else:
+            self._next_id = max(1, max_numeric_id + 1)
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +127,7 @@ class SharedTaskStore:
         blocked_by: list[str] | None = None,
         created_by: str = "",
     ) -> SharedTask:
+        self._load()
         task_id = str(self._next_id)
         self._next_id += 1
         task = SharedTask(
@@ -109,6 +176,10 @@ class SharedTaskStore:
         if task is None:
             return None
         if status is not None:
+            if status not in VALID_TASK_STATUSES:
+                raise ValueError(
+                    f"status must be one of: {', '.join(sorted(VALID_TASK_STATUSES))}"
+                )
             task.status = status
         if assignee is not None:
             task.assignee = assignee

@@ -260,6 +260,59 @@ class TestSharedTaskStore:
         assert len(tasks) == 1
         assert tasks[0].title == "Persisted task"
 
+    def test_malformed_task_file_loads_as_empty(self, tmp_dir):
+        path = Path(tmp_dir) / "tasks.json"
+        path.write_text("{bad", encoding="utf-8")
+
+        store = SharedTaskStore(path)
+
+        assert store.list_tasks() == []
+
+    def test_load_skips_invalid_tasks_and_derives_next_id(self, tmp_dir):
+        path = Path(tmp_dir) / "tasks.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "next_id": 1,
+                    "tasks": [
+                        {"id": "7", "title": "valid"},
+                        {"id": "bad-title", "title": []},
+                        {"id": "bad-status", "title": "Bad", "status": "done"},
+                        {"id": "bad-blocks", "title": "Bad", "blocks": [1]},
+                        [],
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        store = SharedTaskStore(path)
+        tasks = store.list_tasks()
+        new_task = store.create(title="next")
+
+        assert [task.id for task in tasks] == ["7"]
+        assert new_task.id == "8"
+
+    def test_load_rejects_invalid_next_id(self, tmp_dir):
+        path = Path(tmp_dir) / "tasks.json"
+        path.write_text(
+            json.dumps({"next_id": True, "tasks": [{"id": "3", "title": "valid"}]}),
+            encoding="utf-8",
+        )
+
+        store = SharedTaskStore(path)
+        new_task = store.create(title="next")
+
+        assert new_task.id == "4"
+
+    def test_update_rejects_invalid_status(self, tmp_dir):
+        store = SharedTaskStore(Path(tmp_dir) / "tasks.json")
+        store.init_empty()
+        task = store.create(title="Task")
+
+        with pytest.raises(ValueError, match="status must be one of"):
+            store.update(task.id, status="done")
+
 # =====================================================================
 # 3. Mailbox
 # =====================================================================
