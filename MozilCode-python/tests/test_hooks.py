@@ -23,6 +23,7 @@ from mozilcode.hooks import (
     load_hooks,
     parse_condition,
 )
+from mozilcode.hooks.actions import load_action
 
 # ---------------------------------------------------------------------------
 # LifecycleEvent
@@ -391,6 +392,43 @@ class TestExecuteAction:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
+
+class TestLoadAction:
+    def test_command_action_defaults(self):
+        action = load_action(
+            {"type": "command", "command": "echo ok"},
+            "hook 'x'",
+        )
+
+        assert action.type == "command"
+        assert action.command == "echo ok"
+        assert action.method == "POST"
+        assert action.headers == {}
+        assert action.timeout == 30
+
+    def test_http_action_preserves_fields(self):
+        action = load_action(
+            {
+                "type": "http",
+                "url": "https://example.test/hook",
+                "method": "PUT",
+                "body": "{}",
+                "headers": {"X-Hook": "1"},
+                "timeout": 9,
+            },
+            "hook 'http'",
+        )
+
+        assert action.url == "https://example.test/hook"
+        assert action.method == "PUT"
+        assert action.body == "{}"
+        assert action.headers == {"X-Hook": "1"}
+        assert action.timeout == 9
+
+    def test_missing_action_mapping_is_rejected(self):
+        with pytest.raises(HookConfigError, match="missing or invalid 'action'"):
+            load_action(None, "hook 'bad'")
+
 
 class TestLoadHooks:
     def test_full_config(self):

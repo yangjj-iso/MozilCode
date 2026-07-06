@@ -6,8 +6,9 @@ from mozilcode.hooks.conditions import (
     parse_condition,
 )
 from mozilcode.hooks.engine import HookEngine
+from mozilcode.hooks.errors import HookConfigError
 from mozilcode.hooks.events import LifecycleEvent
-from mozilcode.hooks.loader import HookConfigError, load_hooks
+from mozilcode.hooks.loader import load_hooks
 from mozilcode.hooks.models import (
     Action,
     ActionResult,
@@ -32,4 +33,3 @@ __all__ = [
     "load_hooks",
     "parse_condition",
 ]
-
