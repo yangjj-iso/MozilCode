@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -20,10 +21,18 @@ log = logging.getLogger(__name__)
 
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
 VALID_EXIT_ACTIONS = {"keep", "remove"}
+_GIT_OBJECT_ID_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 
 
 class WorktreeError(Exception):
     pass
+
+
+def _normalized_git_object_id(value: str) -> str | None:
+    candidate = value.strip()
+    if not _GIT_OBJECT_ID_RE.fullmatch(candidate):
+        return None
+    return candidate.lower()
 
 
 class WorktreeManager:
@@ -92,16 +101,18 @@ class WorktreeManager:
                 if not ref_file.exists():
                     ref_file = commondir / ref_path
                 if ref_file.exists():
-                    return ref_file.read_text(encoding="utf-8").strip()
+                    return _normalized_git_object_id(
+                        ref_file.read_text(encoding="utf-8")
+                    )
                 packed_refs = commondir / "packed-refs"
                 if packed_refs.exists():
                     for line in packed_refs.read_text(encoding="utf-8").splitlines():
                         if line.strip() and not line.startswith("#"):
                             parts = line.split()
                             if len(parts) == 2 and parts[1] == ref_path:
-                                return parts[0]
+                                return _normalized_git_object_id(parts[0])
                 return None
-            return head_content
+            return _normalized_git_object_id(head_content)
         except OSError:
             return None
 

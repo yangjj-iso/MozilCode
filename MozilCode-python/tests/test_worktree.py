@@ -480,3 +480,32 @@ class TestReadWorktreeHeadSha:
     def test_not_a_worktree(self, tmp_path):
         sha = WorktreeManager.read_worktree_head_sha(str(tmp_path))
         assert sha is None
+
+    def test_invalid_detached_head_is_ignored(self, tmp_path):
+        wt = tmp_path / "wt"
+        gitdir = tmp_path / "gitdir"
+        wt.mkdir()
+        gitdir.mkdir()
+        (wt / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+        (gitdir / "HEAD").write_text("not-a-commit\n", encoding="utf-8")
+
+        sha = WorktreeManager.read_worktree_head_sha(str(wt))
+
+        assert sha is None
+
+    def test_invalid_ref_head_is_ignored(self, tmp_path):
+        wt = tmp_path / "wt"
+        gitdir = tmp_path / "gitdir"
+        refs = gitdir / "refs" / "heads"
+        wt.mkdir()
+        refs.mkdir(parents=True)
+        (wt / ".git").write_text(f"gitdir: {gitdir}\n", encoding="utf-8")
+        (gitdir / "HEAD").write_text(
+            "ref: refs/heads/feature\n",
+            encoding="utf-8",
+        )
+        (refs / "feature").write_text("not-a-commit\n", encoding="utf-8")
+
+        sha = WorktreeManager.read_worktree_head_sha(str(wt))
+
+        assert sha is None
