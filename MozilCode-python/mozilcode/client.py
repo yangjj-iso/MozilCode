@@ -15,6 +15,15 @@ from mozilcode.serialization import (
     build_chat_completion_messages,
     build_openai_input,
 )
+from mozilcode.openai_streaming import (
+    RESPONSE_REASONING_DELTA_EVENTS as _RESPONSE_REASONING_DELTA_EVENTS,
+    RESPONSE_REASONING_DONE_EVENTS as _RESPONSE_REASONING_DONE_EVENTS,
+    extract_chat_reasoning_delta as _extract_chat_reasoning_delta,
+    extract_response_reasoning_summary as _extract_response_reasoning_summary,
+    get_text as _get_text,
+    stream_end_from_openai_chat_usage as _stream_end_from_openai_chat_usage,
+    stream_end_from_openai_response_usage as _stream_end_from_openai_response_usage,
+)
 from mozilcode.tools.base import (
     StreamEnd,
     StreamEvent,
@@ -78,132 +87,6 @@ def _mark_last_tool_for_cache(tools: list[dict[str, Any]]) -> list[dict[str, Any
     last["cache_control"] = _EPHEMERAL
     marked[-1] = last
     return marked
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if hasattr(value, "model_dump"):
-        try:
-            data = value.model_dump(exclude_none=True)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-    return {}
-
-
-def _get_text(value: Any, *names: str) -> str:
-    for name in names:
-        item = getattr(value, name, None)
-        if isinstance(item, str) and item:
-            return item
-    data = _as_dict(value)
-    for name in names:
-        item = data.get(name)
-        if isinstance(item, str) and item:
-            return item
-    return ""
-
-
-def _extract_response_reasoning_summary(response: Any) -> str:
-    data = _as_dict(response)
-    output = data.get("output")
-    if not isinstance(output, list):
-        output = getattr(response, "output", [])
-    parts: list[str] = []
-    for item in output or []:
-        item_data = _as_dict(item)
-        if item_data.get("type") != "reasoning":
-            continue
-        summary = item_data.get("summary") or getattr(item, "summary", [])
-        for summary_item in summary or []:
-            text = _get_text(summary_item, "text")
-            if text:
-                parts.append(text)
-    return "\n\n".join(parts)
-
-
-def _extract_chat_reasoning_delta(delta: Any) -> str:
-    text = _get_text(
-        delta,
-        "reasoning_content",
-        "reasoning_delta",
-        "reasoning",
-        "thinking",
-    )
-    if text:
-        return text
-    data = _as_dict(delta)
-    reasoning = data.get("reasoning")
-    if isinstance(reasoning, dict):
-        for key in ("content", "text", "summary"):
-            item = reasoning.get(key)
-            if isinstance(item, str) and item:
-                return item
-    return ""
-
-
-def _token_count(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int):
-        return max(value, 0)
-    return 0
-
-
-def _cached_tokens(details: Any) -> int:
-    if details is None:
-        return 0
-    return _token_count(getattr(details, "cached_tokens", 0))
-
-
-def _openai_usage_stream_end(
-    *,
-    total_input_tokens: Any,
-    output_tokens: Any,
-    cache_details: Any,
-) -> StreamEnd:
-    # OpenAI 系列把 cached_tokens 计入总 input token。MozilCode 的
-    # StreamEnd 约定是 input + cache_read + cache_creation 可加回完整
-    # prompt 大小，因此这里统一扣除 cache_read。
-    cache_read = _cached_tokens(cache_details)
-    input_tokens = _token_count(total_input_tokens)
-    return StreamEnd(
-        stop_reason="end_turn",
-        input_tokens=max(input_tokens - cache_read, 0),
-        output_tokens=_token_count(output_tokens),
-        cache_read=cache_read,
-        cache_creation=0,
-    )
-
-
-def _stream_end_from_openai_response_usage(usage: Any) -> StreamEnd:
-    return _openai_usage_stream_end(
-        total_input_tokens=getattr(usage, "input_tokens", 0),
-        output_tokens=getattr(usage, "output_tokens", 0),
-        cache_details=getattr(usage, "input_tokens_details", None),
-    )
-
-
-def _stream_end_from_openai_chat_usage(usage: Any) -> StreamEnd:
-    return _openai_usage_stream_end(
-        total_input_tokens=getattr(usage, "prompt_tokens", 0),
-        output_tokens=getattr(usage, "completion_tokens", 0),
-        cache_details=getattr(usage, "prompt_tokens_details", None),
-    )
-
-
-_RESPONSE_REASONING_DELTA_EVENTS = {
-    "response.reasoning_summary_text.delta",
-    "response.reasoning_text.delta",
-    "response.reasoning.delta",
-}
-
-_RESPONSE_REASONING_DONE_EVENTS = {
-    "response.reasoning_summary_text.done",
-    "response.reasoning_text.done",
-    "response.reasoning.done",
-}
 
 
 def _is_local_base_url(base_url: str) -> bool:

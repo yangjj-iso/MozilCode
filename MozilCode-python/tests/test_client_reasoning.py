@@ -14,6 +14,10 @@ from mozilcode.client import (
 )
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
+from mozilcode.openai_streaming import (
+    stream_end_from_openai_chat_usage,
+    stream_end_from_openai_response_usage,
+)
 from mozilcode.tools.base import StreamEnd, TextDelta, ThinkingComplete, ThinkingDelta
 
 
@@ -35,6 +39,14 @@ async def _collect(stream):
     async for event in stream:
         result.append(event)
     return result
+
+
+def test_client_keeps_openai_streaming_helper_exports():
+    assert _stream_end_from_openai_chat_usage is stream_end_from_openai_chat_usage
+    assert (
+        _stream_end_from_openai_response_usage
+        is stream_end_from_openai_response_usage
+    )
 
 
 @pytest.mark.asyncio
