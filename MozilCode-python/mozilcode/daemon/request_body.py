@@ -85,6 +85,20 @@ def string_field(
     return value
 
 
+def required_string_field(
+    payload: dict[str, Any],
+    name: str,
+    *,
+    strip: bool = True,
+) -> str:
+    value = string_field(payload, name)
+    if strip:
+        value = value.strip()
+    if not value:
+        raise BodyFieldError(f"'{name}' is required")
+    return value
+
+
 def choice_field(
     payload: dict[str, Any],
     name: str,
@@ -92,6 +106,18 @@ def choice_field(
     default: str = "",
 ) -> str:
     value = string_field(payload, name, default)
+    if value not in choices:
+        allowed = ", ".join(sorted(choices))
+        raise BodyFieldError(f"'{name}' must be one of: {allowed}")
+    return value
+
+
+def required_choice_field(
+    payload: dict[str, Any],
+    name: str,
+    choices: set[str],
+) -> str:
+    value = required_string_field(payload, name)
     if value not in choices:
         allowed = ", ".join(sorted(choices))
         raise BodyFieldError(f"'{name}' must be one of: {allowed}")

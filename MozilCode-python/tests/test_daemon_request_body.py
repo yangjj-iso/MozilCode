@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.request_body import (
     parse_json_object,
+    required_string_field,
     string_field,
     string_mapping_field,
 )
@@ -51,6 +52,19 @@ async def test_parse_json_object_returns_typed_value():
 
     assert parsed.ok
     assert parsed.unwrap() == "main"
+
+
+@pytest.mark.asyncio
+async def test_parse_json_object_rejects_blank_required_string():
+    parsed = await parse_json_object(
+        _JsonRequest({"name": "   "}),
+        lambda body: required_string_field(body, "name"),
+    )
+
+    assert not parsed.ok
+    assert parsed.error is not None
+    assert parsed.error.status_code == 400
+    assert json.loads(parsed.error.body) == {"error": "'name' is required"}
 
 
 @pytest.mark.asyncio
@@ -151,6 +165,8 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
     [
         ("/api/session", {"session_id": 123}, "'session_id' must be a string"),
         ("/api/session", {"work_dir": []}, "'work_dir' must be a string"),
+        ("/api/session/missing/mode", {}, "'mode' is required"),
+        ("/api/session/missing/mode", {"mode": "   "}, "'mode' is required"),
         ("/api/session/missing/mode", {"mode": 1}, "'mode' must be a string"),
         (
             "/api/session/missing/mode",
@@ -167,13 +183,33 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
         ),
         (
             "/api/task",
+            {"session_id": "", "prompt": "go"},
+            "'session_id' is required",
+        ),
+        (
+            "/api/task",
             {"session_id": "sid", "prompt": []},
             "'prompt' must be a string",
+        ),
+        (
+            "/api/task",
+            {"session_id": "sid", "prompt": "   "},
+            "'prompt' is required",
+        ),
+        (
+            "/api/permission/missing",
+            {},
+            "'request_id' is required",
         ),
         (
             "/api/permission/missing",
             {"request_id": 1},
             "'request_id' must be a string",
+        ),
+        (
+            "/api/permission/missing",
+            {"request_id": " "},
+            "'request_id' is required",
         ),
         (
             "/api/permission/missing",
@@ -192,6 +228,11 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
         ),
         (
             "/api/askuser/missing",
+            {"request_id": " ", "answers": {}},
+            "'request_id' is required",
+        ),
+        (
+            "/api/askuser/missing",
             {"request_id": "req", "answers": []},
             "'answers' must be an object",
         ),
@@ -204,6 +245,11 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
             "/api/session/missing/worktrees",
             {"name": 123},
             "'name' must be a string",
+        ),
+        (
+            "/api/session/missing/worktrees",
+            {"name": "   "},
+            "'name' is required",
         ),
         (
             "/api/session/missing/worktrees",

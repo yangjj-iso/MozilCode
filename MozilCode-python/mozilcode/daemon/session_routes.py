@@ -11,6 +11,8 @@ from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import (
     choice_field,
     parse_json_object,
+    required_choice_field,
+    required_string_field,
     string_field,
     string_mapping_field,
 )
@@ -67,13 +69,13 @@ def _parse_create_session_body(body: dict[str, Any]) -> CreateSessionBody:
 
 
 def _parse_mode_body(body: dict[str, Any]) -> str:
-    return choice_field(body, "mode", MODE_REQUESTS).strip()
+    return required_choice_field(body, "mode", MODE_REQUESTS)
 
 
 def _parse_start_task_body(body: dict[str, Any]) -> StartTaskBody:
     return StartTaskBody(
-        session_id=string_field(body, "session_id"),
-        prompt=string_field(body, "prompt"),
+        session_id=required_string_field(body, "session_id"),
+        prompt=required_string_field(body, "prompt"),
     )
 
 
@@ -81,14 +83,14 @@ def _parse_permission_resolution_body(
     body: dict[str, Any],
 ) -> PermissionResolutionBody:
     return PermissionResolutionBody(
-        request_id=string_field(body, "request_id"),
+        request_id=required_string_field(body, "request_id"),
         response=choice_field(body, "response", PERMISSION_RESPONSES, "deny"),
     )
 
 
 def _parse_askuser_resolution_body(body: dict[str, Any]) -> AskUserResolutionBody:
     return AskUserResolutionBody(
-        request_id=string_field(body, "request_id"),
+        request_id=required_string_field(body, "request_id"),
         answers=string_mapping_field(body, "answers"),
     )
 
@@ -156,8 +158,6 @@ async def set_session_mode(request: Request) -> JSONResponse:
     if parsed.error is not None:
         return parsed.error
     mode = parsed.unwrap()
-    if not mode:
-        return bad_request_response("mode is required")
     try:
         status = await server.set_permission_mode(sid, mode)
     except ValueError as e:
@@ -195,8 +195,6 @@ async def start_task(request: Request) -> JSONResponse:
     if parsed.error is not None:
         return parsed.error
     body = parsed.unwrap()
-    if not body.session_id or not body.prompt:
-        return bad_request_response("session_id and prompt are required")
     try:
         task_id = await server.start_task(body.session_id, body.prompt)
     except ValueError as e:

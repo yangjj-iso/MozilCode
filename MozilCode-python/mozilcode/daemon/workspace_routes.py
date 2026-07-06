@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 from mozilcode.daemon.request_body import (
     bool_field,
     parse_json_object,
+    required_string_field,
     string_field,
 )
 from mozilcode.daemon.request_context import daemon_server, path_param, query_param
@@ -38,7 +39,7 @@ class ExitWorktreeBody:
 
 def _parse_create_worktree_body(body: dict[str, Any]) -> CreateWorktreeBody:
     return CreateWorktreeBody(
-        name=string_field(body, "name").strip(),
+        name=required_string_field(body, "name"),
         base_branch=string_field(body, "base_branch", "HEAD").strip(),
     )
 
