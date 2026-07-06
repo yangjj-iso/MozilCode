@@ -10,6 +10,7 @@ from pathlib import Path
 
 from mozilcode.agents.notification import format_task_notification
 from mozilcode.config import ConfigError, load_config
+from mozilcode.conversation import ConversationManager
 from mozilcode.hooks import HookConfigError, HookEngine, load_hooks
 from mozilcode.permissions import PermissionMode
 
@@ -69,7 +70,6 @@ def main() -> None:
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
-    from mozilcode.conversation import ConversationManager
     work_dir = os.getcwd()
     from mozilcode.agent_factory import create_agent_from_config
 
@@ -81,14 +81,19 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     )
     task_manager = deps.task_manager
     team_manager = deps.team_manager
+    try:
+        await _run_prompt_loop(agent, task_manager, team_manager, prompt)
+    finally:
+        if agent.memory_hub:
+            await agent.memory_hub.shutdown()
 
+
+async def _run_prompt_loop(agent, task_manager, team_manager, prompt: str) -> None:
     conv = ConversationManager()
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
 
     if not team_manager.has_teams():
-        if agent.memory_hub:
-            await agent.memory_hub.shutdown()
         return
 
     for i in range(90):
@@ -114,9 +119,6 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             "Teammate notifications received. Process them and continue.", conv
         )
         print(last_result, flush=True)
-
-    if agent.memory_hub:
-        await agent.memory_hub.shutdown()
 
 
 def _drain_cli_notifications(task_manager, team_manager) -> list[str]:

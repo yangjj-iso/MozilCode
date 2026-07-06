@@ -129,3 +129,59 @@ async def test_run_prompt_uses_shared_agent_factory(
     assert agent.prompts == ["hello"]
     assert agent.memory_hub.shutdown_called is True
     assert capsys.readouterr().out.strip() == "done"
+
+
+@pytest.mark.asyncio
+async def test_run_prompt_shutdowns_memory_hub_when_agent_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    created: dict[str, object] = {}
+
+    class FakeMemoryHub:
+        def __init__(self) -> None:
+            self.shutdown_called = False
+
+        async def shutdown(self) -> None:
+            self.shutdown_called = True
+
+    class FailingAgent:
+        def __init__(self) -> None:
+            self.memory_hub = FakeMemoryHub()
+
+        async def run_to_completion(self, _prompt, _conversation=None) -> str:
+            raise RuntimeError("model failed")
+
+    async def fake_create_agent_from_config(*_args):
+        agent = FailingAgent()
+        created["agent"] = agent
+        return agent, SimpleNamespace(
+            task_manager=SimpleNamespace(),
+            team_manager=SimpleNamespace(),
+        )
+
+    import mozilcode.agent_factory as agent_factory
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        agent_factory,
+        "create_agent_from_config",
+        fake_create_agent_from_config,
+    )
+    config = AppConfig(
+        providers=[
+            ProviderConfig(
+                name="local",
+                protocol="openai-compat",
+                base_url="http://127.0.0.1:9999/v1",
+                model="smoke-model",
+            )
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="model failed"):
+        await cli._run_prompt(config, PermissionMode.DEFAULT, None, "hello")
+
+    agent = created["agent"]
+    assert isinstance(agent, FailingAgent)
+    assert agent.memory_hub.shutdown_called is True
