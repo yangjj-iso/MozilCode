@@ -32,6 +32,8 @@ class MCPClient:
     async def connect(self) -> None:
         if self._alive:
             return
+        if self._stack is not None:
+            await self._cleanup_stack()
 
         self._stack = AsyncExitStack()
         await self._stack.__aenter__()
@@ -55,8 +57,9 @@ class MCPClient:
 
 
     async def _connect_stdio(self) -> tuple[Any, Any]:
-        assert self._stack is not None
-        assert self.config.command is not None
+        stack = self._require_stack()
+        if self.config.command is None:
+            raise RuntimeError(f"MCP server '{self.name}' has no stdio command")
 
         params = StdioServerParameters(
             command=self.config.command,
@@ -64,15 +67,16 @@ class MCPClient:
             env=build_child_env(self.config.env),
         )
         devnull = open(os.devnull, "w")
-        self._stack.callback(devnull.close)
-        read, write = await self._stack.enter_async_context(
+        stack.callback(devnull.close)
+        read, write = await stack.enter_async_context(
             stdio_client(params, errlog=devnull)
         )
         return read, write
 
     async def _connect_http(self) -> tuple[Any, Any]:
-        assert self._stack is not None
-        assert self.config.url is not None
+        stack = self._require_stack()
+        if self.config.url is None:
+            raise RuntimeError(f"MCP server '{self.name}' has no HTTP url")
 
         resolved_headers = {
             k: resolve_env_vars(v) for k, v in self.config.headers.items()
@@ -81,9 +85,9 @@ class MCPClient:
             headers=resolved_headers,
             follow_redirects=True,
         )
-        await self._stack.enter_async_context(http_client)
+        await stack.enter_async_context(http_client)
 
-        result = await self._stack.enter_async_context(
+        result = await stack.enter_async_context(
             streamable_http_client(self.config.url, http_client=http_client)
         )
         read, write = result[0], result[1]
@@ -91,21 +95,29 @@ class MCPClient:
 
 
     async def list_tools(self) -> list[types.Tool]:
-        assert self._session is not None
-        result = await self._session.list_tools()
+        result = await self._require_session().list_tools()
         return list(result.tools)
 
 
     async def call_tool(
         self, name: str, arguments: dict[str, Any]
     ) -> types.CallToolResult:
-        assert self._session is not None
-        return await self._session.call_tool(name, arguments)
+        return await self._require_session().call_tool(name, arguments)
 
     async def close(self) -> None:
         self._alive = False
         self._session = None
         await self._cleanup_stack()
+
+    def _require_stack(self) -> AsyncExitStack:
+        if self._stack is None:
+            raise RuntimeError(f"MCP server '{self.name}' is not connecting")
+        return self._stack
+
+    def _require_session(self) -> ClientSession:
+        if self._session is None or not self._alive:
+            raise RuntimeError(f"MCP server '{self.name}' is not connected")
+        return self._session
 
     async def _cleanup_stack(self) -> None:
         if self._stack is not None:

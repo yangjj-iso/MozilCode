@@ -428,6 +428,69 @@ class TestMCPToolWrapper:
         assert output.output == "ok"
         client.call_tool.assert_awaited_once_with("search issues", {})
 
+    @pytest.mark.asyncio
+    async def test_execute_closes_client_after_call_failure(self) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.tool_wrapper import MCPToolWrapper
+
+        tool_def = mcp_types.Tool(
+            name="search",
+            description="Search",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        client = AsyncMock()
+        client.is_alive = True
+        client.call_tool.side_effect = RuntimeError("server closed")
+
+        wrapper = MCPToolWrapper("github", tool_def, client)
+        params = wrapper.params_model()
+
+        output = await wrapper.execute(params)
+
+        assert output.is_error is True
+        assert "server closed" in output.output
+        client.close.assert_awaited_once()
+
+
+# ===========================================================================
+# MCPClient 状态守卫
+# ===========================================================================
+
+class TestMCPClientState:
+    @pytest.mark.asyncio
+    async def test_list_tools_requires_connected_session(self) -> None:
+        from mozilcode.mcp.client import MCPClient
+
+        client = MCPClient(MCPServerConfig(name="local", command="echo"))
+
+        with pytest.raises(RuntimeError, match="not connected"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_requires_connected_session(self) -> None:
+        from mozilcode.mcp.client import MCPClient
+
+        client = MCPClient(MCPServerConfig(name="local", command="echo"))
+
+        with pytest.raises(RuntimeError, match="not connected"):
+            await client.call_tool("tool", {})
+
+    @pytest.mark.asyncio
+    async def test_connect_cleans_stale_stack_before_reconnect(self) -> None:
+        from contextlib import AsyncExitStack
+
+        from mozilcode.mcp.client import MCPClient
+
+        client = MCPClient(MCPServerConfig(name="local", command="echo"))
+        stale_stack = AsyncMock(spec=AsyncExitStack)
+        client._stack = stale_stack
+
+        with patch.object(client, "_connect_stdio", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError, match="boom"):
+                await client.connect()
+
+        stale_stack.__aexit__.assert_awaited_once_with(None, None, None)
+
 # ===========================================================================
 # _extract_text
 # ===========================================================================

@@ -165,7 +165,7 @@ class MCPToolWrapper(Tool):
                 self._tool_def.name, params.model_dump(exclude_none=True)
             )
         except Exception as e:
-            self._client._alive = False
+            await self._client.close()
             return ToolResult(
                 output=f"MCP tool call failed: {e}",
                 is_error=True,
