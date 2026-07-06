@@ -46,6 +46,7 @@ def build_memory_hub(
     )
     providers: list[MemoryProvider] = []
     seen_names: set[str] = set()
+    seen_loaded_names: set[str] = set()
     for provider_config in provider_configs:
         if not provider_config.enabled:
             continue
@@ -58,13 +59,18 @@ def build_memory_hub(
             )
         seen_names.add(name)
         provider_config = replace(provider_config, name=name)
-        providers.append(
-            _load_provider(
-                provider_config,
-                project_root,
-                legacy_manager=legacy_manager,
-            )
+        provider = _load_provider(
+            provider_config,
+            project_root,
+            legacy_manager=legacy_manager,
         )
+        loaded_name = _normalized_loaded_provider_name(provider)
+        if loaded_name in seen_loaded_names:
+            raise MemoryProviderLoadError(
+                f"Duplicate loaded memory provider name: {loaded_name}"
+            )
+        seen_loaded_names.add(loaded_name)
+        providers.append(provider)
     return MemoryHub(providers=providers) if providers else None
 
 
@@ -161,6 +167,13 @@ def _validate_provider_contract(provider: Any, target: str) -> None:
             f"Memory provider {target} does not implement required method(s): "
             f"{', '.join(missing_methods)}"
         )
+
+
+def _normalized_loaded_provider_name(provider: MemoryProvider) -> str:
+    name = provider.name.strip()
+    if name != provider.name:
+        provider.name = name
+    return name
 
 
 def _provider_constructor_kwargs(

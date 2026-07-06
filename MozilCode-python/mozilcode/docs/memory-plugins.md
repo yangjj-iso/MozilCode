@@ -35,6 +35,8 @@ memory:
       class: MyMemoryProvider
 ```
 
+配置中的 `name` 必须唯一；provider 实例最终暴露的 `name` 也必须唯一。这样 `MemoryHub` 的上下文标题、状态输出和错误隔离都能稳定指向同一个 provider。
+
 ## 核心组件
 
 - `mozilcode/memory/providers/base.py`：定义 `MemoryProvider` 协议、`MemoryScope`、`MemoryEvent`、`MemoryItem`。

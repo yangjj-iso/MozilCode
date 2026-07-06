@@ -1202,6 +1202,42 @@ class TestMemoryProviders:
         with pytest.raises(Exception, match="Duplicate memory provider name"):
             build_memory_hub(cfg, str(tmp_path))
 
+    def test_duplicate_loaded_memory_provider_names_are_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "duplicate_loaded_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class FirstProvider(BaseMemoryProvider):\n"
+            "    name = 'shared'\n"
+            "class SecondProvider(BaseMemoryProvider):\n"
+            "    name = ' shared '\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="first",
+                    type="python",
+                    module=module_name,
+                    class_name="FirstProvider",
+                ),
+                MemoryProviderConfig(
+                    name="second",
+                    type="python",
+                    module=module_name,
+                    class_name="SecondProvider",
+                ),
+            ]
+        )
+
+        with pytest.raises(
+            MemoryProviderLoadError,
+            match="Duplicate loaded memory provider name: shared",
+        ):
+            build_memory_hub(cfg, str(tmp_path))
+
     def test_programmatic_memory_provider_names_are_trimmed_without_mutation(
         self, tmp_path: Path
     ) -> None:
