@@ -20,6 +20,7 @@ from mozilcode.teams.models import (
     resolve_team_dir,
     unique_team_name,
 )
+from mozilcode.teams.manager import TeamManager
 from mozilcode.teams.shared_task import SharedTask, SharedTaskStore
 from mozilcode.teams.mailbox import Mailbox, MailboxMessage, create_message
 from mozilcode.teams.registry import AgentNameRegistry
@@ -175,6 +176,19 @@ class TestModels:
             (Path(tmp_dir) / ".mozilcode" / "teams" / "my-team").mkdir(parents=True)
             name2 = unique_team_name("my-team")
             assert name2 == "my-team-2"
+
+
+class TestTeamManager:
+    def test_team_query_helpers(self, tmp_dir):
+        with patch("mozilcode.teams.models.Path.home", return_value=Path(tmp_dir)):
+            manager = TeamManager()
+            assert manager.has_teams() is False
+            assert manager.team_names() == []
+
+            team = manager.create_team("alpha", lead_agent_id="lead")
+
+            assert manager.has_teams() is True
+            assert manager.team_names() == [team.name]
 
 # =====================================================================
 # 2. SharedTaskStore

@@ -555,6 +555,28 @@ class TestTaskManager:
         assert bg.status == "cancelled"
 
     @pytest.mark.asyncio
+    async def test_readonly_task_state_helpers(self, mock_agent):
+        async def long_running(*a, **kw):
+            await asyncio.sleep(10)
+            return "done"
+
+        mock_agent.run_to_completion = long_running
+        tm = TaskManager()
+        task_id = tm.launch(mock_agent, "long task")
+        await asyncio.sleep(0.1)
+
+        assert tm.running_task_states() == {task_id: True}
+        assert tm.has_running_tasks() is True
+        assert tm.completed_task_ids() == []
+        assert tm.notification_queue_size() == 0
+
+        assert tm.cancel(task_id) is True
+        await asyncio.sleep(0.2)
+        assert tm.has_running_tasks() is False
+        assert tm.completed_task_ids() == [task_id]
+        assert tm.notification_queue_size() == 1
+
+    @pytest.mark.asyncio
     async def test_failed_task(self):
         agent = MagicMock()
         agent.total_input_tokens = 0

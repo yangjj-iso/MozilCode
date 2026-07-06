@@ -99,6 +99,12 @@ class TeamManager:
             return team
         return None
 
+    def has_teams(self) -> bool:
+        return bool(self._teams)
+
+    def team_names(self) -> list[str]:
+        return list(self._teams.keys())
+
     def get_task_store(self, team_name: str) -> SharedTaskStore | None:
         if team_name in self._task_stores:
             return self._task_stores[team_name]

@@ -68,96 +68,18 @@ def main() -> None:
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
-    from mozilcode.agent import Agent
-    from mozilcode.client import create_client, resolve_context_window
     from mozilcode.conversation import ConversationManager
-    from mozilcode.memory.instructions import load_instructions
-    from mozilcode.memory.providers import build_memory_hub
-    from mozilcode.permissions import (
-        DangerousCommandDetector,
-        PathSandbox,
-        PermissionChecker,
-        RuleEngine,
-    )
-    from mozilcode.tools import create_default_registry
-    from mozilcode.agents.loader import AgentLoader
-    from mozilcode.agents.task_manager import TaskManager
-    from mozilcode.agents.trace import TraceManager
-    from mozilcode.tools.agent_tool import AgentTool
-    from mozilcode.tools.impl.tool_search import ToolSearchTool
-    from mozilcode.teams.manager import TeamManager
-    from mozilcode.teams.models import BackendType
-    from mozilcode.tools.team_create import TeamCreateTool
-    from mozilcode.tools.team_delete import TeamDeleteTool
-    from mozilcode.worktree import WorktreeManager
-    from mozilcode.config import WorktreeConfig
-
-    provider = config.providers[0]
-    client = create_client(provider)
-    # 第 2 层：尽力从 provider 自动拉取模型的 context window（缓存在 provider 上）。
-    # 不会抛异常或阻塞启动；失败则退化到映射表。
-    await resolve_context_window(provider)
     work_dir = os.getcwd()
-    home = Path.home()
+    from mozilcode.daemon.agent_factory import create_agent_from_config
 
-    checker = PermissionChecker(
-        detector=DangerousCommandDetector(),
-        sandbox=PathSandbox(work_dir),
-        rule_engine=RuleEngine(
-            user_rules_path=home / ".mozilcode" / "permissions.yaml",
-            project_rules_path=Path(work_dir) / ".mozilcode" / "permissions.yaml",
-            local_rules_path=Path(work_dir) / ".mozilcode" / "permissions.local.yaml",
-        ),
-        mode=permission_mode,
+    agent, deps = await create_agent_from_config(
+        config,
+        work_dir,
+        permission_mode,
+        hook_engine,
     )
-
-    instructions = load_instructions(work_dir)
-    memory_hub = build_memory_hub(config.memory, work_dir)
-    registry = create_default_registry()
-    registry.register(ToolSearchTool(registry, protocol=provider.protocol))
-
-    agent = Agent(
-        client=client,
-        registry=registry,
-        protocol=provider.protocol,
-        work_dir=work_dir,
-        permission_checker=checker,
-        context_window=provider.get_context_window(),
-        instructions_content=instructions,
-        memory_hub=memory_hub,
-        hook_engine=hook_engine,
-    )
-
-    wt_cfg = config.worktree or WorktreeConfig()
-    wt_manager = WorktreeManager(
-        repo_root=work_dir,
-        symlink_directories=wt_cfg.symlink_directories,
-    )
-    trace_manager = TraceManager()
-    task_manager = TaskManager()
-    agent_loader = AgentLoader(work_dir, enable_verification=config.enable_verification_agent)
-    agent_loader.load_all()
-    team_manager = TeamManager(worktree_manager=wt_manager, trace_manager=trace_manager)
-
-    agent_tool = AgentTool(
-        agent_loader=agent_loader,
-        task_manager=task_manager,
-        trace_manager=trace_manager,
-        parent_agent=agent,
-        enable_fork=config.enable_fork,
-        provider_config=provider,
-        worktree_manager=wt_manager,
-        team_manager=team_manager,
-    )
-    registry.register(agent_tool)
-    registry.register(TeamCreateTool(
-        team_manager=team_manager,
-        parent_agent=agent,
-        teammate_mode="in-process",
-        is_interactive=False,
-        enable_coordinator_mode=config.enable_coordinator_mode,
-    ))
-    registry.register(TeamDeleteTool(team_manager=team_manager, parent_agent=agent))
+    task_manager = deps.task_manager
+    team_manager = deps.team_manager
 
     def drain_notifications() -> list[str]:
         notes: list[str] = []
@@ -170,16 +92,11 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
         notes.extend(team_manager.drain_lead_mailbox())
         return notes
 
-    def drain_mailbox_only() -> list[str]:
-        return team_manager.drain_lead_mailbox()
-
-    agent.notification_fn = drain_mailbox_only
-
     conv = ConversationManager()
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
 
-    if not team_manager._teams:
+    if not team_manager.has_teams():
         if agent.memory_hub:
             await agent.memory_hub.shutdown()
         return
@@ -187,13 +104,18 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     import sys
     for i in range(90):
         await asyncio.sleep(2)
-        running = {k: not t.done() for k, t in task_manager._async_tasks.items()}
-        completed_ids = [t.id for t in task_manager._tasks.values() if t.status != "running"]
-        print(f"[poll {i}] running={running} completed={completed_ids} teams={list(team_manager._teams.keys())} queue_size={task_manager._notify_queue.qsize()}", file=sys.stderr, flush=True)
+        running = task_manager.running_task_states()
+        completed_ids = task_manager.completed_task_ids()
+        queue_size = task_manager.notification_queue_size()
+        print(
+            f"[poll {i}] running={running} completed={completed_ids} "
+            f"teams={team_manager.team_names()} queue_size={queue_size}",
+            file=sys.stderr,
+            flush=True,
+        )
         notes = drain_notifications()
         if not notes:
-            has_running = any(v for v in running.values())
-            if not has_running:
+            if not task_manager.has_running_tasks():
                 print(f"[poll {i}] no running tasks, breaking", file=sys.stderr, flush=True)
                 break
             continue

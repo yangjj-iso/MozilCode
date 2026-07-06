@@ -180,6 +180,21 @@ class TaskManager:
     def list_tasks(self) -> list[BackgroundTask]:
         return list(self._tasks.values())
 
+    def running_task_states(self) -> dict[str, bool]:
+        return {
+            task_id: not task.done()
+            for task_id, task in self._async_tasks.items()
+        }
+
+    def has_running_tasks(self) -> bool:
+        return any(not task.done() for task in self._async_tasks.values())
+
+    def completed_task_ids(self) -> list[str]:
+        return [task.id for task in self._tasks.values() if task.status != "running"]
+
+    def notification_queue_size(self) -> int:
+        return self._notify_queue.qsize()
+
     def cancel(self, task_id: str) -> bool:
         bg = self._tasks.get(task_id)
         if bg is None or bg.status != "running":
