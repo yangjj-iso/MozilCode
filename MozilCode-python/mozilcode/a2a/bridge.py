@@ -80,6 +80,61 @@ def _event_applies_to_task(task: A2ATask, event: dict[str, Any]) -> bool:
     return not event_task_id or event_task_id == task.internal_task_id
 
 
+def _event_data(event: dict[str, Any]) -> dict[str, Any]:
+    data = event.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _apply_task_log_event(task: A2ATask, event: object) -> None:
+    if event is None:
+        _set_task_state(
+            task,
+            TASK_FAILED,
+            status_message="Session closed.",
+            error="Session closed.",
+        )
+        return
+    if not isinstance(event, dict):
+        return
+    if not _event_applies_to_task(task, event):
+        return
+
+    event_type = event.get("type")
+    data = _event_data(event)
+    if event_type == "StreamText":
+        text = data.get("text", "")
+        if text:
+            task.output_parts.append(str(text))
+            _set_task_state(task, TASK_WORKING)
+    elif event_type == "ErrorEvent":
+        message = str(data.get("message") or "Agent task failed.")
+        _set_task_state(
+            task,
+            TASK_FAILED,
+            status_message=message,
+            error=message,
+        )
+    elif event_type == "TaskCancelled":
+        _set_task_state(
+            task,
+            TASK_CANCELED,
+            status_message=str(data.get("message") or "Task cancelled."),
+        )
+    elif event_type in {"PermissionRequest", "AskUserRequest"}:
+        if task.state not in TERMINAL_STATES:
+            _set_task_state(
+                task,
+                TASK_INPUT_REQUIRED,
+                status_message=(
+                    "The task requires interactive input from a "
+                    "MozilCode daemon client."
+                ),
+            )
+    elif event_type == "LoopComplete":
+        if task.state not in {TASK_FAILED, TASK_CANCELED}:
+            _set_task_state(task, TASK_COMPLETED, status_message="")
+
+
 class A2ABridge:
     """Expose the daemon Agent as a small A2A-compatible task bridge.
 
@@ -351,52 +406,7 @@ class A2ABridge:
             return
 
         for ev in log_list[task.cursor:]:
-            if ev is None:
-                _set_task_state(
-                    task,
-                    TASK_FAILED,
-                    status_message="Session closed.",
-                    error="Session closed.",
-                )
-                continue
-            if not isinstance(ev, dict):
-                continue
-            if not _event_applies_to_task(task, ev):
-                continue
-            event_type = ev.get("type")
-            data = ev.get("data") or {}
-            if event_type == "StreamText":
-                text = data.get("text", "")
-                if text:
-                    task.output_parts.append(str(text))
-                    _set_task_state(task, TASK_WORKING)
-            elif event_type == "ErrorEvent":
-                message = str(data.get("message") or "Agent task failed.")
-                _set_task_state(
-                    task,
-                    TASK_FAILED,
-                    status_message=message,
-                    error=message,
-                )
-            elif event_type == "TaskCancelled":
-                _set_task_state(
-                    task,
-                    TASK_CANCELED,
-                    status_message=str(data.get("message") or "Task cancelled."),
-                )
-            elif event_type in {"PermissionRequest", "AskUserRequest"}:
-                if task.state not in TERMINAL_STATES:
-                    _set_task_state(
-                        task,
-                        TASK_INPUT_REQUIRED,
-                        status_message=(
-                            "The task requires interactive input from a "
-                            "MozilCode daemon client."
-                        ),
-                    )
-            elif event_type == "LoopComplete":
-                if task.state not in {TASK_FAILED, TASK_CANCELED}:
-                    _set_task_state(task, TASK_COMPLETED, status_message="")
+            _apply_task_log_event(task, ev)
         task.cursor = len(log_list)
 
     def _json_error(self, req_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:

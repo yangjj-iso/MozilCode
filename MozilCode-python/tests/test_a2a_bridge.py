@@ -150,3 +150,25 @@ async def test_a2a_task_ignores_foreign_events_before_failure():
     assert result["status"]["state"] == TASK_FAILED
     assert result["metadata"]["error"] == "boom"
     assert "artifacts" not in result
+
+
+@pytest.mark.asyncio
+async def test_a2a_task_ignores_malformed_event_data():
+    bridge = A2ABridge(
+        _ScriptedDaemon(
+            lambda task_id, _prompt: [
+                {"type": "StreamText", "task_id": task_id, "data": "bad"},
+                {"type": "StreamText", "task_id": task_id, "data": {"text": "ok"}},
+                {"type": "LoopComplete", "task_id": task_id, "data": {}},
+            ]
+        ),
+        default_wait_timeout=1,
+    )
+
+    result = await bridge.send_message({
+        "message": {"parts": [{"kind": "text", "text": "malformed"}]},
+        "configuration": {"returnImmediately": True},
+    })
+
+    assert result["status"]["state"] == TASK_COMPLETED
+    assert result["artifacts"][0]["parts"][0]["text"] == "ok"
