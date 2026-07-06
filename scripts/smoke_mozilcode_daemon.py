@@ -9,30 +9,6 @@ import httpx
 import websockets
 
 
-REMOVED_MANAGEMENT_ENDPOINTS = (
-    ("GET", "/"),
-    ("GET", "/api/config"),
-    ("POST", "/api/config"),
-    ("GET", "/api/settings/mcp"),
-    ("POST", "/api/settings/mcp"),
-    ("GET", "/api/settings/memory"),
-    ("POST", "/api/settings/memory"),
-    ("GET", "/api/skills"),
-    ("POST", "/api/skills"),
-    ("GET", "/api/settings/gui"),
-    ("POST", "/api/auth/login"),
-    ("GET", "/api/accounts"),
-    ("GET", "/api/cloud/status"),
-    ("GET", "/api/models/official"),
-    ("GET", "/api/settings/official-models"),
-    ("POST", "/api/settings/official-models"),
-    ("GET", "/api/settings/qqbot"),
-    ("GET", "/api/settings/telegrambot"),
-    ("GET", "/api/qq/official/status"),
-    ("GET", "/api/telegram/status"),
-)
-
-
 class SmokeFailure(RuntimeError):
     pass
 
@@ -67,38 +43,6 @@ async def request_json(
     if not isinstance(data, dict):
         raise SmokeFailure(f"{method} {path} returned non-object JSON")
     return data
-
-
-async def request_status(
-    http: httpx.AsyncClient,
-    method: str,
-    base_url: str,
-    path: str,
-    *,
-    expected_status: int,
-    payload: dict | None = None,
-) -> None:
-    response = await http.request(method, f"{base_url}{path}", json=payload)
-    if response.status_code != expected_status:
-        raise SmokeFailure(
-            f"{method} {path} returned {response.status_code}, "
-            f"expected {expected_status}: {response.text[:300]}"
-        )
-
-
-async def verify_removed_management_routes(
-    http: httpx.AsyncClient,
-    base_url: str,
-) -> None:
-    for method, path in REMOVED_MANAGEMENT_ENDPOINTS:
-        await request_status(
-            http,
-            method,
-            base_url,
-            path,
-            expected_status=404,
-            payload={} if method == "POST" else None,
-        )
 
 
 async def verify_stream_replay(ws_base_url: str, session_id: str, timeout: float) -> None:
@@ -156,7 +100,6 @@ async def run_smoke(base_url: str, timeout: float) -> dict:
         if agent_card.get("name") != "MozilCode":
             raise SmokeFailure("A2A agent card did not identify MozilCode")
 
-        await verify_removed_management_routes(http, base_url)
         await verify_stream_replay(ws_base, session_id, timeout)
         await request_json(
             http,
@@ -175,7 +118,6 @@ async def run_smoke(base_url: str, timeout: float) -> dict:
             "session",
             "session_status",
             "a2a_agent_card",
-            "removed_management_routes",
             "websocket_replay",
             "session_delete",
         ],

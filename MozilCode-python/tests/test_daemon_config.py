@@ -175,92 +175,32 @@ def test_a2a_message_send_rejects_non_object_configuration(tmp_path):
 
 
 def test_route_registry_keeps_local_daemon_surface_only():
-    paths = {route.path for route in build_routes()}
-
-    assert "/api/health" in paths
-    assert "/api/session" in paths
-    assert "/api/stream/{sid}" in paths
-    assert "/a2a/rpc" in paths
-    assert "/" not in paths
-    assert "/api/config" not in paths
-    assert "/api/settings/mcp" not in paths
-    assert "/api/settings/memory" not in paths
-    assert "/api/skills" not in paths
-    assert "/api/auth/login" not in paths
-    assert "/api/accounts" not in paths
-    assert "/api/cloud/status" not in paths
-    assert "/api/models/official" not in paths
-    assert "/api/settings/official-models" not in paths
-    assert "/api/settings/qqbot" not in paths
-    assert "/api/settings/telegrambot" not in paths
-
-
-def test_external_bot_settings_routes_are_removed(tmp_path):
-    provider = ProviderConfig(
-        name="openai",
-        protocol="openai",
-        base_url="http://127.0.0.1:8080/v1",
-        model="gpt-local",
-    )
-    app = _create_app(provider, tmp_path)
-
-    with TestClient(app) as client:
-        qq = client.get("/api/settings/qqbot")
-        telegram = client.get("/api/settings/telegrambot")
-        qq_status = client.get("/api/qq/official/status")
-        telegram_status = client.get("/api/telegram/status")
-
-    assert qq.status_code == 404
-    assert telegram.status_code == 404
-    assert qq_status.status_code == 404
-    assert telegram_status.status_code == 404
-
-
-def test_gui_management_routes_are_removed(tmp_path):
-    provider = ProviderConfig(
-        name="openai",
-        protocol="openai",
-        base_url="http://127.0.0.1:8080/v1",
-        model="gpt-local",
-    )
-    app = _create_app(provider, tmp_path)
-
-    with TestClient(app) as client:
-        responses = [
-            client.get("/api/config"),
-            client.post("/api/config", json={}),
-            client.get("/api/settings/mcp"),
-            client.post("/api/settings/mcp", json={}),
-            client.get("/api/settings/memory"),
-            client.post("/api/settings/memory", json={}),
-            client.get("/api/skills"),
-            client.post("/api/skills", json={}),
-            client.get("/api/settings/gui"),
-        ]
-
-    assert {response.status_code for response in responses} == {404}
-
-
-def test_cloud_account_and_official_model_routes_are_removed(tmp_path):
-    provider = ProviderConfig(
-        name="openai",
-        protocol="openai",
-        base_url="http://127.0.0.1:8080/v1",
-        model="gpt-local",
-    )
-    app = _create_app(provider, tmp_path)
-
-    with TestClient(app) as client:
-        responses = [
-            client.post("/api/auth/login", json={}),
-            client.get("/api/accounts"),
-            client.get("/api/cloud/status"),
-            client.get("/api/models/official"),
-            client.get("/api/settings/official-models"),
-            client.post("/api/settings/official-models", json={}),
-        ]
-
-    assert {response.status_code for response in responses} == {404}
+    assert {route.path for route in build_routes()} == {
+        "/.well-known/agent-card.json",
+        "/a2a/agent-card.json",
+        "/a2a/rpc",
+        "/a2a/message:send",
+        "/a2a/tasks/{task_id}",
+        "/a2a/tasks/{task_id}:cancel",
+        "/api/health",
+        "/api/session",
+        "/api/sessions",
+        "/api/task",
+        "/api/session/{sid}/status",
+        "/api/session/{sid}/mode",
+        "/api/session/{sid}/cancel",
+        "/api/session/{sid}/tasks",
+        "/api/session/{sid}/tasks/{task_id}/cancel",
+        "/api/session/{sid}/worktrees",
+        "/api/session/{sid}/worktrees/{name:path}/enter",
+        "/api/session/{sid}/worktrees/exit",
+        "/api/permission/{sid}",
+        "/api/askuser/{sid}",
+        "/api/compact/{sid}",
+        "/api/session/{sid}",
+        "/api/fs/{sid}",
+        "/api/stream/{sid}",
+    }
 
 
 def test_create_session_rejects_malformed_json(tmp_path):
