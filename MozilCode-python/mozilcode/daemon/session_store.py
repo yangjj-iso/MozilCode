@@ -48,6 +48,14 @@ def _clean_meta(meta: object) -> dict:
     return cleaned
 
 
+def _event_slice_start(persisted_count: int, event_count: int) -> int:
+    if persisted_count < 0:
+        return 0
+    if persisted_count > event_count:
+        return event_count
+    return persisted_count
+
+
 class SessionStore:
     """On-disk session store used to replay conversations after daemon restarts."""
 
@@ -139,7 +147,8 @@ class SessionStore:
         persisted_count: int,
     ) -> int:
         """Append new serialized events and return the updated persisted count."""
-        new_events = [event for event in log_list[persisted_count:] if event is not None]
+        start = _event_slice_start(persisted_count, len(log_list))
+        new_events = [event for event in log_list[start:] if event is not None]
         if not new_events:
             return len(log_list)
 

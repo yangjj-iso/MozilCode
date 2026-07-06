@@ -46,6 +46,32 @@ def test_session_store_appends_only_new_events(tmp_path):
     assert loaded[0].events == [{"type": "A"}, {"type": "B"}, {"type": "C"}]
 
 
+def test_session_store_clamps_negative_persisted_count(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+    events = [{"type": "A"}, {"type": "B"}]
+
+    store.persist_meta(sid, {"title": "repair count"})
+    next_count = store.persist_events(sid, events, -5)
+    loaded = store.load_sessions()
+
+    assert next_count == 2
+    assert loaded[0].events == events
+
+
+def test_session_store_clamps_oversized_persisted_count(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+    events = [{"type": "A"}, {"type": "B"}]
+
+    store.persist_meta(sid, {"title": "oversized count"})
+    next_count = store.persist_events(sid, events, 99)
+    loaded = store.load_sessions()
+
+    assert next_count == 2
+    assert loaded[0].events == []
+
+
 def test_session_store_delete_removes_session_directory(tmp_path):
     store = SessionStore(tmp_path)
     sid = "session-a"
