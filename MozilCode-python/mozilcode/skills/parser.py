@@ -34,15 +34,21 @@ class SkillDef:
 
 def parse_frontmatter(raw: str) -> tuple[dict, str]:
     stripped = raw.lstrip()
-    if not stripped.startswith("---"):
+    lines = stripped.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         raise SkillParseError("Missing YAML frontmatter (must start with ---)")
 
-    end = stripped.find("---", 3)
-    if end == -1:
+    closing_line = None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            closing_line = index
+            break
+
+    if closing_line is None:
         raise SkillParseError("Unclosed YAML frontmatter (missing closing ---)")
 
-    yaml_block = stripped[3:end]
-    body = stripped[end + 3:].lstrip("\n")
+    yaml_block = "".join(lines[1:closing_line])
+    body = "".join(lines[closing_line + 1:]).lstrip("\n")
 
     try:
         meta = yaml.safe_load(yaml_block)

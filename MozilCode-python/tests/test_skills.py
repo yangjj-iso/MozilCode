@@ -90,9 +90,25 @@ class TestParseFrontmatter:
         assert meta["description"] == "A test skill"
         assert "Do something" in body
 
+    def test_yaml_value_can_contain_delimiter_text(self) -> None:
+        meta, body = parse_frontmatter(textwrap.dedent("""\
+            ---
+            name: delimiter
+            description: "Use --- as a separator"
+            ---
+            Body
+        """))
+
+        assert meta["description"] == "Use --- as a separator"
+        assert body == "Body\n"
+
     def test_missing_opening(self) -> None:
         with pytest.raises(SkillParseError, match="Missing YAML frontmatter"):
             parse_frontmatter("no frontmatter here")
+
+    def test_opening_marker_must_be_own_line(self) -> None:
+        with pytest.raises(SkillParseError, match="Missing YAML frontmatter"):
+            parse_frontmatter("----\nname: foo\n---\nbody")
 
     def test_unclosed(self) -> None:
         with pytest.raises(SkillParseError, match="Unclosed YAML"):
