@@ -93,6 +93,31 @@ def test_a2a_agent_card_route_is_available(tmp_path):
     assert data["metadata"]["model"] == "gpt-local"
 
 
+def test_a2a_message_send_rejects_non_object_metadata(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/a2a/message:send",
+            json={
+                "message": {"parts": [{"kind": "text", "text": "hello"}]},
+                "metadata": "bad",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "metadata must be an object",
+        "code": -32602,
+    }
+
+
 def test_route_registry_keeps_local_daemon_surface_only():
     paths = {route.path for route in build_routes()}
 

@@ -269,18 +269,13 @@ class A2ABridge:
         if not prompt:
             raise A2AError("message must contain a text part", -32602)
 
-        context_id = (
-            message.get("contextId")
-            or message.get("context_id")
-            or params.get("contextId")
-            or params.get("context_id")
-        )
-        task_id_hint = message.get("taskId") or message.get("task_id") or params.get("taskId") or params.get("task_id")
+        context_id = _context_id_from_message(params, message)
+        task_id_hint = _task_id_hint_from_message(params, message)
         if not context_id and task_id_hint and task_id_hint in self._tasks:
             context_id = self._tasks[task_id_hint].context_id
         context_id = str(context_id or f"ctx-{uuid.uuid4().hex[:12]}")
 
-        metadata = dict(params.get("metadata") or {})
+        metadata = _metadata_from_params(params)
         work_dir = metadata.get("work_dir") or metadata.get("workDir")
         session_id = self._contexts.get(context_id)
         if session_id is None:
@@ -453,6 +448,41 @@ def _task_id_from_params(params: Any) -> str:
     if not task_id:
         raise A2AError("task id is required", -32602)
     return str(task_id)
+
+
+def _context_id_from_message(
+    params: dict[str, Any],
+    message: dict[str, Any],
+) -> str:
+    context_id = (
+        message.get("contextId")
+        or message.get("context_id")
+        or params.get("contextId")
+        or params.get("context_id")
+    )
+    return str(context_id) if context_id else ""
+
+
+def _task_id_hint_from_message(
+    params: dict[str, Any],
+    message: dict[str, Any],
+) -> str:
+    task_id = (
+        message.get("taskId")
+        or message.get("task_id")
+        or params.get("taskId")
+        or params.get("task_id")
+    )
+    return str(task_id) if task_id else ""
+
+
+def _metadata_from_params(params: dict[str, Any]) -> dict[str, Any]:
+    metadata = params.get("metadata")
+    if metadata is None:
+        return {}
+    if not isinstance(metadata, dict):
+        raise A2AError("metadata must be an object", -32602)
+    return dict(metadata)
 
 
 def _should_wait(params: dict[str, Any]) -> bool:

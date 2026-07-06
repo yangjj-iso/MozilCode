@@ -172,3 +172,23 @@ async def test_a2a_task_ignores_malformed_event_data():
 
     assert result["status"]["state"] == TASK_COMPLETED
     assert result["artifacts"][0]["parts"][0]["text"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a2a_json_rpc_rejects_non_object_metadata():
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "message/send",
+        "params": {
+            "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            "metadata": "bad",
+        },
+    })
+
+    assert response["id"] == 7
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "metadata must be an object"
+    assert bridge._server.sessions == []
