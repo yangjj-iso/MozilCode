@@ -262,3 +262,17 @@ async def test_a2a_json_rpc_preserves_invalid_params_types(
     assert response["error"]["code"] == -32602
     assert response["error"]["message"] == message
     assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+async def test_a2a_json_rpc_rejects_empty_batch():
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc([])
+
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32600, "message": "Invalid JSON-RPC request"},
+    }
+    assert bridge._server.sessions == []

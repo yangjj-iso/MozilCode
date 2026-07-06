@@ -199,6 +199,8 @@ class A2ABridge:
 
     async def handle_json_rpc(self, payload: Any) -> Any:
         if isinstance(payload, list):
+            if not payload:
+                return self._json_error(None, -32600, "Invalid JSON-RPC request")
             return [await self._handle_json_rpc_single(item) for item in payload]
         return await self._handle_json_rpc_single(payload)
 

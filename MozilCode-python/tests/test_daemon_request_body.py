@@ -237,6 +237,20 @@ def test_a2a_json_rpc_maps_invalid_json_encoding_to_parse_error(tmp_path):
     }
 
 
+def test_a2a_json_rpc_rejects_empty_batch(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post("/a2a/rpc", json=[])
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32600, "message": "Invalid JSON-RPC request"},
+    }
+
+
 def test_a2a_message_send_maps_bridge_error(tmp_path):
     app = _app(tmp_path)
 
