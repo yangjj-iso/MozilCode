@@ -369,6 +369,87 @@ class TestMailbox:
         assert mailbox.consume("nonexistent") == []
         assert mailbox.read("nonexistent") == []
 
+    def test_rejects_unsafe_agent_id(self, tmp_dir):
+        mailbox = Mailbox(tmp_dir)
+        msg = create_message("alice", "bob", "Hello", summary="greeting")
+
+        with pytest.raises(ValueError, match="agent_id must be"):
+            mailbox.write("../escape", msg)
+
+        assert not (Path(tmp_dir).parent / "escape").exists()
+
+    def test_rejects_unsafe_message_id(self, tmp_dir):
+        mailbox = Mailbox(tmp_dir)
+        msg = MailboxMessage(
+            id="../escape",
+            from_agent="alice",
+            to_agent="bob",
+            content="bad",
+            timestamp=1.0,
+        )
+
+        with pytest.raises(ValueError, match="message.id must be"):
+            mailbox.write("bob-id", msg)
+
+        assert not (Path(tmp_dir) / "bob-id").exists()
+
+    def test_write_rejects_invalid_message_type(self, tmp_dir):
+        mailbox = Mailbox(tmp_dir)
+        msg = MailboxMessage(
+            id="msg-1",
+            from_agent="alice",
+            to_agent="bob",
+            content="bad",
+            message_type="unknown",
+            timestamp=1.0,
+        )
+
+        with pytest.raises(ValueError, match="message.message_type must be"):
+            mailbox.write("bob-id", msg)
+
+        assert not (Path(tmp_dir) / "bob-id").exists()
+
+    def test_read_skips_malformed_messages(self, tmp_dir):
+        mailbox = Mailbox(tmp_dir)
+        agent_dir = Path(tmp_dir) / "bob-id"
+        agent_dir.mkdir()
+        valid = create_message("alice", "bob", "Hello", summary="greeting")
+        (agent_dir / "1_valid.json").write_text(
+            json.dumps(valid.to_dict()),
+            encoding="utf-8",
+        )
+        (agent_dir / "2_bad_json.json").write_text("{bad", encoding="utf-8")
+        (agent_dir / "3_bad_shape.json").write_text("[]", encoding="utf-8")
+        (agent_dir / "4_bad_type.json").write_text(
+            json.dumps({**valid.to_dict(), "timestamp": True}),
+            encoding="utf-8",
+        )
+        (agent_dir / "5_bad_metadata.json").write_text(
+            json.dumps({**valid.to_dict(), "metadata": []}),
+            encoding="utf-8",
+        )
+
+        messages = mailbox.read("bob-id")
+
+        assert len(messages) == 1
+        assert messages[0].content == "Hello"
+
+    def test_consume_only_removes_valid_messages(self, tmp_dir):
+        mailbox = Mailbox(tmp_dir)
+        agent_dir = Path(tmp_dir) / "bob-id"
+        agent_dir.mkdir()
+        valid = create_message("alice", "bob", "Hello", summary="greeting")
+        valid_path = agent_dir / "1_valid.json"
+        bad_path = agent_dir / "2_bad.json"
+        valid_path.write_text(json.dumps(valid.to_dict()), encoding="utf-8")
+        bad_path.write_text("[]", encoding="utf-8")
+
+        messages = mailbox.consume("bob-id")
+
+        assert len(messages) == 1
+        assert not valid_path.exists()
+        assert bad_path.exists()
+
 # =====================================================================
 # 4. AgentNameRegistry
 # =====================================================================

@@ -1,11 +1,40 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+MAILBOX_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+VALID_MESSAGE_TYPES = {"text", "shutdown_request", "shutdown_response"}
+
+
+def validate_mailbox_id(value: str, field_name: str = "agent_id") -> str:
+    if not isinstance(value, str) or not MAILBOX_ID_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{field_name} must be 1-64 characters of letters, digits, '_' or '-'"
+        )
+    return value
+
+
+def _string_field(data: dict[str, Any], name: str, *, required: bool = True) -> str:
+    value = data.get(name, "")
+    if not isinstance(value, str):
+        raise ValueError(f"message.{name} must be a string")
+    if required and not value:
+        raise ValueError(f"message.{name} is required")
+    return value
+
+
+def _timestamp_field(data: dict[str, Any]) -> float:
+    value = data.get("timestamp", 0.0)
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        raise ValueError("message.timestamp must be a non-negative number")
+    return float(value)
 
 
 @dataclass
@@ -25,7 +54,28 @@ class MailboxMessage:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MailboxMessage:
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if not isinstance(data, dict):
+            raise ValueError("message must be an object")
+        message_id = validate_mailbox_id(_string_field(data, "id"), "message.id")
+        message_type = _string_field(data, "message_type", required=False) or "text"
+        if message_type not in VALID_MESSAGE_TYPES:
+            raise ValueError(
+                f"message.message_type must be one of: "
+                f"{', '.join(sorted(VALID_MESSAGE_TYPES))}"
+            )
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ValueError("message.metadata must be an object")
+        return cls(
+            id=message_id,
+            from_agent=_string_field(data, "from_agent"),
+            to_agent=_string_field(data, "to_agent"),
+            content=_string_field(data, "content"),
+            summary=_string_field(data, "summary", required=False),
+            message_type=message_type,
+            timestamp=_timestamp_field(data),
+            metadata=metadata,
+        )
 
 
 class Mailbox:
@@ -33,10 +83,11 @@ class Mailbox:
         self._base_dir = Path(base_dir)
 
     def _agent_dir(self, agent_id: str) -> Path:
-        return self._base_dir / agent_id
+        return self._base_dir / validate_mailbox_id(agent_id)
 
 
     def write(self, agent_id: str, message: MailboxMessage) -> None:
+        message = MailboxMessage.from_dict(message.to_dict())
         d = self._agent_dir(agent_id)
         d.mkdir(parents=True, exist_ok=True)
         filename = f"{message.timestamp:.6f}_{message.id}.json"
@@ -56,7 +107,7 @@ class Mailbox:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 messages.append(MailboxMessage.from_dict(data))
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, ValueError):
                 continue
         return messages
 
@@ -72,7 +123,7 @@ class Mailbox:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 messages.append(MailboxMessage.from_dict(data))
                 f.unlink()
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, ValueError):
                 continue
         return messages
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from mozilcode.teams.mailbox import VALID_MESSAGE_TYPES
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -19,9 +20,6 @@ class SendMessageParams(BaseModel):
     summary: str = ""
     message_type: str = "text"
     metadata: dict[str, Any] | None = None
-
-
-VALID_MESSAGE_TYPES = {"text", "shutdown_request", "shutdown_response"}
 
 
 class SendMessageTool(Tool):
@@ -55,7 +53,10 @@ class SendMessageTool(Tool):
 
         if p.message_type not in VALID_MESSAGE_TYPES:
             return ToolResult(
-                output=f"Invalid message_type '{p.message_type}'. Must be one of: {', '.join(sorted(VALID_MESSAGE_TYPES))}",
+                output=(
+                    f"Invalid message_type '{p.message_type}'. Must be one of: "
+                    f"{', '.join(sorted(VALID_MESSAGE_TYPES))}"
+                ),
                 is_error=True,
             )
 
