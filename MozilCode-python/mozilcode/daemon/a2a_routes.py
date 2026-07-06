@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 
 from mozilcode.a2a.bridge import A2ABridge, A2AError
 from mozilcode.daemon.request_body import read_json_object
+from mozilcode.daemon.request_context import a2a_bridge, path_param
 
 
 def public_base_url(request: Request) -> str:
@@ -32,12 +33,12 @@ def a2a_error_response(error: A2AError, status_code: int) -> JSONResponse:
 
 
 async def a2a_agent_card(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
+    bridge: A2ABridge = a2a_bridge(request)
     return JSONResponse(bridge.agent_card(public_base_url(request)))
 
 
 async def a2a_rpc(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
+    bridge: A2ABridge = a2a_bridge(request)
     try:
         payload = await request.json()
     except json.JSONDecodeError:
@@ -46,7 +47,7 @@ async def a2a_rpc(request: Request) -> JSONResponse:
 
 
 async def a2a_message_send(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
+    bridge: A2ABridge = a2a_bridge(request)
     try:
         parsed = await read_json_object(request)
         if not parsed.ok:
@@ -59,18 +60,18 @@ async def a2a_message_send(request: Request) -> JSONResponse:
 
 
 async def a2a_task_get(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
+    bridge: A2ABridge = a2a_bridge(request)
     try:
-        task = bridge.get_task(request.path_params["task_id"])
+        task = bridge.get_task(path_param(request, "task_id"))
     except A2AError as e:
         return a2a_error_response(e, 404)
     return JSONResponse(bridge.task_to_a2a(task))
 
 
 async def a2a_task_cancel(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
+    bridge: A2ABridge = a2a_bridge(request)
     try:
-        task = await bridge.cancel_task(request.path_params["task_id"])
+        task = await bridge.cancel_task(path_param(request, "task_id"))
     except A2AError as e:
         return a2a_error_response(e, 404)
     return JSONResponse(bridge.task_to_a2a(task))

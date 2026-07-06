@@ -7,6 +7,8 @@ from typing import Any
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from mozilcode.daemon.request_context import daemon_server, path_param
+
 log = logging.getLogger(__name__)
 
 
@@ -44,8 +46,8 @@ async def listen_client_actions(
 async def stream_events(websocket: WebSocket) -> None:
     """Replay a session's full event history, then tail it live."""
     await websocket.accept()
-    sid = websocket.path_params["sid"]
-    server = websocket.app.state.server
+    sid = path_param(websocket, "sid")
+    server = daemon_server(websocket)
 
     log_list = server.get_event_log(sid)
     if log_list is None:

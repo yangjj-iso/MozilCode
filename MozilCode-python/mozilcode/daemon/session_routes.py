@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 
 from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import read_json_object
+from mozilcode.daemon.request_context import daemon_server, path_param
 from mozilcode.daemon.responses import (
     action_response,
     bad_request_response,
@@ -17,7 +18,7 @@ USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 
 
 async def health(request: Request) -> JSONResponse:
-    server = request.app.state.server
+    server = daemon_server(request)
     return JSONResponse(
         {
             "status": "ok",
@@ -30,7 +31,7 @@ async def health(request: Request) -> JSONResponse:
 
 
 async def create_session(request: Request) -> JSONResponse:
-    server = request.app.state.server
+    server = daemon_server(request)
     parsed = await read_json_object(request)
     if not parsed.ok:
         return parsed.error_response()
@@ -45,21 +46,21 @@ async def create_session(request: Request) -> JSONResponse:
 
 
 async def list_sessions(request: Request) -> JSONResponse:
-    server = request.app.state.server
+    server = daemon_server(request)
     return JSONResponse({"sessions": server.list_session_infos()})
 
 
 async def session_info(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     if not server.has_session(sid):
         return not_found_response("session not found")
     return JSONResponse(server.session_info(sid))
 
 
 async def session_status(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     try:
         ok = await server.ensure_agent(sid)
     except LLMError as e:
@@ -75,8 +76,8 @@ async def session_status(request: Request) -> JSONResponse:
 
 
 async def set_session_mode(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     parsed = await read_json_object(request)
     if not parsed.ok:
         return parsed.error_response()
@@ -92,8 +93,8 @@ async def set_session_mode(request: Request) -> JSONResponse:
 
 
 async def cancel_active_task(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     if not server.has_session(sid):
         return not_found_response("session not found")
     cancelled = server.cancel_active_task(sid)
@@ -101,22 +102,22 @@ async def cancel_active_task(request: Request) -> JSONResponse:
 
 
 async def list_background_tasks(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     result = await server.list_background_tasks(sid)
     return action_response(result)
 
 
 async def cancel_background_task(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
-    task_id = request.path_params["task_id"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
+    task_id = path_param(request, "task_id")
     result = await server.cancel_background_task(sid, task_id)
     return action_response(result)
 
 
 async def start_task(request: Request) -> JSONResponse:
-    server = request.app.state.server
+    server = daemon_server(request)
     parsed = await read_json_object(request)
     if not parsed.ok:
         return parsed.error_response()
@@ -133,8 +134,8 @@ async def start_task(request: Request) -> JSONResponse:
 
 
 async def resolve_permission(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     parsed = await read_json_object(request)
     if not parsed.ok:
         return parsed.error_response()
@@ -148,8 +149,8 @@ async def resolve_permission(request: Request) -> JSONResponse:
 
 
 async def resolve_askuser(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     parsed = await read_json_object(request)
     if not parsed.ok:
         return parsed.error_response()
@@ -163,14 +164,14 @@ async def resolve_askuser(request: Request) -> JSONResponse:
 
 
 async def manual_compact(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     result = await server.manual_compact(sid)
     return action_response(result)
 
 
 async def close_session(request: Request) -> JSONResponse:
-    server = request.app.state.server
-    sid = request.path_params["sid"]
+    server = daemon_server(request)
+    sid = path_param(request, "sid")
     await server.close_session(sid)
     return JSONResponse({"closed": True})
