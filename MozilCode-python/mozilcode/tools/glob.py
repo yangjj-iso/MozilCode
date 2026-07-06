@@ -8,7 +8,7 @@ from mozilcode.tools.base import SKIP_DIRS, Tool, ToolResult
 
 
 class Params(BaseModel):
-    pattern: str = Field(description="Glob pattern to match (e.g. '**/*.py')")
+    pattern: str = Field(min_length=1, description="Glob pattern to match (e.g. '**/*.py')")
     path: str = Field(default=".", description="Base directory to search from")
 
 
@@ -21,9 +21,14 @@ class Glob(Tool):
 
 
     async def execute(self, params: Params) -> ToolResult:
+        if not params.pattern:
+            return ToolResult(output="Error: pattern must not be empty", is_error=True)
+
         base = Path(params.path)
         if not base.exists():
             return ToolResult(output=f"Error: path not found: {params.path}", is_error=True)
+        if not base.is_dir():
+            return ToolResult(output=f"Error: path is not a directory: {params.path}", is_error=True)
 
         try:
             found = [
@@ -39,4 +44,3 @@ class Glob(Tool):
         if not matches:
             return ToolResult(output="No files matched the pattern.")
         return ToolResult(output="\n".join(matches))
-

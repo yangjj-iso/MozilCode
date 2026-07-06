@@ -9,7 +9,7 @@ from mozilcode.tools.base import SKIP_DIRS, Tool, ToolResult
 
 
 class Params(BaseModel):
-    pattern: str = Field(description="Regex pattern to search for")
+    pattern: str = Field(min_length=1, description="Regex pattern to search for")
     path: str = Field(default=".", description="Base directory to search from")
     include: str = Field(default="", description="Glob filter for filenames (e.g. '*.py')")
 
@@ -23,9 +23,14 @@ class Grep(Tool):
 
 
     async def execute(self, params: Params) -> ToolResult:
+        if not params.pattern:
+            return ToolResult(output="Error: pattern must not be empty", is_error=True)
+
         base = Path(params.path)
         if not base.exists():
             return ToolResult(output=f"Error: path not found: {params.path}", is_error=True)
+        if not base.is_dir():
+            return ToolResult(output=f"Error: path is not a directory: {params.path}", is_error=True)
 
         try:
             regex = re.compile(params.pattern)
@@ -54,4 +59,3 @@ class Grep(Tool):
         if not results:
             return ToolResult(output="No matches found.")
         return ToolResult(output="\n".join(results))
-
