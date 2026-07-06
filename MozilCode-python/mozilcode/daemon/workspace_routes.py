@@ -5,10 +5,16 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mozilcode.daemon.request_body import read_json_object
+from mozilcode.daemon.request_body import (
+    BodyFieldError,
+    bool_field,
+    read_json_object,
+    string_field,
+)
 from mozilcode.daemon.request_context import daemon_server, path_param, query_param
 from mozilcode.daemon.responses import (
     action_response,
+    bad_request_response,
     error_response,
     not_found_response,
 )
@@ -32,8 +38,11 @@ async def create_worktree(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    name = (body.get("name") or "").strip()
-    base_branch = (body.get("base_branch") or "HEAD").strip()
+    try:
+        name = string_field(body, "name").strip()
+        base_branch = string_field(body, "base_branch", "HEAD").strip()
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     result = await server.create_worktree(sid, name, base_branch)
     return action_response(result)
 
@@ -53,8 +62,11 @@ async def exit_worktree(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    remove = bool(body.get("remove", False))
-    discard = bool(body.get("discard", False))
+    try:
+        remove = bool_field(body, "remove")
+        discard = bool_field(body, "discard")
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     result = await server.exit_worktree(sid, remove=remove, discard=discard)
     return action_response(result)
 

@@ -64,3 +64,16 @@ def object_field(
     if not isinstance(value, dict):
         raise BodyFieldError(f"'{name}' must be an object")
     return value
+
+
+def bool_field(
+    payload: dict[str, Any],
+    name: str,
+    default: bool = False,
+) -> bool:
+    value = payload.get(name, default)
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise BodyFieldError(f"'{name}' must be a boolean")
+    return value

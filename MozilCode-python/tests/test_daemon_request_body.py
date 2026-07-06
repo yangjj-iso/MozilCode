@@ -103,6 +103,26 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
             {"request_id": "req", "answers": []},
             "'answers' must be an object",
         ),
+        (
+            "/api/session/missing/worktrees",
+            {"name": 123},
+            "'name' must be a string",
+        ),
+        (
+            "/api/session/missing/worktrees",
+            {"name": "feature", "base_branch": []},
+            "'base_branch' must be a string",
+        ),
+        (
+            "/api/session/missing/worktrees/exit",
+            {"remove": "false"},
+            "'remove' must be a boolean",
+        ),
+        (
+            "/api/session/missing/worktrees/exit",
+            {"discard": "true"},
+            "'discard' must be a boolean",
+        ),
     ],
 )
 def test_session_routes_reject_invalid_field_types(tmp_path, path, payload, error):
