@@ -23,6 +23,7 @@ class HookEngine:
         self.hooks: list[Hook] = hooks or []
         self._prompt_messages: list[str] = []
         self._notifications: list[HookNotification] = []
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
 
     def find_matching_hooks(self, event: str, ctx: HookContext) -> list[Hook]:
@@ -43,10 +44,31 @@ class HookEngine:
         for hook in matched:
             hook.mark_executed()
             if hook.async_exec:
-                asyncio.ensure_future(self._run_single(hook, ctx))
+                self._schedule_background_hook(hook, ctx)
             else:
                 await self._run_single(hook, ctx)
 
+    def _schedule_background_hook(self, hook: Hook, ctx: HookContext) -> None:
+        task = asyncio.create_task(
+            self._run_single(hook, ctx),
+            name=f"mozilcode-hook-{hook.id}",
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            log.info("Async hook task was cancelled")
+        except Exception as e:
+            log.warning("Async hook task failed unexpectedly: %s", e)
+
+    async def wait_for_async_hooks(self) -> None:
+        while self._background_tasks:
+            pending = tuple(self._background_tasks)
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _run_single(self, hook: Hook, ctx: HookContext) -> None:
         try:

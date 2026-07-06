@@ -581,7 +581,32 @@ class TestHookEngine:
         start = asyncio.get_running_loop().time()
         await engine.run_hooks("post_tool_use", ctx)
         assert asyncio.get_running_loop().time() - start < 0.1
-        await asyncio.sleep(0.5)
+        await engine.wait_for_async_hooks()
+
+    @pytest.mark.asyncio
+    async def test_async_hook_can_be_drained(self):
+        h = self._make_hook(
+            id="tracked",
+            event="post_tool_use",
+            action=Action(type="prompt", message="async complete"),
+            async_exec=True,
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="post_tool_use")
+
+        async def slow_execute(_action, _ctx):
+            await asyncio.sleep(0.05)
+            return ActionResult(output="async complete", success=True)
+
+        with patch("mozilcode.hooks.engine.execute_action", side_effect=slow_execute):
+            await engine.run_hooks("post_tool_use", ctx)
+            assert engine.drain_notifications() == []
+            await engine.wait_for_async_hooks()
+
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "tracked"
+        assert notifications[0].success is True
 
 # ---------------------------------------------------------------------------
 # Agent 循环集成
