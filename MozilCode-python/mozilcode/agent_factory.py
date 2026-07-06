@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from mozilcode.agent import Agent
 from mozilcode.agents.loader import AgentLoader
 from mozilcode.agents.task_manager import TaskManager
 from mozilcode.agents.trace import TraceManager
 from mozilcode.client import create_client, resolve_context_window
-from mozilcode.config import AppConfig, WorktreeConfig
+from mozilcode.config import AppConfig, ProviderConfig, WorktreeConfig
 from mozilcode.hooks import HookEngine
 from mozilcode.memory.instructions import load_instructions
 from mozilcode.memory.providers import build_memory_hub
@@ -23,9 +22,10 @@ from mozilcode.permissions import (
     RuleEngine,
 )
 from mozilcode.teams.manager import TeamManager
-from mozilcode.tools import create_default_registry
+from mozilcode.tools import ToolRegistry, create_default_registry
 from mozilcode.tools.agent_tool import AgentTool
 from mozilcode.tools.ask_user import AskUserTool
+from mozilcode.tools.exit_plan_mode import ExitPlanModeTool
 from mozilcode.tools.impl.tool_search import ToolSearchTool
 from mozilcode.tools.team_create import TeamCreateTool
 from mozilcode.tools.team_delete import TeamDeleteTool
@@ -41,7 +41,7 @@ class AgentDeps:
     trace_manager: TraceManager
     agent_loader: AgentLoader
     worktree_manager: WorktreeManager
-    provider: Any
+    provider: ProviderConfig
 
 
 async def create_agent_from_config(
@@ -55,40 +55,59 @@ async def create_agent_from_config(
     client = create_client(provider)
     await resolve_context_window(provider)
 
-    home = Path.home()
-    checker = PermissionChecker(
-        detector=DangerousCommandDetector(),
-        sandbox=PathSandbox(work_dir),
-        rule_engine=RuleEngine(
-            user_rules_path=home / ".mozilcode" / "permissions.yaml",
-            project_rules_path=Path(work_dir) / ".mozilcode" / "permissions.yaml",
-            local_rules_path=Path(work_dir) / ".mozilcode" / "permissions.local.yaml",
-        ),
-        mode=permission_mode,
-    )
-
     instructions = load_instructions(work_dir)
     memory_hub = build_memory_hub(config.memory, work_dir)
-    registry = create_default_registry()
-    registry.register(ToolSearchTool(registry, protocol=provider.protocol))
-    registry.register(AskUserTool())
-
-    from mozilcode.tools.exit_plan_mode import ExitPlanModeTool
-
-    registry.register(ExitPlanModeTool())
+    registry = _create_base_registry(provider.protocol)
 
     agent = Agent(
         client=client,
         registry=registry,
         protocol=provider.protocol,
         work_dir=work_dir,
-        permission_checker=checker,
+        permission_checker=_create_permission_checker(work_dir, permission_mode),
         context_window=provider.get_context_window(),
         instructions_content=instructions,
         memory_hub=memory_hub,
         hook_engine=hook_engine,
     )
 
+    deps = _create_agent_deps(config, work_dir, provider, agent, registry)
+    return agent, deps
+
+
+def _create_permission_checker(
+    work_dir: str,
+    permission_mode: PermissionMode,
+) -> PermissionChecker:
+    home = Path.home()
+    work_path = Path(work_dir)
+    return PermissionChecker(
+        detector=DangerousCommandDetector(),
+        sandbox=PathSandbox(work_dir),
+        rule_engine=RuleEngine(
+            user_rules_path=home / ".mozilcode" / "permissions.yaml",
+            project_rules_path=work_path / ".mozilcode" / "permissions.yaml",
+            local_rules_path=work_path / ".mozilcode" / "permissions.local.yaml",
+        ),
+        mode=permission_mode,
+    )
+
+
+def _create_base_registry(protocol: str) -> ToolRegistry:
+    registry = create_default_registry()
+    registry.register(ToolSearchTool(registry, protocol=protocol))
+    registry.register(AskUserTool())
+    registry.register(ExitPlanModeTool())
+    return registry
+
+
+def _create_agent_deps(
+    config: AppConfig,
+    work_dir: str,
+    provider: ProviderConfig,
+    agent: Agent,
+    registry: ToolRegistry,
+) -> AgentDeps:
     wt_cfg = config.worktree or WorktreeConfig()
     wt_manager = WorktreeManager(
         repo_root=work_dir,
@@ -130,7 +149,7 @@ async def create_agent_from_config(
 
     agent.notification_fn = drain_mailbox
 
-    deps = AgentDeps(
+    return AgentDeps(
         task_manager=task_manager,
         team_manager=team_manager,
         trace_manager=trace_manager,
@@ -138,4 +157,3 @@ async def create_agent_from_config(
         worktree_manager=wt_manager,
         provider=provider,
     )
-    return agent, deps
