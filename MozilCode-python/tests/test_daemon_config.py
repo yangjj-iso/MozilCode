@@ -233,6 +233,30 @@ def test_route_registry_excludes_gui_cloud_and_bot_management():
     ] == []
 
 
+def test_removed_gui_cloud_and_bot_routes_are_not_served(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = _create_app(provider, tmp_path)
+
+    removed_paths = [
+        "/api/auth/login",
+        "/api/cloud/status",
+        "/api/models/official",
+        "/api/settings/gui",
+        "/api/settings/qqbot",
+        "/api/settings/telegrambot",
+    ]
+
+    with TestClient(app) as client:
+        for path in removed_paths:
+            response = client.post(path, json={})
+            assert response.status_code == 404, path
+
+
 def test_build_routes_matches_declared_route_specs():
     actual_http = []
     actual_websocket = []
