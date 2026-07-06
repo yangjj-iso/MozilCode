@@ -42,15 +42,33 @@ class ToolRegistry:
     def is_discovered(self, name: str) -> bool:
         return name in self._discovered
 
+    @staticmethod
+    def _is_deferred(tool: Tool) -> bool:
+        return bool(getattr(tool, "should_defer", False))
 
     def get_deferred_tool_names(self) -> list[str]:
         return [
             name
             for name, tool in self._tools.items()
-            if getattr(tool, "should_defer", False)
+            if self._is_deferred(tool)
             and name not in self._discovered
             and name not in self._disabled
         ]
+
+    def _is_deferred_searchable(self, name: str, tool: Tool) -> bool:
+        return self._is_deferred(tool) and name not in self._disabled
+
+    @staticmethod
+    def _schema_for_protocol(tool: Tool, protocol: str) -> dict[str, Any]:
+        base = tool.get_schema()
+        if protocol in ("openai", "openai-compat"):
+            return {
+                "type": "function",
+                "name": base["name"],
+                "description": base["description"],
+                "parameters": base["input_schema"],
+            }
+        return base
 
     def search_deferred(
         self, query: str, max_results: int, protocol: str = "anthropic"
@@ -58,9 +76,7 @@ class ToolRegistry:
         query_lower = query.lower()
         scored: list[tuple[int, str, Tool]] = []
         for name, tool in self._tools.items():
-            if not getattr(tool, "should_defer", False):
-                continue
-            if name in self._disabled:
+            if not self._is_deferred_searchable(name, tool):
                 continue
             score = 0
             name_lower = name.lower()
@@ -79,16 +95,7 @@ class ToolRegistry:
         scored.sort(key=lambda x: x[0], reverse=True)
         results: list[dict[str, Any]] = []
         for _, _name, tool in scored[:max_results]:
-            base = tool.get_schema()
-            if protocol in ("openai", "openai-compat"):
-                results.append({
-                    "type": "function",
-                    "name": base["name"],
-                    "description": base["description"],
-                    "parameters": base["input_schema"],
-                })
-            else:
-                results.append(base)
+            results.append(self._schema_for_protocol(tool, protocol))
         return results
 
     def find_deferred_by_names(
@@ -99,18 +106,9 @@ class ToolRegistry:
             tool = self._tools.get(name)
             if tool is None:
                 continue
-            if not getattr(tool, "should_defer", False):
+            if not self._is_deferred(tool):
                 continue
-            base = tool.get_schema()
-            if protocol in ("openai", "openai-compat"):
-                results.append({
-                    "type": "function",
-                    "name": base["name"],
-                    "description": base["description"],
-                    "parameters": base["input_schema"],
-                })
-            else:
-                results.append(base)
+            results.append(self._schema_for_protocol(tool, protocol))
         return results
 
     def list_tools(self) -> list[Tool]:
@@ -122,18 +120,9 @@ class ToolRegistry:
         for name, tool in self._tools.items():
             if name in self._disabled:
                 continue
-            if getattr(tool, "should_defer", False) and name not in self._discovered:
+            if self._is_deferred(tool) and name not in self._discovered:
                 continue
-            base = tool.get_schema()
-            if protocol in ("openai", "openai-compat"):
-                schemas.append({
-                    "type": "function",
-                    "name": base["name"],
-                    "description": base["description"],
-                    "parameters": base["input_schema"],
-                })
-            else:
-                schemas.append(base)
+            schemas.append(self._schema_for_protocol(tool, protocol))
         return schemas
 
 

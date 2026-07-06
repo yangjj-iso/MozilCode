@@ -129,6 +129,23 @@ def test_discovered_in_schemas():
     # DeferredBeta 仍未被发现
     assert "DeferredBeta" not in names_after
 
+def test_openai_schema_format_is_shared_by_all_schema_paths():
+    reg = _make_registry()
+    reg.mark_discovered("DeferredAlpha")
+
+    all_schemas = reg.get_all_schemas("openai")
+    selected = reg.find_deferred_by_names(["DeferredAlpha"], "openai-compat")
+    searched = reg.search_deferred("alpha", 1, "openai")
+
+    for schema in [
+        next(s for s in all_schemas if s["name"] == "NormalTool"),
+        selected[0],
+        searched[0],
+    ]:
+        assert schema["type"] == "function"
+        assert "parameters" in schema
+        assert "input_schema" not in schema
+
 def test_get_deferred_tool_names():
     """get_deferred_tool_names 只返回尚未被发现的延迟工具。"""
     reg = _make_registry()
