@@ -31,7 +31,7 @@ from starlette.responses import JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.config import load_config, AppConfig, WorktreeConfig
-from mozilcode.validator import ConfigError, validate_config_structure
+from mozilcode.validator import ConfigError
 from mozilcode.client import LLMError, create_client, resolve_context_window
 from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
@@ -60,28 +60,11 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.settings import (
-    load_daemon_settings as _load_daemon_settings,
-    save_daemon_settings as _save_daemon_settings,
-)
 from mozilcode.daemon.config_settings import (
     USER_CONFIG_FILE as _USER_CONFIG_FILE,
-    app_config_to_raw as _app_config_to_raw,
     config_from_settings_payload as _config_from_settings_payload,
-    memory_settings_from_payload as _memory_settings_from_payload,
     public_config as _public_config,
-    public_memory_settings as _public_memory_settings,
     write_user_config as _write_user_config,
-)
-from mozilcode.daemon.extension_settings import (
-    create_skill_from_payload as _create_skill_from_payload,
-    delete_mcp_server as _delete_mcp_server,
-    delete_user_skill as _delete_user_skill,
-    list_mcp_servers as _list_mcp_servers,
-    list_skills as _list_skills,
-    toggle_mcp_server as _toggle_mcp_server,
-    toggle_skill as _toggle_skill,
-    upsert_mcp_server as _upsert_mcp_server,
 )
 from mozilcode.daemon.bot_runtime import (
     init_bot_state as _init_bot_state,
@@ -106,6 +89,18 @@ from mozilcode.daemon.a2a_routes import (
     telegrambot_settings_get,
     telegrambot_settings_save,
     telegrambot_status_get,
+)
+from mozilcode.daemon.management_routes import (
+    mcp_add,
+    mcp_delete,
+    mcp_list,
+    mcp_toggle,
+    memory_settings_get,
+    memory_settings_save,
+    skill_create,
+    skill_delete,
+    skill_toggle,
+    skills_list,
 )
 from mozilcode.a2a.bridge import A2ABridge
 
@@ -1084,103 +1079,6 @@ async def stream_events(websocket: WebSocket) -> None:
         except (asyncio.CancelledError, Exception):
             pass
         log.info("WS stream ended for session %s", sid)
-
-
-async def mcp_list(request: Request) -> JSONResponse:
-    return JSONResponse({"servers": _list_mcp_servers(_load_daemon_settings())})
-
-
-async def mcp_add(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-        data = _load_daemon_settings()
-        servers = _upsert_mcp_server(data, body or {})
-        _save_daemon_settings(data)
-    except (json.JSONDecodeError, ValueError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"ok": True, "servers": servers})
-
-
-async def mcp_delete(request: Request) -> JSONResponse:
-    name = request.path_params["name"]
-    data = _load_daemon_settings()
-    _delete_mcp_server(data, name)
-    _save_daemon_settings(data)
-    return JSONResponse({"ok": True})
-
-
-async def mcp_toggle(request: Request) -> JSONResponse:
-    name = request.path_params["name"]
-    data = _load_daemon_settings()
-    _toggle_mcp_server(data, name)
-    _save_daemon_settings(data)
-    return JSONResponse({"ok": True})
-
-
-async def memory_settings_get(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    return JSONResponse(_public_memory_settings(server.config))
-
-
-async def memory_settings_save(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    if server.config is None:
-        return JSONResponse(
-            _public_memory_settings(server.config, "model provider is not configured"),
-            status_code=400,
-        )
-    try:
-        body = await request.json()
-        raw = _app_config_to_raw(server.config)
-        raw["memory"] = _memory_settings_from_payload(body or {}, server.config)
-        validate_config_structure(raw)
-        server.config = _write_user_config(raw)
-        await server.invalidate_idle_agents()
-    except (ConfigError, ValueError, TypeError) as e:
-        return JSONResponse(_public_memory_settings(server.config, str(e)), status_code=400)
-    except Exception as e:
-        log.exception("Failed to save memory settings")
-        return JSONResponse(_public_memory_settings(server.config, str(e)), status_code=500)
-    return JSONResponse({"ok": True, **_public_memory_settings(server.config)})
-
-
-async def skills_list(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    try:
-        out = _list_skills(server.work_dir, _load_daemon_settings())
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    return JSONResponse({"skills": out})
-
-
-async def skill_toggle(request: Request) -> JSONResponse:
-    name = request.path_params["name"]
-    data = _load_daemon_settings()
-    _toggle_skill(data, name)
-    _save_daemon_settings(data)
-    return JSONResponse({"ok": True})
-
-
-async def skill_create(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-        _create_skill_from_payload(body or {})
-    except (json.JSONDecodeError, ValueError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True})
-
-
-async def skill_delete(request: Request) -> JSONResponse:
-    name = request.path_params["name"]
-    try:
-        _delete_user_skill(name)
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True})
 
 
 # ---------------------------------------------------------------------------

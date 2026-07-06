@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import pytest
+from starlette.testclient import TestClient
 
 from mozilcode.daemon import extension_settings
+from mozilcode.daemon import settings as daemon_settings
 from mozilcode.daemon.extension_settings import create_skill_from_payload
 from mozilcode.daemon.extension_settings import delete_user_skill
 from mozilcode.daemon.extension_settings import list_mcp_servers
 from mozilcode.daemon.extension_settings import toggle_mcp_server
 from mozilcode.daemon.extension_settings import toggle_skill
 from mozilcode.daemon.extension_settings import upsert_mcp_server
+from mozilcode.daemon.server import create_app
+from mozilcode.config import AppConfig, ProviderConfig
 
 
 def test_mcp_server_upsert_replaces_existing_and_trims_fields():
@@ -89,3 +93,37 @@ def test_delete_user_skill_rejects_invalid_name(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="invalid skill name"):
         delete_user_skill("..")
+
+
+def test_management_routes_update_mcp_and_user_skills(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon_settings, "DAEMON_SETTINGS_FILE", tmp_path / "daemon_settings.json")
+    monkeypatch.setattr(extension_settings, "USER_SKILLS_DIR", tmp_path / "skills")
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        added = client.post(
+            "/api/settings/mcp",
+            json={"name": "local", "command": "python", "args": "-m demo"},
+        )
+        listed = client.get("/api/settings/mcp")
+        created = client.post(
+            "/api/skills",
+            json={
+                "name": "route-skill",
+                "description": "Route-created skill",
+                "body": "Use route handlers.",
+            },
+        )
+        deleted = client.delete("/api/skills/route-skill")
+
+    assert added.status_code == 200
+    assert listed.json()["servers"][0]["name"] == "local"
+    assert created.status_code == 200
+    assert deleted.status_code == 200
+    assert not (tmp_path / "skills" / "route-skill").exists()
