@@ -282,6 +282,16 @@ class TestWorktreeManager:
         session = _run(manager.enter("cache-test"))
         assert manager.current_session == session
 
+    def test_enter_records_repo_root_not_process_cwd(self, manager, tmp_path, monkeypatch):
+        _run(manager.create("cwd-source"))
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.chdir(outside)
+
+        session = _run(manager.enter("cwd-source"))
+
+        assert session.original_cwd == manager.repo_root
+
     def test_exit_keep(self, manager):
         _run(manager.create("exit-keep"))
         _run(manager.enter("exit-keep"))

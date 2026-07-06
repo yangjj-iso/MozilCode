@@ -174,12 +174,11 @@ class WorktreeManager:
         if wt is None:
             raise WorktreeError(f"worktree not found: {name}")
 
-        original_cwd = os.getcwd()
         original_branch = self._get_current_branch()
         original_head = self._get_head_commit()
 
         session = WorktreeSession(
-            original_cwd=original_cwd,
+            original_cwd=self.repo_root,
             worktree_path=wt.path,
             worktree_name=name,
             original_branch=original_branch,
