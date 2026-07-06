@@ -84,8 +84,7 @@ class A2ABridge:
     """Expose the daemon Agent as a small A2A-compatible task bridge.
 
     The bridge deliberately reuses the daemon's existing session/task/event-log
-    surface. A2A and chat transports remain protocol adapters; the Agent loop
-    stays unchanged.
+    surface. A2A remains a protocol adapter; the Agent loop stays unchanged.
     """
 
     def __init__(self, daemon_server: Any, default_wait_timeout: float = 120.0) -> None:
