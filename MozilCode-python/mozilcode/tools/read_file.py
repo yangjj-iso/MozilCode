@@ -14,8 +14,16 @@ if TYPE_CHECKING:
 
 class Params(BaseModel):
     file_path: str = Field(description="Absolute or relative path to the file to read")
-    offset: int = Field(default=0, description="Line offset to start reading from (0-based)")
-    limit: int = Field(default=2000, description="Maximum number of lines to read")
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Line offset to start reading from (0-based)",
+    )
+    limit: int = Field(
+        default=2000,
+        gt=0,
+        description="Maximum number of lines to read",
+    )
 
 
 class ReadFile(Tool):
@@ -32,6 +40,11 @@ class ReadFile(Tool):
 
 
     async def execute(self, params: Params) -> ToolResult:
+        if params.offset < 0:
+            return ToolResult(output="Error: offset must be non-negative", is_error=True)
+        if params.limit <= 0:
+            return ToolResult(output="Error: limit must be positive", is_error=True)
+
         path = Path(params.file_path)
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
