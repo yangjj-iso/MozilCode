@@ -17,6 +17,7 @@ Architecture:
     mozilcode-core (agent.py, already headless)
 """
 
-from mozilcode.daemon.server import DaemonServer, create_app, run_daemon
+from mozilcode.daemon.server import create_app, run_daemon
+from mozilcode.daemon.server_state import DaemonServer
 
 __all__ = ["DaemonServer", "create_app", "run_daemon"]
