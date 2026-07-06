@@ -3,7 +3,8 @@ from __future__ import annotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mozilcode.a2a.bridge import A2ABridge, A2AError
+from mozilcode.a2a.bridge import A2ABridge
+from mozilcode.a2a.protocol import A2AError
 from mozilcode.daemon.request_body import read_json_object
 from mozilcode.daemon.request_context import a2a_bridge, path_param
 

@@ -8,6 +8,16 @@ from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
+from mozilcode.a2a.protocol import (
+    A2AError,
+    configuration_from_params,
+    float_from_config,
+    parse_json_rpc_request,
+    parse_message_request,
+    should_wait,
+    task_id_from_params,
+)
+
 
 TASK_SUBMITTED = "TASK_STATE_SUBMITTED"
 TASK_WORKING = "TASK_STATE_WORKING"
@@ -17,14 +27,6 @@ TASK_FAILED = "TASK_STATE_FAILED"
 TASK_CANCELED = "TASK_STATE_CANCELED"
 
 TERMINAL_STATES = {TASK_COMPLETED, TASK_FAILED, TASK_CANCELED}
-
-
-class A2AError(Exception):
-    def __init__(self, message: str, code: int = -32000, data: Any = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.code = code
-        self.data = data
 
 
 @dataclass
@@ -47,22 +49,6 @@ class A2ATask:
     @property
     def output(self) -> str:
         return "".join(self.output_parts).strip()
-
-
-@dataclass(frozen=True)
-class A2AMessageRequest:
-    prompt: str
-    context_id: str
-    task_id_hint: str
-    metadata: dict[str, Any]
-    work_dir: str | None
-
-
-@dataclass(frozen=True)
-class JsonRpcRequest:
-    id: Any
-    method: str
-    params: Any
 
 
 def _iso_now() -> str:
@@ -224,7 +210,7 @@ class A2ABridge:
 
     async def _handle_json_rpc_single(self, payload: Any) -> dict[str, Any]:
         try:
-            request = _parse_json_rpc_request(payload)
+            request = parse_json_rpc_request(payload)
         except A2AError as e:
             req_id = payload.get("id") if isinstance(payload, dict) else None
             return self._json_error(req_id, e.code, e.message, e.data)
@@ -245,10 +231,10 @@ class A2ABridge:
                 raise A2AError("message/send params must be an object", -32602)
             return await self.send_message(params)
         if normalized in {"tasks/get", "GetTask", "Task/Get"}:
-            task_id = _task_id_from_params(params)
+            task_id = task_id_from_params(params)
             return self.task_to_a2a(self.get_task(task_id))
         if normalized in {"tasks/cancel", "CancelTask", "Task/Cancel"}:
-            task_id = _task_id_from_params(params)
+            task_id = task_id_from_params(params)
             return self.task_to_a2a(await self.cancel_task(task_id))
         if normalized in {"tasks/list", "ListTasks", "Task/List"}:
             return {"tasks": [self.task_to_a2a(t) for t in self._tasks.values()]}
@@ -257,15 +243,15 @@ class A2ABridge:
         raise A2AError(f"Unsupported A2A method: {method}", -32601)
 
     async def send_message(self, params: dict[str, Any]) -> dict[str, Any]:
-        config = _configuration_from_params(params)
-        should_wait = _should_wait(config)
+        config = configuration_from_params(params)
+        wait_for_completion = should_wait(config)
         timeout = (
-            _float_from_config(config, "timeout", self._default_wait_timeout)
-            if should_wait
+            float_from_config(config, "timeout", self._default_wait_timeout)
+            if wait_for_completion
             else None
         )
         task = await self.start_task_from_message(params, source="a2a")
-        if should_wait:
+        if wait_for_completion:
             await self.wait_for_task(task.id, timeout=timeout)
         else:
             self._refresh_task_from_log(task)
@@ -299,7 +285,7 @@ class A2ABridge:
         params: dict[str, Any],
         source: str,
     ) -> A2ATask:
-        request = _parse_message_request(params)
+        request = parse_message_request(params)
         context_id = request.context_id
         if (
             not context_id
@@ -440,209 +426,14 @@ class A2ABridge:
             _apply_task_log_event(task, ev)
         task.cursor = len(log_list)
 
-    def _json_error(self, req_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+    def _json_error(
+        self,
+        req_id: Any,
+        code: int,
+        message: str,
+        data: Any = None,
+    ) -> dict[str, Any]:
         err: dict[str, Any] = {"code": code, "message": message}
         if data is not None:
             err["data"] = data
         return {"jsonrpc": "2.0", "id": req_id, "error": err}
-
-
-def _extract_text(message: dict[str, Any]) -> str:
-    direct = message.get("content")
-    if isinstance(direct, str):
-        return direct.strip()
-
-    parts = message.get("parts") or []
-    if not isinstance(parts, list):
-        return ""
-
-    chunks: list[str] = []
-    for part in parts:
-        if isinstance(part, str):
-            chunks.append(part)
-            continue
-        if not isinstance(part, dict):
-            continue
-        if isinstance(part.get("text"), str):
-            chunks.append(part["text"])
-            continue
-        nested = part.get("text")
-        if isinstance(nested, dict) and isinstance(nested.get("text"), str):
-            chunks.append(nested["text"])
-            continue
-        if isinstance(part.get("data"), str):
-            chunks.append(part["data"])
-    return "\n".join(c.strip() for c in chunks if c and c.strip()).strip()
-
-
-def _parse_json_rpc_request(payload: Any) -> JsonRpcRequest:
-    if not isinstance(payload, dict):
-        raise A2AError("Invalid JSON-RPC request", -32600)
-    if payload.get("jsonrpc") != "2.0":
-        raise A2AError("Invalid JSON-RPC request", -32600)
-
-    method = payload.get("method")
-    if not isinstance(method, str) or not method.strip():
-        raise A2AError("Invalid JSON-RPC request", -32600)
-
-    params = payload.get("params")
-    if params is None:
-        params = {}
-    return JsonRpcRequest(
-        id=payload.get("id"),
-        method=method,
-        params=params,
-    )
-
-
-def _message_from_params(params: dict[str, Any]) -> dict[str, Any]:
-    message = params["message"] if "message" in params else params
-    if not isinstance(message, dict):
-        raise A2AError("message must be an object", -32602)
-    return message
-
-
-def _parse_message_request(params: dict[str, Any]) -> A2AMessageRequest:
-    message = _message_from_params(params)
-    prompt = _extract_text(message)
-    if not prompt:
-        raise A2AError("message must contain a text part", -32602)
-
-    metadata = _metadata_from_params(params)
-    work_dir = _work_dir_from_metadata(metadata)
-    return A2AMessageRequest(
-        prompt=prompt,
-        context_id=_context_id_from_message(params, message),
-        task_id_hint=_task_id_hint_from_message(params, message),
-        metadata=metadata,
-        work_dir=work_dir,
-    )
-
-
-def _work_dir_from_metadata(metadata: dict[str, Any]) -> str | None:
-    work_dir = _string_from_aliases(
-        metadata,
-        ("work_dir", "workDir"),
-        field_label="metadata.work_dir",
-    )
-    return work_dir or None
-
-
-def _task_id_from_params(params: Any) -> str:
-    if isinstance(params, str):
-        task_id = params.strip()
-        if not task_id:
-            raise A2AError("task id is required", -32602)
-        return task_id
-    if not isinstance(params, dict):
-        raise A2AError("task params must be an object", -32602)
-    task_id = _string_from_aliases(
-        params,
-        ("id", "taskId", "task_id"),
-        field_label="task id",
-    )
-    if not task_id:
-        raise A2AError("task id is required", -32602)
-    return task_id
-
-
-def _context_id_from_message(
-    params: dict[str, Any],
-    message: dict[str, Any],
-) -> str:
-    context_id = _string_from_aliases(
-        message,
-        ("contextId", "context_id"),
-        field_label="message.contextId",
-    )
-    if context_id:
-        return context_id
-    return _string_from_aliases(
-        params,
-        ("contextId", "context_id"),
-        field_label="contextId",
-    )
-
-
-def _task_id_hint_from_message(
-    params: dict[str, Any],
-    message: dict[str, Any],
-) -> str:
-    task_id = _string_from_aliases(
-        message,
-        ("taskId", "task_id"),
-        field_label="message.taskId",
-    )
-    if task_id:
-        return task_id
-    return _string_from_aliases(
-        params,
-        ("taskId", "task_id"),
-        field_label="taskId",
-    )
-
-
-def _metadata_from_params(params: dict[str, Any]) -> dict[str, Any]:
-    metadata = params.get("metadata")
-    if metadata is None:
-        return {}
-    if not isinstance(metadata, dict):
-        raise A2AError("metadata must be an object", -32602)
-    return dict(metadata)
-
-
-def _configuration_from_params(params: dict[str, Any]) -> dict[str, Any]:
-    config = params.get("configuration")
-    if config is None:
-        return {}
-    if not isinstance(config, dict):
-        raise A2AError("configuration must be an object", -32602)
-    return config
-
-
-def _string_from_aliases(
-    data: dict[str, Any],
-    aliases: tuple[str, ...],
-    *,
-    field_label: str,
-) -> str:
-    for alias in aliases:
-        if alias not in data:
-            continue
-        value = data[alias]
-        if value is None:
-            return ""
-        if not isinstance(value, str):
-            raise A2AError(f"{field_label} must be a string", -32602)
-        return value.strip()
-    return ""
-
-
-def _bool_from_config(config: dict[str, Any], key: str) -> bool:
-    value = config.get(key)
-    if not isinstance(value, bool):
-        raise A2AError(f"configuration.{key} must be a boolean", -32602)
-    return value
-
-
-def _should_wait(config: dict[str, Any]) -> bool:
-    if "returnImmediately" in config:
-        return not _bool_from_config(config, "returnImmediately")
-    if "blocking" in config:
-        return _bool_from_config(config, "blocking")
-    if "waitUntilCompleted" in config:
-        return _bool_from_config(config, "waitUntilCompleted")
-    return False
-
-
-def _float_from_config(config: dict[str, Any], key: str, default: float) -> float:
-    if key not in config:
-        return default
-    value = config[key]
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or value <= 0
-    ):
-        raise A2AError(f"configuration.{key} must be a positive number", -32602)
-    return float(value)
