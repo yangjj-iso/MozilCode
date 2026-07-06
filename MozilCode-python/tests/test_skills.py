@@ -515,6 +515,45 @@ class TestDirectorySkill:
             {"name": "valid_tool", "description": "ok", "parameters": {}}
         ]
 
+    def test_parse_tool_json_filters_duplicate_tool_names(
+        self, tmp_path: Path
+    ) -> None:
+        from mozilcode.skills.directory import parse_tool_json
+
+        tool_json = tmp_path / "tool.json"
+        tool_json.write_text(json.dumps([
+            {
+                "name": "same_tool",
+                "description": "first definition",
+                "parameters": {"type": "object"},
+            },
+            {
+                "name": "same_tool",
+                "description": "second definition",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "other_tool",
+                "description": "kept",
+                "parameters": {},
+            },
+        ]))
+
+        schemas = parse_tool_json(tool_json)
+
+        assert schemas == [
+            {
+                "name": "same_tool",
+                "description": "first definition",
+                "parameters": {"type": "object"},
+            },
+            {
+                "name": "other_tool",
+                "description": "kept",
+                "parameters": {},
+            },
+        ]
+
     def test_parse_tool_json_rejects_scalar_root(self, tmp_path: Path) -> None:
         from mozilcode.skills.directory import parse_tool_json
 

@@ -70,10 +70,20 @@ def normalize_tool_schemas(raw: Any, path: Path) -> list[dict[str, Any]]:
         return []
 
     schemas: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
     for index, item in enumerate(raw, start=1):
         if isinstance(item, dict):
             schema = clean_tool_schema(item, path, index)
             if schema is not None:
+                tool_name = schema["name"]
+                if tool_name in seen_names:
+                    log.warning(
+                        "Skipping duplicate tool schema '%s' in %s",
+                        tool_name,
+                        path,
+                    )
+                    continue
+                seen_names.add(tool_name)
                 schemas.append(schema)
         else:
             log.warning(
