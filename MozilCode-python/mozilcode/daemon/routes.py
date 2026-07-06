@@ -27,14 +27,9 @@ from mozilcode.daemon.session_routes import (
     close_session,
     config_status,
     create_session,
-    create_worktree,
-    enter_worktree,
-    exit_worktree,
     health,
     list_background_tasks,
-    list_files,
     list_sessions,
-    list_worktrees,
     manual_compact,
     resolve_askuser,
     resolve_permission,
@@ -45,6 +40,13 @@ from mozilcode.daemon.session_routes import (
     start_task,
 )
 from mozilcode.daemon.stream_routes import stream_events
+from mozilcode.daemon.workspace_routes import (
+    create_worktree,
+    enter_worktree,
+    exit_worktree,
+    list_files,
+    list_worktrees,
+)
 
 
 def build_routes() -> list[BaseRoute]:
