@@ -143,6 +143,56 @@ def _extract_chat_reasoning_delta(delta: Any) -> str:
     return ""
 
 
+def _token_count(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    return 0
+
+
+def _cached_tokens(details: Any) -> int:
+    if details is None:
+        return 0
+    return _token_count(getattr(details, "cached_tokens", 0))
+
+
+def _openai_usage_stream_end(
+    *,
+    total_input_tokens: Any,
+    output_tokens: Any,
+    cache_details: Any,
+) -> StreamEnd:
+    # OpenAI 系列把 cached_tokens 计入总 input token。MozilCode 的
+    # StreamEnd 约定是 input + cache_read + cache_creation 可加回完整
+    # prompt 大小，因此这里统一扣除 cache_read。
+    cache_read = _cached_tokens(cache_details)
+    input_tokens = _token_count(total_input_tokens)
+    return StreamEnd(
+        stop_reason="end_turn",
+        input_tokens=max(input_tokens - cache_read, 0),
+        output_tokens=_token_count(output_tokens),
+        cache_read=cache_read,
+        cache_creation=0,
+    )
+
+
+def _stream_end_from_openai_response_usage(usage: Any) -> StreamEnd:
+    return _openai_usage_stream_end(
+        total_input_tokens=getattr(usage, "input_tokens", 0),
+        output_tokens=getattr(usage, "output_tokens", 0),
+        cache_details=getattr(usage, "input_tokens_details", None),
+    )
+
+
+def _stream_end_from_openai_chat_usage(usage: Any) -> StreamEnd:
+    return _openai_usage_stream_end(
+        total_input_tokens=getattr(usage, "prompt_tokens", 0),
+        output_tokens=getattr(usage, "completion_tokens", 0),
+        cache_details=getattr(usage, "prompt_tokens_details", None),
+    )
+
+
 _RESPONSE_REASONING_DELTA_EVENTS = {
     "response.reasoning_summary_text.delta",
     "response.reasoning_text.delta",
@@ -487,20 +537,7 @@ class OpenAIClient(LLMClient):
                             yield ThinkingComplete(thinking=summary, signature="")
                             reasoning_completed = True
                     usage = getattr(resp, "usage", None) if resp else None
-                    # Responses API 通过 input_tokens_details.cached_tokens
-                    # 暴露 cache 命中数，没有 creation 计数。注意这里的
-                    # input_tokens *包含*了缓存 token，所以需要减去它们，
-                    # 保持 input + cache_read 可加性，与 Anthropic 对齐。
-                    details = getattr(usage, "input_tokens_details", None)
-                    cache_read = getattr(details, "cached_tokens", 0) or 0
-                    input_tokens = getattr(usage, "input_tokens", 0) or 0
-                    yield StreamEnd(
-                        stop_reason="end_turn",
-                        input_tokens=max(input_tokens - cache_read, 0),
-                        output_tokens=getattr(usage, "output_tokens", 0) or 0,
-                        cache_read=cache_read,
-                        cache_creation=0,
-                    )
+                    yield _stream_end_from_openai_response_usage(usage)
 
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
@@ -605,22 +642,7 @@ class OpenAICompatClient(LLMClient):
                 if not chunk.choices:
                     # 最后一个 chunk，只包含 usage 数据。
                     if chunk.usage:
-                        # 部分兼容 provider 通过 prompt_tokens_details.cached_tokens
-                        # 上报 cache 命中数，大多数不上报（cache_read 保持 0）。
-                        # prompt_tokens 包含了缓存 token，需要减去以保持
-                        # input + cache_read 可加性。没有 provider 上报 creation 计数。
-                        details = getattr(
-                            chunk.usage, "prompt_tokens_details", None
-                        )
-                        cache_read = getattr(details, "cached_tokens", 0) or 0
-                        prompt_tokens = chunk.usage.prompt_tokens or 0
-                        yield StreamEnd(
-                            stop_reason="end_turn",
-                            input_tokens=max(prompt_tokens - cache_read, 0),
-                            output_tokens=chunk.usage.completion_tokens or 0,
-                            cache_read=cache_read,
-                            cache_creation=0,
-                        )
+                        yield _stream_end_from_openai_chat_usage(chunk.usage)
                     continue
 
                 choice = chunk.choices[0]

@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozilcode.client import OpenAIClient, OpenAICompatClient
+from mozilcode.client import (
+    OpenAIClient,
+    OpenAICompatClient,
+    _stream_end_from_openai_chat_usage,
+    _stream_end_from_openai_response_usage,
+)
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.tools.base import StreamEnd, TextDelta, ThinkingComplete, ThinkingDelta
@@ -111,3 +116,52 @@ def test_local_openai_base_url_allows_empty_api_key():
     client = OpenAIClient(config)
 
     assert client.model == "local-model"
+
+
+def test_openai_response_usage_excludes_cached_tokens_from_input():
+    usage = SimpleNamespace(
+        input_tokens=1000,
+        output_tokens=250,
+        input_tokens_details=SimpleNamespace(cached_tokens=700),
+    )
+
+    event = _stream_end_from_openai_response_usage(usage)
+
+    assert event == StreamEnd(
+        stop_reason="end_turn",
+        input_tokens=300,
+        output_tokens=250,
+        cache_read=700,
+        cache_creation=0,
+    )
+
+
+def test_openai_chat_usage_excludes_cached_tokens_from_prompt():
+    usage = SimpleNamespace(
+        prompt_tokens=1200,
+        completion_tokens=180,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=500),
+    )
+
+    event = _stream_end_from_openai_chat_usage(usage)
+
+    assert event == StreamEnd(
+        stop_reason="end_turn",
+        input_tokens=700,
+        output_tokens=180,
+        cache_read=500,
+        cache_creation=0,
+    )
+
+
+def test_openai_usage_never_reports_negative_uncached_input():
+    usage = SimpleNamespace(
+        input_tokens=100,
+        output_tokens=10,
+        input_tokens_details=SimpleNamespace(cached_tokens=300),
+    )
+
+    event = _stream_end_from_openai_response_usage(usage)
+
+    assert event.input_tokens == 0
+    assert event.cache_read == 300
