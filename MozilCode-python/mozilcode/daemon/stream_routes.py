@@ -34,9 +34,7 @@ async def stream_events(websocket: WebSocket) -> None:
                     continue
                 try:
                     if json.loads(raw).get("action") == "cancel":
-                        task = server._tasks.get(sid)
-                        if task and not task.done():
-                            task.cancel()
+                        server.cancel_active_task(sid)
                 except (json.JSONDecodeError, AttributeError):
                     pass
         except WebSocketDisconnect:
@@ -65,7 +63,7 @@ async def stream_events(websocket: WebSocket) -> None:
                     replay_marked = True
                     try:
                         await websocket.send_json({"type": "ReplayDone", "data": {}})
-                        for event in list(server._pending_prompts.get(sid, {}).values()):
+                        for event in server.pending_prompt_events(sid):
                             await websocket.send_json(event)
                     except Exception:
                         pass

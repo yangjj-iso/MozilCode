@@ -10,6 +10,7 @@ from mozilcode.config import (
 )
 from mozilcode.daemon import config_settings
 from mozilcode.daemon.config_settings import config_from_settings_payload
+from mozilcode.daemon.routes import build_routes
 from mozilcode.daemon.settings import normalize_daemon_settings
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
@@ -254,6 +255,18 @@ def test_a2a_agent_card_route_is_available(tmp_path):
     data = response.json()
     assert data["name"] == "MozilCode"
     assert data["metadata"]["model"] == "gpt-local"
+
+
+def test_route_registry_keeps_local_daemon_surface_only():
+    paths = {route.path for route in build_routes()}
+
+    assert "/api/health" in paths
+    assert "/api/session" in paths
+    assert "/api/stream/{sid}" in paths
+    assert "/a2a/rpc" in paths
+    assert "/" not in paths
+    assert "/api/settings/qqbot" not in paths
+    assert "/api/settings/telegrambot" not in paths
 
 
 def test_cloud_bot_settings_routes_are_removed(tmp_path):
