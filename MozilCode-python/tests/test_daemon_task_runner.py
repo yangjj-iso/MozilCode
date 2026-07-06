@@ -230,3 +230,16 @@ async def test_resolve_askuser_clears_pending_prompt_and_emits_event(tmp_path):
             "data": {"request_id": "req-ask"},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_close_session_clears_pending_prompt_state(tmp_path):
+    conversation = _Conversation()
+    server, sid = await _create_server_with_agent(tmp_path, _Agent(), conversation)
+    future = await _register_pending_future(server, sid, "req-close")
+
+    await server.close_session(sid)
+
+    assert future.cancelled()
+    assert server.pending_prompt_events(sid) == []
+    assert sid not in server._pending_prompts

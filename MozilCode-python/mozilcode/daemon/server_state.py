@@ -655,5 +655,6 @@ class DaemonServer:
         self._persisted_count.pop(sid, None)
         self._active_task_ids.pop(sid, None)
         self._pre_plan_modes.pop(sid, None)
+        self._pending_prompts.pop(sid, None)
         self.session_store.delete_session(sid)
         log.info("Session %s closed", sid)
