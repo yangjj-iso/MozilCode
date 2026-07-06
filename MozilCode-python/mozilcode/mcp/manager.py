@@ -23,7 +23,9 @@ class MCPManager:
         errors: list[str] = []
         for name, config in self._configs.items():
             try:
-                await self._register_server_tools(name, config, registry)
+                errors.extend(
+                    await self._register_server_tools(name, config, registry)
+                )
             except Exception as e:
                 msg = f"MCP server '{name}': {e}"
                 logger.warning(msg)
@@ -36,16 +38,26 @@ class MCPManager:
         name: str,
         config: MCPServerConfig,
         registry: ToolRegistry,
-    ) -> None:
+    ) -> list[str]:
         client = MCPClient(config)
+        errors: list[str] = []
         try:
             await client.connect()
             tools = await client.list_tools()
             for tool_def in tools:
                 wrapper = MCPToolWrapper(name, tool_def, client)
+                if registry.get(wrapper.name) is not None:
+                    msg = (
+                        f"MCP server '{name}' tool '{tool_def.name}' maps to "
+                        f"duplicate registered tool '{wrapper.name}'"
+                    )
+                    logger.warning(msg)
+                    errors.append(msg)
+                    continue
                 registry.register(wrapper)
                 logger.info("Registered MCP tool: %s", wrapper.name)
             self._clients[name] = client
+            return errors
         except Exception:
             try:
                 await client.close()

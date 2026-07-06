@@ -553,3 +553,40 @@ class TestMCPManagerPartialFailure:
         assert "list failed" in errors[0]
         assert "close failed" not in errors[0]
         assert manager._clients == {}
+
+    @pytest.mark.asyncio
+    async def test_duplicate_public_tool_names_are_reported_without_overwrite(
+        self,
+    ) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.manager import MCPManager
+        from mozilcode.tools import ToolRegistry
+
+        config = MCPServerConfig(name="good", command="echo")
+        manager = MCPManager()
+        manager.load_configs([config])
+        registry = ToolRegistry()
+
+        with patch("mozilcode.mcp.manager.MCPClient") as MockClient:
+            client = AsyncMock()
+            client.is_alive = True
+            client.list_tools.return_value = [
+                mcp_types.Tool(
+                    name="same_tool",
+                    description="First",
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+                mcp_types.Tool(
+                    name="same_tool",
+                    description="Second",
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+            ]
+            MockClient.return_value = client
+
+            errors = await manager.register_all_tools(registry)
+
+        assert len(errors) == 1
+        assert "duplicate registered tool 'mcp_good_same_tool'" in errors[0]
+        assert registry.get("mcp_good_same_tool").description == "First"
+        assert manager._clients == {"good": client}
