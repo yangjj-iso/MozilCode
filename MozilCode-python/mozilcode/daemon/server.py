@@ -40,6 +40,7 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 from mozilcode.daemon.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
+from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.config_settings import (
     USER_CONFIG_FILE as _USER_CONFIG_FILE,
     config_from_settings_payload as _config_from_settings_payload,
@@ -86,16 +87,6 @@ from mozilcode.a2a.bridge import A2ABridge
 
 log = logging.getLogger(__name__)
 
-# On-disk store so conversations survive daemon restarts. Each session lives in
-# its own folder: meta.json (id/work_dir/created_at/title) + events.jsonl
-# (append-only serialized events used to replay the conversation on connect).
-_SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
-
-
-def _session_dir(sid: str) -> Path:
-    return _SESSIONS_DIR / sid
-
-
 # ---------------------------------------------------------------------------
 # Daemon server
 # ---------------------------------------------------------------------------
@@ -109,10 +100,17 @@ class DaemonServer:
         PermissionMode.BYPASS,
     }
 
-    def __init__(self, config: AppConfig | None, work_dir: str, hook_engine: HookEngine | None = None):
+    def __init__(
+        self,
+        config: AppConfig | None,
+        work_dir: str,
+        hook_engine: HookEngine | None = None,
+        session_store: SessionStore | None = None,
+    ):
         self.config = config
         self.work_dir = work_dir
         self.hook_engine = hook_engine
+        self.session_store = session_store or SessionStore()
         self.session_mgr = SessionManager()
         # Cache: session_id → (agent, deps, conversation)
         self._agents: dict[str, tuple[Agent, AgentDeps, ConversationManager]] = {}
@@ -140,62 +138,26 @@ class DaemonServer:
     def _load_persisted_sessions(self) -> None:
         """Load previously persisted sessions from disk so past conversations
         survive a daemon restart. Agents are created lazily on first use."""
-        try:
-            _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            log.warning("Cannot create sessions dir: %s", e)
-            return
-        for d in sorted(_SESSIONS_DIR.iterdir(), key=lambda p: p.name):
-            if not d.is_dir():
-                continue
-            sid = d.name
-            try:
-                meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
-                events: list[dict | None] = []
-                ev_path = d / "events.jsonl"
-                if ev_path.exists():
-                    for line in ev_path.read_text(encoding="utf-8").splitlines():
-                        line = line.strip()
-                        if line:
-                            events.append(json.loads(line))
-                self._event_logs[sid] = events
-                self._session_meta[sid] = meta
-                self._persisted_count[sid] = len(events)
-            except Exception as e:
-                log.warning("Failed to load session %s: %s", sid, e)
+        for session in self.session_store.load_sessions():
+            self._event_logs[session.sid] = session.events
+            self._session_meta[session.sid] = session.meta
+            self._persisted_count[session.sid] = len(session.events)
         if self._session_meta:
             log.info("Loaded %d persisted session(s)", len(self._session_meta))
 
     def _persist_meta(self, sid: str) -> None:
-        try:
-            d = _session_dir(sid)
-            d.mkdir(parents=True, exist_ok=True)
-            (d / "meta.json").write_text(
-                json.dumps(self._session_meta.get(sid, {}), ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception as e:
-            log.warning("Persist meta failed for %s: %s", sid, e)
+        self.session_store.persist_meta(sid, self._session_meta.get(sid, {}))
 
     def _persist_events(self, sid: str) -> None:
         """Append newly-produced events for a session to its events.jsonl."""
         log_list = self._event_logs.get(sid)
         if log_list is None:
             return
-        start = self._persisted_count.get(sid, 0)
-        new = [e for e in log_list[start:] if e is not None]
-        if not new:
-            self._persisted_count[sid] = len(log_list)
-            return
-        try:
-            d = _session_dir(sid)
-            d.mkdir(parents=True, exist_ok=True)
-            with (d / "events.jsonl").open("a", encoding="utf-8") as f:
-                for e in new:
-                    f.write(json.dumps(e, ensure_ascii=False) + "\n")
-            self._persisted_count[sid] = len(log_list)
-        except Exception as e:
-            log.warning("Persist events failed for %s: %s", sid, e)
+        self._persisted_count[sid] = self.session_store.persist_events(
+            sid,
+            log_list,
+            self._persisted_count.get(sid, 0),
+        )
 
     async def init_session(
         self, session_id: str | None = None, work_dir: str | None = None
@@ -520,11 +482,7 @@ class DaemonServer:
         self._active_task_ids.pop(sid, None)
         self._pre_plan_modes.pop(sid, None)
         # Remove the on-disk record so a deleted conversation stays deleted.
-        try:
-            import shutil
-            shutil.rmtree(_session_dir(sid), ignore_errors=True)
-        except Exception:
-            pass
+        self.session_store.delete_session(sid)
         log.info("Session %s closed", sid)
 
 
