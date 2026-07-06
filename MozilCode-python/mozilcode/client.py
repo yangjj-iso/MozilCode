@@ -8,6 +8,13 @@ from urllib.parse import urlparse
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
+from mozilcode.anthropic_request import (
+    ANTHROPIC_MODEL_FETCH_TIMEOUT,
+    build_anthropic_request_kwargs,
+    mark_last_tool_for_cache as _mark_last_tool_for_cache,
+    mark_last_user_tail_for_cache as _mark_last_user_tail_for_cache,
+    supports_adaptive_thinking as _supports_adaptive_thinking,
+)
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.serialization import (
@@ -43,59 +50,6 @@ from mozilcode.tools.base import (
 )
 
 
-# 限制自动拉取模型元数据的超时时间，防止慢响应或挂起的
-# /v1/models 端点拖延启动。超时后降级为 None（即"未知"），
-# 由下一层 context window 解析逻辑接管。
-ANTHROPIC_MODEL_FETCH_TIMEOUT = 3.0
-
-
-_EPHEMERAL = {"type": "ephemeral"}
-
-
-def _mark_last_user_tail_for_cache(messages: list[dict[str, Any]]) -> None:
-    """给最后一条 user 消息的最后一个 block 附加 cache_control。
-
-    会原地修改 `messages`。Anthropic 会缓存到（且包含）这个 block 为止的前缀；
-    后续请求只要前缀逐字节相同，缓存命中的 token 只需支付 10% 的费用。
-    仅适用于 Anthropic 协议的消息。
-    """
-    if not messages:
-        return
-    # 从后往前找到最后一条 user 角色消息；assistant 尾部不能锚定 cache。
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = msg.get("content")
-        if isinstance(content, str):
-            # 把字符串 content 升级为 block 形式，以便附加 cache_control。
-            msg["content"] = [{
-                "type": "text",
-                "text": content,
-                "cache_control": _EPHEMERAL,
-            }]
-        elif isinstance(content, list) and content:
-            last = content[-1]
-            if isinstance(last, dict):
-                last["cache_control"] = _EPHEMERAL
-        return
-
-
-def _mark_last_tool_for_cache(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """返回一个浅拷贝的 tools 列表，并在最后一个 tool 上标记 cache_control。
-
-    tool schema 在多轮对话之间是稳定的，因此标记列表尾部即可缓存整个 tool block。
-    我们不直接修改调用方传入的列表，因为这些 tool schema 往往是注册表里的
-    模块级单例。
-    """
-    if not tools:
-        return tools
-    marked = list(tools)
-    last = dict(marked[-1])
-    last["cache_control"] = _EPHEMERAL
-    marked[-1] = last
-    return marked
-
-
 def _is_local_base_url(base_url: str) -> bool:
     try:
         host = urlparse(base_url).hostname or ""
@@ -125,15 +79,6 @@ class LLMClient(ABC):
 
     def set_max_output_tokens(self, tokens: int) -> None:
         pass
-
-
-def _supports_adaptive_thinking(model: str) -> bool:
-    for family in ("claude-opus-4-", "claude-sonnet-4-"):
-        if model.startswith(family):
-            rest = model[len(family):]
-            if rest and rest[0].isdigit() and int(rest[0]) >= 6:
-                return True
-    return False
 
 
 class AnthropicClient(LLMClient):
@@ -180,36 +125,14 @@ class AnthropicClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import anthropic as _anthropic
 
-        messages = build_anthropic_messages(conversation.get_messages())
-
-        # 在最长稳定前缀上标记 prompt cache 断点：system、tools
-        # 以及最后一条 user 消息的尾部。Anthropic 会缓存到每个断点，
-        # 并在下次请求时按字节比对——context.manager 中的
-        # ContentReplacementState 保证断点之后的 tool_result 内容保持稳定。
-        _mark_last_user_tail_for_cache(messages)
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": self.max_output_tokens,
-            "messages": messages,
-        }
-        if system:
-            kwargs["system"] = [{
-                "type": "text",
-                "text": system,
-                "cache_control": {"type": "ephemeral"},
-            }]
-        if tools:
-            kwargs["tools"] = _mark_last_tool_for_cache(tools)
-
-        if self.thinking:
-            if _supports_adaptive_thinking(self.model):
-                kwargs["thinking"] = {"type": "enabled", "budget_tokens": 0}
-            else:
-                kwargs["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": max(self.max_output_tokens - 1, 1024),
-                }
+        kwargs = build_anthropic_request_kwargs(
+            model=self.model,
+            max_output_tokens=self.max_output_tokens,
+            messages=build_anthropic_messages(conversation.get_messages()),
+            system=system,
+            tools=tools,
+            thinking=self.thinking,
+        )
 
         current_tool_name = ""
         current_tool_id = ""
