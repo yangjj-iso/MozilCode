@@ -276,7 +276,12 @@ class TestHttpExecutor:
     async def test_mock_request(self):
         from mozilcode.hooks.executors import execute_http
 
-        action = Action(type="http", url="https://httpbin.org/post", body='{"test": true}')
+        action = Action(
+            type="http",
+            url="https://httpbin.org/post",
+            body='{"test": true}',
+            timeout=7,
+        )
         ctx = HookContext()
         # 用 mock 避免发起真实的网络请求
         with patch("mozilcode.hooks.executors.urlopen") as mock_urlopen:
@@ -286,6 +291,7 @@ class TestHttpExecutor:
             result = await execute_http(action, ctx)
             assert result.success is True
             assert "200" in result.output
+            assert mock_urlopen.call_args.kwargs["timeout"] == 7
 
 class TestAgentExecutor:
     @pytest.mark.asyncio

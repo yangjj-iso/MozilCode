@@ -56,7 +56,7 @@ async def execute_http(action: Action, ctx: HookContext) -> ActionResult:
         try:
             data = body.encode() if body else None
             req = Request(url, data=data, headers=headers, method=method)
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=action.timeout) as resp:
                 resp_body = resp.read().decode(errors="replace")[:500]
                 return ActionResult(
                     output=f"HTTP {resp.status}: {resp_body}",
