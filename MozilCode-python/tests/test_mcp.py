@@ -308,6 +308,26 @@ class TestMCPToolWrapper:
         assert wrapper.category == "command"
         assert wrapper.description == "Search GitHub issues"
 
+    def test_public_name_is_sanitized_but_mcp_name_is_preserved(self) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.tool_wrapper import (
+            MAX_PUBLIC_TOOL_NAME_LENGTH,
+            MCPToolWrapper,
+        )
+
+        tool_def = mcp_types.Tool(
+            name="search issues with a very long external MCP name!!!" * 2,
+            description="Search",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        wrapper = MCPToolWrapper("github-prod", tool_def, MagicMock())
+
+        assert wrapper.name.startswith("mcp_github_prod_search_issues")
+        assert len(wrapper.name) <= MAX_PUBLIC_TOOL_NAME_LENGTH
+        assert "-" not in wrapper.name
+        assert "!" not in wrapper.name
+        assert wrapper.mcp_tool_name == tool_def.name
+
     def test_get_schema_uses_original_input_schema(self) -> None:
         from mcp import types as mcp_types
         from mozilcode.mcp.tool_wrapper import MCPToolWrapper
@@ -381,6 +401,32 @@ class TestMCPToolWrapper:
             "count": 2,
             "fallback": "ok",
         }
+
+    @pytest.mark.asyncio
+    async def test_execute_uses_original_mcp_tool_name(self) -> None:
+        from mcp import types as mcp_types
+        from mozilcode.mcp.tool_wrapper import MCPToolWrapper
+
+        tool_def = mcp_types.Tool(
+            name="search issues",
+            description="Search",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        result = mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text="ok")],
+            isError=False,
+        )
+        client = AsyncMock()
+        client.is_alive = True
+        client.call_tool.return_value = result
+
+        wrapper = MCPToolWrapper("github-prod", tool_def, client)
+        params = wrapper.params_model()
+
+        output = await wrapper.execute(params)
+
+        assert output.output == "ok"
+        client.call_tool.assert_awaited_once_with("search issues", {})
 
 # ===========================================================================
 # _extract_text

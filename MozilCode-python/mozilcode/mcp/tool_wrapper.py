@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import Any
 
 from mcp import types as mcp_types
@@ -7,6 +9,9 @@ from pydantic import BaseModel, create_model
 
 from mozilcode.mcp.client import MCPClient
 from mozilcode.tools.base import Tool, ToolResult
+
+MAX_PUBLIC_TOOL_NAME_LENGTH = 64
+_UNSAFE_TOOL_NAME_CHARS_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
 def _normalize_input_schema(input_schema: Any) -> dict[str, Any]:
@@ -42,6 +47,24 @@ def _normalize_input_schema(input_schema: Any) -> dict[str, Any]:
         schema["required"] = []
 
     return schema
+
+
+def build_public_tool_name(server_name: str, tool_name: str) -> str:
+    raw_name = f"mcp_{server_name}_{tool_name}"
+    safe_name = _UNSAFE_TOOL_NAME_CHARS_RE.sub("_", raw_name).strip("_")
+    if not safe_name:
+        safe_name = "mcp_tool"
+    if not re.match(r"^[A-Za-z_]", safe_name):
+        safe_name = f"mcp_{safe_name}"
+
+    if safe_name == raw_name and len(safe_name) <= MAX_PUBLIC_TOOL_NAME_LENGTH:
+        return safe_name
+
+    digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:8]
+    suffix = f"_{digest}"
+    base_length = MAX_PUBLIC_TOOL_NAME_LENGTH - len(suffix)
+    base = safe_name[:base_length].rstrip("_") or "mcp_tool"
+    return f"{base}{suffix}"
 
 
 def _build_params_model(
@@ -105,13 +128,13 @@ class MCPToolWrapper(Tool):
         self._tool_def = tool_def
         self._client = client
         self._input_schema = _normalize_input_schema(tool_def.inputSchema)
-        self.name = f"mcp_{server_name}_{tool_def.name}"
+        self.name = build_public_tool_name(server_name, tool_def.name)
         self.description = tool_def.description or tool_def.name
         self.category = "command"
         self.is_concurrency_safe = False
         self.should_defer = True
         self.params_model = _build_params_model(
-            tool_def.name, self._input_schema
+            self.name, self._input_schema
         )
 
     @property
