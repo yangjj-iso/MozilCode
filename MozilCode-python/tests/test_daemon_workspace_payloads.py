@@ -5,8 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from mozilcode.daemon.request_body import BodyFieldError
+from mozilcode.daemon.workspace_payloads import CreateWorktreeBody
+from mozilcode.daemon.workspace_payloads import ExitWorktreeBody
 from mozilcode.daemon.workspace_payloads import WorkspacePathError
 from mozilcode.daemon.workspace_payloads import list_workspace_directory
+from mozilcode.daemon.workspace_payloads import parse_create_worktree_body
+from mozilcode.daemon.workspace_payloads import parse_exit_worktree_body
 from mozilcode.daemon.workspace_payloads import task_to_dict
 from mozilcode.daemon.workspace_payloads import worktree_to_dict
 from mozilcode.worktree.models import Worktree
@@ -17,6 +22,30 @@ def _symlink_dir_or_skip(link, target) -> None:
         link.symlink_to(target, target_is_directory=True)
     except (NotImplementedError, OSError) as e:
         pytest.skip(f"directory symlinks are not available: {e}")
+
+
+def test_parse_create_worktree_body_defaults_base_branch() -> None:
+    body = parse_create_worktree_body({"name": " feature "})
+
+    assert body == CreateWorktreeBody(name="feature", base_branch="HEAD")
+
+
+def test_parse_create_worktree_body_preserves_blank_base_branch_for_server_default() -> None:
+    body = parse_create_worktree_body({"name": "feature", "base_branch": "   "})
+
+    assert body == CreateWorktreeBody(name="feature", base_branch="")
+
+
+def test_parse_create_worktree_body_rejects_missing_name() -> None:
+    with pytest.raises(BodyFieldError, match="'name' is required"):
+        parse_create_worktree_body({"name": " "})
+
+
+def test_parse_exit_worktree_body_defaults_flags() -> None:
+    assert parse_exit_worktree_body({}) == ExitWorktreeBody(
+        remove=False,
+        discard=False,
+    )
 
 
 def test_task_to_dict_uses_running_clock_for_elapsed():

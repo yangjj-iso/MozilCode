@@ -1,21 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.client import LLMError
-from mozilcode.daemon.request_body import (
-    choice_field,
-    parse_json_object,
-    required_choice_field,
-    required_string_field,
-    string_field,
-    string_mapping_field,
-)
+from mozilcode.daemon.request_body import parse_json_object
 from mozilcode.daemon.request_context import daemon_server, path_param
 from mozilcode.daemon.responses import (
     action_response,
@@ -23,76 +14,15 @@ from mozilcode.daemon.responses import (
     not_found_response,
 )
 from mozilcode.daemon.server_state import ACTIVE_TASK_RUNNING_ERROR
+from mozilcode.daemon.session_payloads import (
+    parse_askuser_resolution_body,
+    parse_create_session_body,
+    parse_mode_body,
+    parse_permission_resolution_body,
+    parse_start_task_body,
+)
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
-PERMISSION_RESPONSES = {"allow", "deny", "allow_always"}
-MODE_REQUESTS = {
-    "acceptEdits",
-    "bypassPermissions",
-    "custom",
-    "default",
-    "do",
-    "dontAsk",
-    "plan",
-}
-
-
-@dataclass(frozen=True)
-class CreateSessionBody:
-    session_id: str | None
-    work_dir: str | None
-
-
-@dataclass(frozen=True)
-class StartTaskBody:
-    session_id: str
-    prompt: str
-
-
-@dataclass(frozen=True)
-class PermissionResolutionBody:
-    request_id: str
-    response: str
-
-
-@dataclass(frozen=True)
-class AskUserResolutionBody:
-    request_id: str
-    answers: dict[str, str]
-
-
-def _parse_create_session_body(body: dict[str, Any]) -> CreateSessionBody:
-    return CreateSessionBody(
-        session_id=string_field(body, "session_id") or None,
-        work_dir=string_field(body, "work_dir") or None,
-    )
-
-
-def _parse_mode_body(body: dict[str, Any]) -> str:
-    return required_choice_field(body, "mode", MODE_REQUESTS)
-
-
-def _parse_start_task_body(body: dict[str, Any]) -> StartTaskBody:
-    return StartTaskBody(
-        session_id=required_string_field(body, "session_id"),
-        prompt=required_string_field(body, "prompt"),
-    )
-
-
-def _parse_permission_resolution_body(
-    body: dict[str, Any],
-) -> PermissionResolutionBody:
-    return PermissionResolutionBody(
-        request_id=required_string_field(body, "request_id"),
-        response=choice_field(body, "response", PERMISSION_RESPONSES, "deny"),
-    )
-
-
-def _parse_askuser_resolution_body(body: dict[str, Any]) -> AskUserResolutionBody:
-    return AskUserResolutionBody(
-        request_id=required_string_field(body, "request_id"),
-        answers=string_mapping_field(body, "answers"),
-    )
 
 
 async def health(request: Request) -> JSONResponse:
@@ -110,7 +40,7 @@ async def health(request: Request) -> JSONResponse:
 
 async def create_session(request: Request) -> JSONResponse:
     server = daemon_server(request)
-    parsed = await parse_json_object(request, _parse_create_session_body)
+    parsed = await parse_json_object(request, parse_create_session_body)
     if parsed.error is not None:
         return parsed.error
     body = parsed.unwrap()
@@ -154,7 +84,7 @@ async def session_status(request: Request) -> JSONResponse:
 async def set_session_mode(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await parse_json_object(request, _parse_mode_body)
+    parsed = await parse_json_object(request, parse_mode_body)
     if parsed.error is not None:
         return parsed.error
     mode = parsed.unwrap()
@@ -191,7 +121,7 @@ async def cancel_background_task(request: Request) -> JSONResponse:
 
 async def start_task(request: Request) -> JSONResponse:
     server = daemon_server(request)
-    parsed = await parse_json_object(request, _parse_start_task_body)
+    parsed = await parse_json_object(request, parse_start_task_body)
     if parsed.error is not None:
         return parsed.error
     body = parsed.unwrap()
@@ -207,7 +137,7 @@ async def start_task(request: Request) -> JSONResponse:
 async def resolve_permission(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await parse_json_object(request, _parse_permission_resolution_body)
+    parsed = await parse_json_object(request, parse_permission_resolution_body)
     if parsed.error is not None:
         return parsed.error
     body = parsed.unwrap()
@@ -220,7 +150,7 @@ async def resolve_permission(request: Request) -> JSONResponse:
 async def resolve_askuser(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await parse_json_object(request, _parse_askuser_resolution_body)
+    parsed = await parse_json_object(request, parse_askuser_resolution_body)
     if parsed.error is not None:
         return parsed.error
     body = parsed.unwrap()

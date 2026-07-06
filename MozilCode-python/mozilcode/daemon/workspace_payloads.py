@@ -1,8 +1,27 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from mozilcode.daemon.request_body import (
+    bool_field,
+    required_string_field,
+    string_field,
+)
+
+
+@dataclass(frozen=True)
+class CreateWorktreeBody:
+    name: str
+    base_branch: str
+
+
+@dataclass(frozen=True)
+class ExitWorktreeBody:
+    remove: bool
+    discard: bool
 
 
 class WorkspacePathError(ValueError):
@@ -11,6 +30,20 @@ class WorkspacePathError(ValueError):
     def __init__(self, message: str, *, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def parse_create_worktree_body(body: dict[str, Any]) -> CreateWorktreeBody:
+    return CreateWorktreeBody(
+        name=required_string_field(body, "name"),
+        base_branch=string_field(body, "base_branch", "HEAD").strip(),
+    )
+
+
+def parse_exit_worktree_body(body: dict[str, Any]) -> ExitWorktreeBody:
+    return ExitWorktreeBody(
+        remove=bool_field(body, "remove"),
+        discard=bool_field(body, "discard"),
+    )
 
 
 def task_to_dict(task: Any, *, clock: Callable[[], float] = time.monotonic) -> dict:
