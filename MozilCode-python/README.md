@@ -28,6 +28,12 @@ uv run mozilcode-daemon
 
 The daemon listens on `127.0.0.1:7800` by default.
 
+From the workspace root, smoke-test a running daemon without making a model call:
+
+```powershell
+uv run python scripts/smoke_mozilcode_daemon.py --base-url http://127.0.0.1:7800
+```
+
 ## A2A
 
 The daemon exposes a non-streaming local A2A bridge:
