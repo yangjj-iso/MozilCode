@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import (
-    BodyFieldError,
     choice_field,
     object_field,
-    read_json_object,
+    parse_json_object,
     string_field,
 )
 from mozilcode.daemon.request_context import daemon_server, path_param
@@ -34,6 +35,64 @@ MODE_REQUESTS = {
 }
 
 
+@dataclass(frozen=True)
+class CreateSessionBody:
+    session_id: str | None
+    work_dir: str | None
+
+
+@dataclass(frozen=True)
+class StartTaskBody:
+    session_id: str
+    prompt: str
+
+
+@dataclass(frozen=True)
+class PermissionResolutionBody:
+    request_id: str
+    response: str
+
+
+@dataclass(frozen=True)
+class AskUserResolutionBody:
+    request_id: str
+    answers: dict[str, Any]
+
+
+def _parse_create_session_body(body: dict[str, Any]) -> CreateSessionBody:
+    return CreateSessionBody(
+        session_id=string_field(body, "session_id") or None,
+        work_dir=string_field(body, "work_dir") or None,
+    )
+
+
+def _parse_mode_body(body: dict[str, Any]) -> str:
+    return choice_field(body, "mode", MODE_REQUESTS).strip()
+
+
+def _parse_start_task_body(body: dict[str, Any]) -> StartTaskBody:
+    return StartTaskBody(
+        session_id=string_field(body, "session_id"),
+        prompt=string_field(body, "prompt"),
+    )
+
+
+def _parse_permission_resolution_body(
+    body: dict[str, Any],
+) -> PermissionResolutionBody:
+    return PermissionResolutionBody(
+        request_id=string_field(body, "request_id"),
+        response=choice_field(body, "response", PERMISSION_RESPONSES, "deny"),
+    )
+
+
+def _parse_askuser_resolution_body(body: dict[str, Any]) -> AskUserResolutionBody:
+    return AskUserResolutionBody(
+        request_id=string_field(body, "request_id"),
+        answers=object_field(body, "answers"),
+    )
+
+
 async def health(request: Request) -> JSONResponse:
     server = daemon_server(request)
     return JSONResponse(
@@ -49,17 +108,12 @@ async def health(request: Request) -> JSONResponse:
 
 async def create_session(request: Request) -> JSONResponse:
     server = daemon_server(request)
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
+    parsed = await parse_json_object(request, _parse_create_session_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
     try:
-        session_id = string_field(body, "session_id") or None
-        work_dir = string_field(body, "work_dir") or None
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    try:
-        sid = await server.init_session(session_id, work_dir)
+        sid = await server.init_session(body.session_id, body.work_dir)
     except ValueError as e:
         return bad_request_response(str(e), configured=server.config is not None)
     return JSONResponse({"session_id": sid, **server.session_info(sid)})
@@ -98,14 +152,10 @@ async def session_status(request: Request) -> JSONResponse:
 async def set_session_mode(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        mode = choice_field(body, "mode", MODE_REQUESTS).strip()
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
+    parsed = await parse_json_object(request, _parse_mode_body)
+    if parsed.error is not None:
+        return parsed.error
+    mode = parsed.unwrap()
     if not mode:
         return bad_request_response("mode is required")
     try:
@@ -141,39 +191,29 @@ async def cancel_background_task(request: Request) -> JSONResponse:
 
 async def start_task(request: Request) -> JSONResponse:
     server = daemon_server(request)
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        sid = string_field(body, "session_id")
-        prompt = string_field(body, "prompt")
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    if not sid or not prompt:
+    parsed = await parse_json_object(request, _parse_start_task_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
+    if not body.session_id or not body.prompt:
         return bad_request_response("session_id and prompt are required")
     try:
-        task_id = await server.start_task(sid, prompt)
+        task_id = await server.start_task(body.session_id, body.prompt)
     except ValueError as e:
         if str(e) == ACTIVE_TASK_RUNNING_ERROR:
             return bad_request_response(str(e))
         return not_found_response(str(e))
-    return JSONResponse({"task_id": task_id, "session_id": sid})
+    return JSONResponse({"task_id": task_id, "session_id": body.session_id})
 
 
 async def resolve_permission(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        request_id = string_field(body, "request_id")
-        response = choice_field(body, "response", PERMISSION_RESPONSES, "deny")
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    ok = await server.resolve_permission(sid, request_id, response)
+    parsed = await parse_json_object(request, _parse_permission_resolution_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
+    ok = await server.resolve_permission(sid, body.request_id, body.response)
     if not ok:
         return not_found_response("request not found")
     return JSONResponse({"resolved": True})
@@ -182,16 +222,11 @@ async def resolve_permission(request: Request) -> JSONResponse:
 async def resolve_askuser(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        request_id = string_field(body, "request_id")
-        answers = object_field(body, "answers")
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    ok = await server.resolve_askuser(sid, request_id, answers)
+    parsed = await parse_json_object(request, _parse_askuser_resolution_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
+    ok = await server.resolve_askuser(sid, body.request_id, body.answers)
     if not ok:
         return not_found_response("request not found")
     return JSONResponse({"resolved": True})

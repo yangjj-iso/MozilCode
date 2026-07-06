@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.daemon.request_body import (
-    BodyFieldError,
     bool_field,
-    read_json_object,
+    parse_json_object,
     string_field,
 )
 from mozilcode.daemon.request_context import daemon_server, path_param, query_param
 from mozilcode.daemon.responses import (
     action_response,
-    bad_request_response,
     error_response,
     not_found_response,
 )
@@ -22,6 +22,32 @@ from mozilcode.daemon.workspace_payloads import (
     WorkspacePathError,
     list_workspace_directory,
 )
+
+
+@dataclass(frozen=True)
+class CreateWorktreeBody:
+    name: str
+    base_branch: str
+
+
+@dataclass(frozen=True)
+class ExitWorktreeBody:
+    remove: bool
+    discard: bool
+
+
+def _parse_create_worktree_body(body: dict[str, Any]) -> CreateWorktreeBody:
+    return CreateWorktreeBody(
+        name=string_field(body, "name").strip(),
+        base_branch=string_field(body, "base_branch", "HEAD").strip(),
+    )
+
+
+def _parse_exit_worktree_body(body: dict[str, Any]) -> ExitWorktreeBody:
+    return ExitWorktreeBody(
+        remove=bool_field(body, "remove"),
+        discard=bool_field(body, "discard"),
+    )
 
 
 async def list_worktrees(request: Request) -> JSONResponse:
@@ -34,16 +60,11 @@ async def list_worktrees(request: Request) -> JSONResponse:
 async def create_worktree(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        name = string_field(body, "name").strip()
-        base_branch = string_field(body, "base_branch", "HEAD").strip()
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    result = await server.create_worktree(sid, name, base_branch)
+    parsed = await parse_json_object(request, _parse_create_worktree_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
+    result = await server.create_worktree(sid, body.name, body.base_branch)
     return action_response(result)
 
 
@@ -58,16 +79,15 @@ async def enter_worktree(request: Request) -> JSONResponse:
 async def exit_worktree(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    parsed = await read_json_object(request)
-    if not parsed.ok:
-        return parsed.error_response()
-    body = parsed.payload
-    try:
-        remove = bool_field(body, "remove")
-        discard = bool_field(body, "discard")
-    except BodyFieldError as e:
-        return bad_request_response(str(e))
-    result = await server.exit_worktree(sid, remove=remove, discard=discard)
+    parsed = await parse_json_object(request, _parse_exit_worktree_body)
+    if parsed.error is not None:
+        return parsed.error
+    body = parsed.unwrap()
+    result = await server.exit_worktree(
+        sid,
+        remove=body.remove,
+        discard=body.discard,
+    )
     return action_response(result)
 
 

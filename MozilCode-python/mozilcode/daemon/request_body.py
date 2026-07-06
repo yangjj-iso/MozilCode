@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mozilcode.daemon.responses import error_response
+from mozilcode.daemon.responses import bad_request_response, error_response
 
 
 class BodyFieldError(ValueError):
     pass
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,21 @@ class JsonObjectBody:
         return error_response(self.error, self.status_code)
 
 
+@dataclass(frozen=True)
+class ParsedJsonObject(Generic[T]):
+    value: T | None = None
+    error: JSONResponse | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None
+
+    def unwrap(self) -> T:
+        if self.error is not None or self.value is None:
+            raise RuntimeError("parsed JSON object has no value")
+        return self.value
+
+
 async def read_json_object(request: Request) -> JsonObjectBody:
     try:
         payload = await request.json()
@@ -38,6 +57,19 @@ async def read_json_object(request: Request) -> JsonObjectBody:
     if not isinstance(payload, dict):
         return JsonObjectBody(error="JSON object is required", status_code=400)
     return JsonObjectBody(payload=payload)
+
+
+async def parse_json_object(
+    request: Request,
+    parser: Callable[[dict[str, Any]], T],
+) -> ParsedJsonObject[T]:
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return ParsedJsonObject(error=parsed.error_response())
+    try:
+        return ParsedJsonObject(value=parser(parsed.payload))
+    except BodyFieldError as e:
+        return ParsedJsonObject(error=bad_request_response(str(e)))
 
 
 def string_field(

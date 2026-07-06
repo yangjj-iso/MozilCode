@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
+from mozilcode.daemon.request_body import parse_json_object, string_field
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.session_store import SessionStore
 
@@ -25,6 +28,38 @@ def _app(tmp_path):
 class _RunningTask:
     def done(self) -> bool:
         return False
+
+
+class _JsonRequest:
+    def __init__(self, payload):
+        self._payload = payload
+
+    async def json(self):
+        return self._payload
+
+
+@pytest.mark.asyncio
+async def test_parse_json_object_returns_typed_value():
+    parsed = await parse_json_object(
+        _JsonRequest({"name": "main"}),
+        lambda body: string_field(body, "name"),
+    )
+
+    assert parsed.ok
+    assert parsed.unwrap() == "main"
+
+
+@pytest.mark.asyncio
+async def test_parse_json_object_maps_field_error_to_bad_request():
+    parsed = await parse_json_object(
+        _JsonRequest({"name": 123}),
+        lambda body: string_field(body, "name"),
+    )
+
+    assert not parsed.ok
+    assert parsed.error is not None
+    assert parsed.error.status_code == 400
+    assert json.loads(parsed.error.body) == {"error": "'name' must be a string"}
 
 
 @pytest.mark.parametrize(
