@@ -451,6 +451,38 @@ class TestLoadHooks:
                 }
             ])
 
+    def test_duplicate_hook_ids_are_rejected(self):
+        with pytest.raises(HookConfigError, match="duplicate hook id 'same'"):
+            load_hooks([
+                {
+                    "id": " same ",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo one"},
+                },
+                {
+                    "id": "same",
+                    "event": "shutdown",
+                    "action": {"type": "command", "command": "echo two"},
+                },
+            ])
+
+    def test_auto_generated_hook_id_collisions_are_rejected(self):
+        with pytest.raises(
+            HookConfigError,
+            match="duplicate hook id 'startup_1'",
+        ):
+            load_hooks([
+                {
+                    "id": "startup_1",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo one"},
+                },
+                {
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo two"},
+                },
+            ])
+
     def test_condition_must_be_string(self):
         with pytest.raises(HookConfigError, match="if.*string"):
             load_hooks([

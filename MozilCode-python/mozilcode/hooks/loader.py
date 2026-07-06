@@ -146,6 +146,7 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
         return []
 
     hooks: list[Hook] = []
+    seen_ids: set[str] = set()
     for i, entry in enumerate(raw_hooks):
         label = _identify(entry, i)
 
@@ -182,6 +183,9 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
                 raise HookConfigError(f"{label}: condition error: {e}") from e
 
         hook_id = _optional_top_string(entry, "id", label, default=f"{event}_{i}")
+        if hook_id in seen_ids:
+            raise HookConfigError(f"{label}: duplicate hook id '{hook_id}'")
+        seen_ids.add(hook_id)
 
         hooks.append(
             Hook(
