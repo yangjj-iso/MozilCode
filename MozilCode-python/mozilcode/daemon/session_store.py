@@ -9,6 +9,8 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 DEFAULT_SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
+META_FILE = "meta.json"
+EVENTS_FILE = "events.jsonl"
 
 
 @dataclass
@@ -27,11 +29,16 @@ class SessionStore:
     def session_dir(self, sid: str) -> Path:
         return self.root / sid
 
-    def load_sessions(self) -> list[PersistedSession]:
+    def _ensure_root(self) -> bool:
         try:
             self.root.mkdir(parents=True, exist_ok=True)
+            return True
         except Exception as e:
             log.warning("Cannot create sessions dir: %s", e)
+            return False
+
+    def load_sessions(self) -> list[PersistedSession]:
+        if not self._ensure_root():
             return []
 
         sessions: list[PersistedSession] = []
@@ -40,24 +47,35 @@ class SessionStore:
                 continue
             sid = directory.name
             try:
-                meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
-                events: list[dict | None] = []
-                events_path = directory / "events.jsonl"
-                if events_path.exists():
-                    for line in events_path.read_text(encoding="utf-8").splitlines():
-                        line = line.strip()
-                        if line:
-                            events.append(json.loads(line))
-                sessions.append(PersistedSession(sid=sid, meta=meta, events=events))
+                sessions.append(self._load_session(sid, directory))
             except Exception as e:
                 log.warning("Failed to load session %s: %s", sid, e)
         return sessions
+
+    def _load_session(self, sid: str, directory: Path) -> PersistedSession:
+        meta = self._read_meta(directory)
+        events = self._read_events(directory)
+        return PersistedSession(sid=sid, meta=meta, events=events)
+
+    def _read_meta(self, directory: Path) -> dict:
+        return json.loads((directory / META_FILE).read_text(encoding="utf-8"))
+
+    def _read_events(self, directory: Path) -> list[dict | None]:
+        events: list[dict | None] = []
+        events_path = directory / EVENTS_FILE
+        if not events_path.exists():
+            return events
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                events.append(json.loads(line))
+        return events
 
     def persist_meta(self, sid: str, meta: dict) -> None:
         try:
             directory = self.session_dir(sid)
             directory.mkdir(parents=True, exist_ok=True)
-            (directory / "meta.json").write_text(
+            (directory / META_FILE).write_text(
                 json.dumps(meta, ensure_ascii=False),
                 encoding="utf-8",
             )
@@ -78,7 +96,7 @@ class SessionStore:
         try:
             directory = self.session_dir(sid)
             directory.mkdir(parents=True, exist_ok=True)
-            with (directory / "events.jsonl").open("a", encoding="utf-8") as f:
+            with (directory / EVENTS_FILE).open("a", encoding="utf-8") as f:
                 for event in new_events:
                     f.write(json.dumps(event, ensure_ascii=False) + "\n")
             return len(log_list)

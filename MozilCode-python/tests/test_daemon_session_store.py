@@ -50,3 +50,18 @@ def test_session_store_delete_removes_session_directory(tmp_path):
     store.delete_session(sid)
 
     assert not store.session_dir(sid).exists()
+
+
+def test_session_store_skips_corrupt_session_and_loads_valid_ones(tmp_path):
+    store = SessionStore(tmp_path)
+    store.persist_meta("valid", {"title": "ok"})
+    store.persist_events("valid", [{"type": "LoopComplete"}], 0)
+
+    corrupt = store.session_dir("corrupt")
+    corrupt.mkdir(parents=True)
+    (corrupt / "meta.json").write_text("{bad", encoding="utf-8")
+
+    loaded = store.load_sessions()
+
+    assert [session.sid for session in loaded] == ["valid"]
+    assert loaded[0].events == [{"type": "LoopComplete"}]
