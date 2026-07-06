@@ -6,7 +6,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.daemon.request_body import read_json_object
-from mozilcode.daemon.responses import action_response, error_response
+from mozilcode.daemon.responses import (
+    action_response,
+    error_response,
+    not_found_response,
+)
 from mozilcode.daemon.workspace_payloads import (
     WorkspacePathError,
     list_workspace_directory,
@@ -59,7 +63,7 @@ async def list_files(request: Request) -> JSONResponse:
     sid = request.path_params["sid"]
     work_dir = server.session_work_dir(sid)
     if work_dir is None:
-        return error_response("session not found", 404)
+        return not_found_response("session not found")
     root = Path(work_dir).resolve()
     rel = request.query_params.get("path", "") or ""
     try:

@@ -5,7 +5,9 @@ import json
 from mozilcode.daemon.responses import (
     DaemonActionResult,
     action_response,
+    bad_request_response,
     error_response,
+    not_found_response,
 )
 
 
@@ -25,3 +27,17 @@ def test_error_response_includes_extra_fields() -> None:
 
     assert response.status_code == 400
     assert _json_body(response) == {"error": "not configured", "configured": False}
+
+
+def test_bad_request_response_uses_400() -> None:
+    response = bad_request_response("mode is required")
+
+    assert response.status_code == 400
+    assert _json_body(response) == {"error": "mode is required"}
+
+
+def test_not_found_response_uses_404() -> None:
+    response = not_found_response("session not found")
+
+    assert response.status_code == 404
+    assert _json_body(response) == {"error": "session not found"}

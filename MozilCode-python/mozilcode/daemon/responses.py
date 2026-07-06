@@ -18,3 +18,11 @@ def action_response(result: DaemonActionResult) -> JSONResponse:
 
 def error_response(message: str, status_code: int, **extra: Any) -> JSONResponse:
     return JSONResponse({"error": message, **extra}, status_code=status_code)
+
+
+def bad_request_response(message: str, **extra: Any) -> JSONResponse:
+    return error_response(message, 400, **extra)
+
+
+def not_found_response(message: str, **extra: Any) -> JSONResponse:
+    return error_response(message, 404, **extra)
