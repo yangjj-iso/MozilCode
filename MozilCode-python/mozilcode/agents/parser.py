@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from mozilcode.frontmatter import FrontmatterParseError, parse_yaml_frontmatter
 
 log = logging.getLogger(__name__)
 
@@ -93,26 +93,10 @@ def _optional_bool(meta: dict, field_name: str, default: bool, ctx: str) -> bool
 
 
 def parse_frontmatter(raw: str) -> tuple[dict, str]:
-    stripped = raw.lstrip()
-    if not stripped.startswith("---"):
-        raise AgentParseError("Missing YAML frontmatter (must start with ---)")
-
-    end = stripped.find("---", 3)
-    if end == -1:
-        raise AgentParseError("Unclosed YAML frontmatter (missing closing ---)")
-
-    yaml_block = stripped[3:end]
-    body = stripped[end + 3 :].lstrip("\n")
-
     try:
-        meta = yaml.safe_load(yaml_block)
-    except yaml.YAMLError as e:
-        raise AgentParseError(f"Invalid YAML in frontmatter: {e}") from e
-
-    if not isinstance(meta, dict):
-        raise AgentParseError("Frontmatter must be a YAML mapping")
-
-    return meta, body
+        return parse_yaml_frontmatter(raw)
+    except FrontmatterParseError as e:
+        raise AgentParseError(str(e)) from e
 
 
 def _validate_agent_meta(meta: dict, source: str = "") -> None:

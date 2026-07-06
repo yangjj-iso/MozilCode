@@ -192,6 +192,18 @@ class TestAgentParser:
         assert meta == {"name": "x", "description": "y"}
         assert body == "body text"
 
+    def test_frontmatter_value_can_contain_delimiter_text(self):
+        raw = textwrap.dedent("""\
+            ---
+            name: x
+            description: "Use --- as a separator"
+            ---
+            body text
+        """)
+        meta, body = parse_frontmatter(raw)
+        assert meta["description"] == "Use --- as a separator"
+        assert body == "body text\n"
+
     def test_valid_permission_modes(self, tmp_path: Path):
         for mode in ("default", "acceptEdits", "dontAsk"):
             f = tmp_path / f"{mode}.md"

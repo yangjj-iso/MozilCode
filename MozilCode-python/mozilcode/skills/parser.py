@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
-import yaml
+from mozilcode.frontmatter import FrontmatterParseError, parse_yaml_frontmatter
 
 log = logging.getLogger(__name__)
 
@@ -33,32 +33,10 @@ class SkillDef:
 
 
 def parse_frontmatter(raw: str) -> tuple[dict, str]:
-    stripped = raw.lstrip()
-    lines = stripped.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        raise SkillParseError("Missing YAML frontmatter (must start with ---)")
-
-    closing_line = None
-    for index, line in enumerate(lines[1:], start=1):
-        if line.strip() == "---":
-            closing_line = index
-            break
-
-    if closing_line is None:
-        raise SkillParseError("Unclosed YAML frontmatter (missing closing ---)")
-
-    yaml_block = "".join(lines[1:closing_line])
-    body = "".join(lines[closing_line + 1:]).lstrip("\n")
-
     try:
-        meta = yaml.safe_load(yaml_block)
-    except yaml.YAMLError as e:
-        raise SkillParseError(f"Invalid YAML in frontmatter: {e}") from e
-
-    if not isinstance(meta, dict):
-        raise SkillParseError("Frontmatter must be a YAML mapping")
-
-    return meta, body
+        return parse_yaml_frontmatter(raw)
+    except FrontmatterParseError as e:
+        raise SkillParseError(str(e)) from e
 
 
 def _source_context(source: str = "") -> str:
