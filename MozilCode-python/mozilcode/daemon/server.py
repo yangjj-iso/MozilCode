@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 from starlette.applications import Starlette
 from starlette.routing import Route, WebSocketRoute
 from starlette.requests import Request
@@ -79,6 +78,16 @@ from mozilcode.daemon.config_settings import (
     public_config as _public_config,
     public_memory_settings as _public_memory_settings,
     write_user_config as _write_user_config,
+)
+from mozilcode.daemon.extension_settings import (
+    create_skill_from_payload as _create_skill_from_payload,
+    delete_mcp_server as _delete_mcp_server,
+    delete_user_skill as _delete_user_skill,
+    list_mcp_servers as _list_mcp_servers,
+    list_skills as _list_skills,
+    toggle_mcp_server as _toggle_mcp_server,
+    toggle_skill as _toggle_skill,
+    upsert_mcp_server as _upsert_mcp_server,
 )
 from mozilcode.a2a.bridge import A2ABridge, A2AError
 from mozilcode.a2a.qq_official import create_official_qq_gateway
@@ -1099,43 +1108,33 @@ async def stream_events(websocket: WebSocket) -> None:
 
 
 async def mcp_list(request: Request) -> JSONResponse:
-    return JSONResponse({"servers": _load_gui_settings().get("mcp_servers", [])})
+    return JSONResponse({"servers": _list_mcp_servers(_load_gui_settings())})
 
 
 async def mcp_add(request: Request) -> JSONResponse:
-    body = await request.json()
-    name = (body.get("name") or "").strip()
-    if not name:
-        return JSONResponse({"error": "name is required"}, status_code=400)
-    d = _load_gui_settings()
-    servers = [s for s in d.get("mcp_servers", []) if s.get("name") != name]
-    servers.append({
-        "name": name,
-        "command": (body.get("command") or "").strip(),
-        "args": (body.get("args") or "").strip(),
-        "url": (body.get("url") or "").strip(),
-        "enabled": True,
-    })
-    d["mcp_servers"] = servers
-    _save_gui_settings(d)
+    try:
+        body = await request.json()
+        data = _load_gui_settings()
+        servers = _upsert_mcp_server(data, body or {})
+        _save_gui_settings(data)
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     return JSONResponse({"ok": True, "servers": servers})
 
 
 async def mcp_delete(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    d = _load_gui_settings()
-    d["mcp_servers"] = [s for s in d.get("mcp_servers", []) if s.get("name") != name]
-    _save_gui_settings(d)
+    data = _load_gui_settings()
+    _delete_mcp_server(data, name)
+    _save_gui_settings(data)
     return JSONResponse({"ok": True})
 
 
 async def mcp_toggle(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    d = _load_gui_settings()
-    for s in d.get("mcp_servers", []):
-        if s.get("name") == name:
-            s["enabled"] = not s.get("enabled", True)
-    _save_gui_settings(d)
+    data = _load_gui_settings()
+    _toggle_mcp_server(data, name)
+    _save_gui_settings(data)
     return JSONResponse({"ok": True})
 
 
@@ -1168,55 +1167,27 @@ async def memory_settings_save(request: Request) -> JSONResponse:
 
 async def skills_list(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
-    disabled = set(_load_gui_settings().get("disabled_skills", []))
-    out = []
     try:
-        from mozilcode.skills.loader import SkillLoader
-        loader = SkillLoader(server.work_dir)
-        for name, sk in loader.load_all().items():
-            out.append({
-                "name": name,
-                "description": getattr(sk, "description", "") or "",
-                "source": loader.get_source_label(name),
-                "enabled": name not in disabled,
-            })
+        out = _list_skills(server.work_dir, _load_gui_settings())
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-    out.sort(key=lambda x: x["name"])
     return JSONResponse({"skills": out})
 
 
 async def skill_toggle(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    d = _load_gui_settings()
-    disabled = set(d.get("disabled_skills", []))
-    disabled.discard(name) if name in disabled else disabled.add(name)
-    d["disabled_skills"] = sorted(disabled)
-    _save_gui_settings(d)
+    data = _load_gui_settings()
+    _toggle_skill(data, name)
+    _save_gui_settings(data)
     return JSONResponse({"ok": True})
 
 
 async def skill_create(request: Request) -> JSONResponse:
-    body = await request.json()
-    name = (body.get("name") or "").strip()
-    desc = (body.get("description") or "").strip()
-    prompt = body.get("body") or ""
-    from mozilcode.skills.parser import VALID_NAME_RE
-    if not VALID_NAME_RE.match(name):
-        return JSONResponse(
-            {"error": "名称需为小写字母/数字/连字符，且以字母开头"}, status_code=400
-        )
-    if not desc:
-        return JSONResponse({"error": "描述必填"}, status_code=400)
-    skill_dir = Path.home() / ".mozilcode" / "skills" / name
-    if skill_dir.exists():
-        return JSONResponse({"error": "同名技能已存在"}, status_code=400)
     try:
-        import yaml
-        front = yaml.safe_dump({"name": name, "description": desc}, allow_unicode=True, sort_keys=False).strip()
-        content = f"---\n{front}\n---\n\n{prompt.strip()}\n"
-        skill_dir.mkdir(parents=True, exist_ok=True)
-        (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+        body = await request.json()
+        _create_skill_from_payload(body or {})
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse({"ok": True})
@@ -1224,12 +1195,10 @@ async def skill_create(request: Request) -> JSONResponse:
 
 async def skill_delete(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    skill_dir = Path.home() / ".mozilcode" / "skills" / name
-    if not skill_dir.is_dir():
-        return JSONResponse({"error": "只能删除用户创建的技能"}, status_code=400)
     try:
-        import shutil
-        shutil.rmtree(skill_dir, ignore_errors=True)
+        _delete_user_skill(name)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse({"ok": True})
