@@ -16,9 +16,7 @@ dist/
 .mewcode/
 .workbuddy/
 .tools/
-QQ.exe
 MozilCode-python/.tools/
-MozilCode-python/snake.html
 *.log
 .env
 .env.*

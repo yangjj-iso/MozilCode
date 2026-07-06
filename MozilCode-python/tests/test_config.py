@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from mozilcode.config import ConfigError, load_config
+from mozilcode.validator import REMOVED_CONFIG_SECTIONS
 
 
 def _write_config(path: Path, extra: str = "", provider_name: str = "test") -> None:
@@ -123,19 +124,7 @@ def test_project_worktree_config_overrides_home_worktree(
     assert cfg.worktree.stale_cutoff_hours == 6
 
 
-@pytest.mark.parametrize(
-    "section",
-    [
-        "gui",
-        "frontend",
-        "cloud",
-        "hosted_models",
-        "official_models",
-        "qqbot",
-        "telegrambot",
-        "bot_adapters",
-    ],
-)
+@pytest.mark.parametrize("section", sorted(REMOVED_CONFIG_SECTIONS))
 def test_removed_gui_cloud_bot_config_sections_are_rejected(
     tmp_path: Path, section: str
 ) -> None:

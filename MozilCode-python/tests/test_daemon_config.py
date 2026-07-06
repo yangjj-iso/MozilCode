@@ -186,6 +186,11 @@ def test_route_registry_keeps_local_daemon_surface_only():
     assert "/api/settings/mcp" not in paths
     assert "/api/settings/memory" not in paths
     assert "/api/skills" not in paths
+    assert "/api/auth/login" not in paths
+    assert "/api/accounts" not in paths
+    assert "/api/cloud/status" not in paths
+    assert "/api/models/official" not in paths
+    assert "/api/settings/official-models" not in paths
     assert "/api/settings/qqbot" not in paths
     assert "/api/settings/telegrambot" not in paths
 
@@ -230,6 +235,29 @@ def test_gui_management_routes_are_removed(tmp_path):
             client.post("/api/settings/memory", json={}),
             client.get("/api/skills"),
             client.post("/api/skills", json={}),
+            client.get("/api/settings/gui"),
+        ]
+
+    assert {response.status_code for response in responses} == {404}
+
+
+def test_cloud_account_and_official_model_routes_are_removed(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = _create_app(provider, tmp_path)
+
+    with TestClient(app) as client:
+        responses = [
+            client.post("/api/auth/login", json={}),
+            client.get("/api/accounts"),
+            client.get("/api/cloud/status"),
+            client.get("/api/models/official"),
+            client.get("/api/settings/official-models"),
+            client.post("/api/settings/official-models", json={}),
         ]
 
     assert {response.status_code for response in responses} == {404}
