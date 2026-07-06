@@ -7,7 +7,8 @@ from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
-from mozilcode.daemon.server_state import DaemonActionResult, DaemonServer
+from mozilcode.daemon.responses import DaemonActionResult
+from mozilcode.daemon.server_state import DaemonServer
 from mozilcode.permissions import PermissionMode
 
 

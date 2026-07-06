@@ -7,6 +7,8 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from mozilcode.daemon.responses import error_response
+
 
 @dataclass(frozen=True)
 class JsonObjectBody:
@@ -19,7 +21,7 @@ class JsonObjectBody:
         return not self.error
 
     def error_response(self) -> JSONResponse:
-        return JSONResponse({"error": self.error}, status_code=self.status_code)
+        return error_response(self.error, self.status_code)
 
 
 async def read_json_object(request: Request) -> JsonObjectBody:

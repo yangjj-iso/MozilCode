@@ -4,9 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from mozilcode.agent import (
     Agent,
@@ -34,17 +32,12 @@ from mozilcode.daemon.task_events import (
     task_error_event,
     user_message_event,
 )
+from mozilcode.daemon.responses import DaemonActionResult
 from mozilcode.daemon.workspace_payloads import task_to_dict, worktree_to_dict
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class DaemonActionResult:
-    payload: dict[str, Any]
-    status_code: int = 200
 
 
 class DaemonServer:
