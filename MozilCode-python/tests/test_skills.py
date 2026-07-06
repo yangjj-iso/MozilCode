@@ -413,6 +413,32 @@ class TestDirectorySkill:
 
         assert schemas == [{"name": "valid", "description": "ok", "parameters": {}}]
 
+    def test_parse_tool_json_filters_invalid_tool_schema_fields(
+        self, tmp_path: Path
+    ) -> None:
+        from mozilcode.skills.directory import parse_tool_json
+
+        tool_json = tmp_path / "tool.json"
+        tool_json.write_text(json.dumps([
+            {
+                "name": "valid_tool",
+                "description": "ok",
+                "parameters": {},
+            },
+            {"name": "", "description": "empty name", "parameters": {}},
+            {"name": "../bad", "description": "unsafe", "parameters": {}},
+            {"name": 7, "description": "bad type", "parameters": {}},
+            {"name": "bad_description", "description": ["bad"], "parameters": {}},
+            {"name": "bad_parameters", "description": "bad", "parameters": []},
+            {"name": "bad_input_schema", "description": "bad", "input_schema": []},
+        ]))
+
+        schemas = parse_tool_json(tool_json)
+
+        assert schemas == [
+            {"name": "valid_tool", "description": "ok", "parameters": {}}
+        ]
+
     def test_parse_tool_json_rejects_scalar_root(self, tmp_path: Path) -> None:
         from mozilcode.skills.directory import parse_tool_json
 
@@ -443,6 +469,50 @@ class TestDirectorySkill:
         count = register_skill_tools(skill_dir, registry)
         assert count == 1
         assert registry.get("my_tool") is not None
+
+    def test_register_skill_tools_skips_invalid_tool_names(
+        self, tmp_path: Path
+    ) -> None:
+        from mozilcode.skills.directory import register_skill_tools
+
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        refs = skill_dir / "references"
+        refs.mkdir()
+
+        (skill_dir / "tool.json").write_text(json.dumps([
+            {
+                "name": "valid_tool",
+                "description": "A tool",
+                "parameters": {},
+            },
+            {
+                "name": "bad-name",
+                "description": (
+                    "Invalid because implementation names are Python identifiers"
+                ),
+                "parameters": {},
+            },
+        ]))
+        (refs / "valid_tool.py").write_text("def execute(**kwargs):\n    return 'ok'\n")
+        (refs / "bad-name.py").write_text("def execute(**kwargs):\n    return 'bad'\n")
+
+        registry = ToolRegistry()
+        count = register_skill_tools(skill_dir, registry)
+
+        assert count == 1
+        assert registry.get("valid_tool") is not None
+        assert registry.get("bad-name") is None
+
+    def test_load_tool_implementation_rejects_invalid_tool_name(
+        self, tmp_path: Path
+    ) -> None:
+        from mozilcode.skills.directory import load_tool_implementation
+
+        refs = tmp_path / "references"
+        refs.mkdir()
+
+        assert load_tool_implementation(refs, "../escape") is None
 
     def test_register_no_tool_json(self, tmp_path: Path) -> None:
         from mozilcode.skills.directory import register_skill_tools
