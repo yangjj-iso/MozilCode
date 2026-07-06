@@ -98,6 +98,31 @@ def _optional_string_field(entry: dict, field_name: str, item_label: str) -> str
     return value.strip()
 
 
+def _string_list_field(entry: dict, field_name: str, item_label: str) -> list[str]:
+    value = entry.get(field_name, [])
+    if not isinstance(value, list):
+        raise ConfigError(f"{item_label}: {field_name} must be a list of strings")
+    if not all(isinstance(item, str) for item in value):
+        raise ConfigError(f"{item_label}: {field_name} must be a list of strings")
+    return value
+
+
+def _string_mapping_field(entry: dict, field_name: str, item_label: str) -> dict[str, str]:
+    value = entry.get(field_name, {})
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"{item_label}: {field_name} must be a mapping of strings to strings"
+        )
+    if not all(
+        isinstance(key, str) and isinstance(item, str)
+        for key, item in value.items()
+    ):
+        raise ConfigError(
+            f"{item_label}: {field_name} must be a mapping of strings to strings"
+        )
+    return value
+
+
 def reject_removed_config_sections(raw: dict) -> None:
     removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
     if not removed:
@@ -198,7 +223,8 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
     for i, entry in enumerate(raw_mcp):
         if not isinstance(entry, dict):
             raise ConfigError(f"MCP server #{i + 1}: must be a mapping")
-        name = _required_name(entry.get("name"), f"MCP server #{i + 1}")
+        item_label = f"MCP server #{i + 1}"
+        name = _required_name(entry.get("name"), item_label)
         _remember_unique_name(name, seen_names, item_label="MCP server")
         has_command = "command" in entry
         has_url = "url" in entry
@@ -210,14 +236,20 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
             raise ConfigError(
                 f"MCP server '{name}': must have either 'command' or 'url'"
             )
+        command = (
+            _required_string_field(entry, "command", item_label)
+            if has_command
+            else None
+        )
+        url = _required_string_field(entry, "url", item_label) if has_url else None
         servers.append(
             {
                 "name": name,
-                "command": entry.get("command"),
-                "args": entry.get("args", []),
-                "url": entry.get("url"),
-                "headers": entry.get("headers", {}),
-                "env": entry.get("env", {}),
+                "command": command,
+                "args": _string_list_field(entry, "args", item_label),
+                "url": url,
+                "headers": _string_mapping_field(entry, "headers", item_label),
+                "env": _string_mapping_field(entry, "env", item_label),
             }
         )
 

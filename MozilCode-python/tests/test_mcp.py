@@ -150,6 +150,23 @@ class TestLoadConfigMCP:
         assert srv.url == "https://api.example.com/mcp"
         assert srv.is_stdio is False
 
+    def test_mcp_transport_fields_are_trimmed(self, tmp_path: Path) -> None:
+        path = self._write_config(tmp_path, """\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: local
+                command: " npx "
+              - name: remote
+                url: " https://api.example.com/mcp "
+        """)
+        config = load_config(path)
+        assert config.mcp_servers[0].command == "npx"
+        assert config.mcp_servers[1].url == "https://api.example.com/mcp"
+
     def test_both_command_and_url_errors(self, tmp_path: Path) -> None:
         path = self._write_config(tmp_path, """\
             providers:
@@ -194,6 +211,72 @@ class TestLoadConfigMCP:
                 url: "https://example.com/mcp"
         """)
         with pytest.raises(ConfigError, match="duplicate name"):
+            load_config(path)
+
+    @pytest.mark.parametrize(
+        "field, value, message",
+        [
+            ("command", "[]", "command must be a string"),
+            ("command", "''", "command must not be empty"),
+            ("url", "123", "url must be a string"),
+            ("url", "''", "url must not be empty"),
+        ],
+    )
+    def test_mcp_transport_fields_are_validated(
+        self,
+        tmp_path: Path,
+        field: str,
+        value: str,
+        message: str,
+    ) -> None:
+        path = self._write_config(tmp_path, f"""\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: bad
+                {field}: {value}
+        """)
+        with pytest.raises(ConfigError, match=message):
+            load_config(path)
+
+    @pytest.mark.parametrize(
+        "body, message",
+        [
+            ("args: echo", "args must be a list of strings"),
+            ("args: ['ok', 1]", "args must be a list of strings"),
+            ("headers: []", "headers must be a mapping of strings to strings"),
+            (
+                "headers:\n                  X-Test: 1",
+                "headers must be a mapping of strings to strings",
+            ),
+            ("env: []", "env must be a mapping of strings to strings"),
+            (
+                "env:\n                  TOKEN: 1",
+                "env must be a mapping of strings to strings",
+            ),
+        ],
+    )
+    def test_mcp_collection_fields_are_validated(
+        self,
+        tmp_path: Path,
+        body: str,
+        message: str,
+    ) -> None:
+        path = self._write_config(tmp_path, f"""\
+            providers:
+              - name: test
+                protocol: openai
+                base_url: http://localhost
+                model: gpt-4o
+            mcp_servers:
+              - name: bad
+                command: npx
+                {body}
+        """)
+        with pytest.raises(ConfigError, match=message):
             load_config(path)
 
 # ===========================================================================
