@@ -239,6 +239,73 @@ async def test_a2a_json_rpc_rejects_non_object_configuration():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("configuration", "message"),
+    [
+        (
+            {"returnImmediately": "false"},
+            "configuration.returnImmediately must be a boolean",
+        ),
+        (
+            {"blocking": "true"},
+            "configuration.blocking must be a boolean",
+        ),
+        (
+            {"waitUntilCompleted": 1},
+            "configuration.waitUntilCompleted must be a boolean",
+        ),
+    ],
+)
+async def test_a2a_json_rpc_rejects_non_boolean_wait_flags(
+    configuration,
+    message,
+):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "message/send",
+        "params": {
+            "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            "configuration": configuration,
+        },
+    })
+
+    assert response["id"] == 10
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == message
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", ["fast", True, 0, -1])
+async def test_a2a_json_rpc_rejects_invalid_wait_timeout(timeout):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "message/send",
+        "params": {
+            "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            "configuration": {
+                "returnImmediately": False,
+                "timeout": timeout,
+            },
+        },
+    })
+
+    assert response["id"] == 11
+    assert response["error"]["code"] == -32602
+    assert (
+        response["error"]["message"]
+        == "configuration.timeout must be a positive number"
+    )
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("method", "params", "message"),
     [
         ("message/send", [], "message/send params must be an object"),

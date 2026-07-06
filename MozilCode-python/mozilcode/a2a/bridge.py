@@ -243,9 +243,14 @@ class A2ABridge:
 
     async def send_message(self, params: dict[str, Any]) -> dict[str, Any]:
         config = _configuration_from_params(params)
+        should_wait = _should_wait(config)
+        timeout = (
+            _float_from_config(config, "timeout", self._default_wait_timeout)
+            if should_wait
+            else None
+        )
         task = await self.start_task_from_message(params, source="a2a")
-        if _should_wait(config):
-            timeout = _float_from_config(config, "timeout", self._default_wait_timeout)
+        if should_wait:
             await self.wait_for_task(task.id, timeout=timeout)
         else:
             self._refresh_task_from_log(task)
@@ -506,19 +511,31 @@ def _configuration_from_params(params: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def _bool_from_config(config: dict[str, Any], key: str) -> bool:
+    value = config.get(key)
+    if not isinstance(value, bool):
+        raise A2AError(f"configuration.{key} must be a boolean", -32602)
+    return value
+
+
 def _should_wait(config: dict[str, Any]) -> bool:
     if "returnImmediately" in config:
-        return not bool(config.get("returnImmediately"))
+        return not _bool_from_config(config, "returnImmediately")
     if "blocking" in config:
-        return bool(config.get("blocking"))
+        return _bool_from_config(config, "blocking")
     if "waitUntilCompleted" in config:
-        return bool(config.get("waitUntilCompleted"))
+        return _bool_from_config(config, "waitUntilCompleted")
     return False
 
 
 def _float_from_config(config: dict[str, Any], key: str, default: float) -> float:
-    value = config.get(key, default)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
+    if key not in config:
         return default
+    value = config[key]
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or value <= 0
+    ):
+        raise A2AError(f"configuration.{key} must be a positive number", -32602)
+    return float(value)
