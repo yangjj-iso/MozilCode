@@ -96,6 +96,12 @@ class DaemonServer:
             self._persisted_count.get(sid, 0),
         )
 
+    def _set_session_title_from_prompt(self, sid: str, prompt: str) -> None:
+        meta = self._session_meta.get(sid)
+        if meta is not None and not meta.get("title"):
+            meta["title"] = prompt[:40]
+            self._persist_meta(sid)
+
     async def init_session(
         self, session_id: str | None = None, work_dir: str | None = None
     ) -> str:
@@ -245,52 +251,57 @@ class DaemonServer:
         if agent is None or conv is None or log_list is None:
             raise ValueError(f"Session {sid} not found")
 
-        meta = self._session_meta.get(sid)
-        if meta is not None and not meta.get("title"):
-            meta["title"] = prompt[:40]
-            self._persist_meta(sid)
-
+        self._set_session_title_from_prompt(sid, prompt)
         task_id = uuid.uuid4().hex[:8]
-
-        async def run_agent():
-            """Drive agent.run(), append serialized events to the session log."""
-            try:
-                conv.add_user_message(prompt)
-                self._emit(sid, user_message_event(task_id, prompt))
-                async for event in agent.run(conv):
-                    task_event = serialize_task_event(event, task_id)
-                    if task_event.future is not None:
-                        session = await self.session_mgr.get_session(sid)
-                        if session:
-                            session.register_future(
-                                task_event.request_id,
-                                task_event.future,
-                            )
-                    if task_event.pending_request_id:
-                        self._pending_prompts.setdefault(sid, {})[
-                            task_event.pending_request_id
-                        ] = task_event.message
-                    self._emit(sid, task_event.message)
-
-                self._emit(sid, loop_complete_event(task_id))
-            except asyncio.CancelledError:
-                self._emit(sid, task_cancelled_event(task_id))
-                self._emit(sid, loop_complete_event(task_id))
-            except Exception as e:
-                log.exception("Agent task %s failed", task_id)
-                self._emit(sid, task_error_event(task_id, str(e)))
-            finally:
-                current = self._tasks.get(sid)
-                task = asyncio.current_task()
-                if current is task:
-                    self._tasks.pop(sid, None)
-                    self._active_task_ids.pop(sid, None)
-                self._persist_events(sid)
-
-        task = asyncio.create_task(run_agent(), name=f"agent-{sid}-{task_id}")
+        task = asyncio.create_task(
+            self._run_agent_task(sid, task_id, prompt, agent, conv),
+            name=f"agent-{sid}-{task_id}",
+        )
         self._tasks[sid] = task
         self._active_task_ids[sid] = task_id
         return task_id
+
+    async def _run_agent_task(
+        self,
+        sid: str,
+        task_id: str,
+        prompt: str,
+        agent: Agent,
+        conv: ConversationManager,
+    ) -> None:
+        """Drive agent.run(), append serialized events to the session log."""
+        try:
+            conv.add_user_message(prompt)
+            self._emit(sid, user_message_event(task_id, prompt))
+            async for event in agent.run(conv):
+                task_event = serialize_task_event(event, task_id)
+                if task_event.future is not None:
+                    session = await self.session_mgr.get_session(sid)
+                    if session:
+                        session.register_future(
+                            task_event.request_id,
+                            task_event.future,
+                        )
+                if task_event.pending_request_id:
+                    self._pending_prompts.setdefault(sid, {})[
+                        task_event.pending_request_id
+                    ] = task_event.message
+                self._emit(sid, task_event.message)
+
+            self._emit(sid, loop_complete_event(task_id))
+        except asyncio.CancelledError:
+            self._emit(sid, task_cancelled_event(task_id))
+            self._emit(sid, loop_complete_event(task_id))
+        except Exception as e:
+            log.exception("Agent task %s failed", task_id)
+            self._emit(sid, task_error_event(task_id, str(e)))
+        finally:
+            current = self._tasks.get(sid)
+            task = asyncio.current_task()
+            if current is task:
+                self._tasks.pop(sid, None)
+                self._active_task_ids.pop(sid, None)
+            self._persist_events(sid)
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
         """Switch a session's permission mode and return fresh status."""
