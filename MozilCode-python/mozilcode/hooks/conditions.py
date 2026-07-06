@@ -54,19 +54,46 @@ class ConditionParseError(Exception):
 
 
 _OPERATORS = ("==", "!=", "=~", "~=")
+_ARG_FIELD_RE = re.compile(r"^args\.[A-Za-z_][A-Za-z0-9_.-]*$")
+
+
+def _validate_field(field: str, expr: str) -> None:
+    if not field:
+        raise ConditionParseError(f"Missing field in condition: '{expr}'")
+    if field in {"tool", "event"}:
+        return
+    if _ARG_FIELD_RE.fullmatch(field):
+        return
+    raise ConditionParseError(
+        f"Invalid field '{field}' in condition: '{expr}'. "
+        "Expected 'tool', 'event', or 'args.<name>'."
+    )
+
+
+def _parse_value(raw_value: str, expr: str) -> str:
+    if not raw_value:
+        raise ConditionParseError(f"Missing value in condition: '{expr}'")
+    if raw_value.startswith('"') and raw_value.endswith('"'):
+        return raw_value[1:-1]
+    return raw_value
 
 
 def _parse_single(expr: str) -> Condition:
     expr = expr.strip()
+    if not expr:
+        raise ConditionParseError("Empty condition segment")
     for op in _OPERATORS:
         idx = expr.find(op)
         if idx == -1:
             continue
         field_part = expr[:idx].strip()
         value_part = expr[idx + len(op):].strip()
-        if value_part.startswith('"') and value_part.endswith('"'):
-            value_part = value_part[1:-1]
-        return Condition(field=field_part, operator=op, value=value_part)
+        _validate_field(field_part, expr)
+        return Condition(
+            field=field_part,
+            operator=op,
+            value=_parse_value(value_part, expr),
+        )
     raise ConditionParseError(f"No valid operator found in condition: '{expr}'")
 
 

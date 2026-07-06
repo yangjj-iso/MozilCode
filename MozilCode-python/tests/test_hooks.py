@@ -158,6 +158,32 @@ class TestParseCondition:
         with pytest.raises(ConditionParseError, match="No valid operator"):
             parse_condition("tool Bash")
 
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            '== "Bash"',
+            'unknown == "Bash"',
+            'args. == "x"',
+            'args.bad key == "x"',
+        ],
+    )
+    def test_invalid_fields_are_rejected(self, expr):
+        with pytest.raises(ConditionParseError, match="field"):
+            parse_condition(expr)
+
+    def test_missing_value_is_rejected(self):
+        with pytest.raises(ConditionParseError, match="Missing value"):
+            parse_condition("tool ==")
+
+    def test_empty_segment_is_rejected(self):
+        with pytest.raises(ConditionParseError, match="Empty condition segment"):
+            parse_condition('tool == "Bash" && ')
+
+    def test_explicit_empty_string_value_is_allowed(self):
+        group = parse_condition('args.optional == ""')
+        assert group is not None
+        assert group.conditions[0].value == ""
+
 # ---------------------------------------------------------------------------
 # 条件求值
 # ---------------------------------------------------------------------------
