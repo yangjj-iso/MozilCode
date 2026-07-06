@@ -3,14 +3,15 @@ from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, MemoryConfig, MemoryProviderConfig, ProviderConfig
 from mozilcode.daemon import server as daemon_server
+from mozilcode.daemon.gui_settings import normalize_gui_settings
+from mozilcode.daemon.gui_settings import public_qqbot_status
+from mozilcode.daemon.gui_settings import public_telegrambot_status
+from mozilcode.daemon.gui_settings import qqbot_settings_from_payload
+from mozilcode.daemon.gui_settings import resolve_qqbot_config
+from mozilcode.daemon.gui_settings import resolve_telegrambot_config
+from mozilcode.daemon.gui_settings import telegrambot_settings_from_payload
 from mozilcode.daemon.server import _config_from_gui_payload
 from mozilcode.daemon.server import create_app
-from mozilcode.daemon.server import _public_qqbot_status
-from mozilcode.daemon.server import _public_telegrambot_status
-from mozilcode.daemon.server import _qqbot_settings_from_payload
-from mozilcode.daemon.server import _resolve_qqbot_config
-from mozilcode.daemon.server import _resolve_telegrambot_config
-from mozilcode.daemon.server import _telegrambot_settings_from_payload
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.permissions.modes import PermissionMode
 
@@ -42,6 +43,17 @@ class _FakeAgent:
 class _FakeDeps:
     def __init__(self, provider):
         self.provider = provider
+
+
+def test_normalize_gui_settings_returns_independent_defaults():
+    first = normalize_gui_settings({})
+    first["mcp_servers"].append({"name": "local"})
+    first["qqbot"]["enabled"] = True
+
+    second = normalize_gui_settings({})
+
+    assert second["mcp_servers"] == []
+    assert second["qqbot"] == {}
 
 
 def test_gui_config_normalizes_local_openai_base_url_to_v1():
@@ -175,7 +187,7 @@ def test_qqbot_public_status_uses_env_fallback_and_masks_secret(monkeypatch):
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
     monkeypatch.setenv("MOZILCODE_QQ_COMMAND_PREFIX", "/mew")
 
-    status = _public_qqbot_status(settings={"qqbot": {}})
+    status = public_qqbot_status(settings={"qqbot": {}})
 
     assert status["enabled"] is True
     assert status["configured"] is True
@@ -189,14 +201,14 @@ def test_qqbot_saved_disabled_overrides_env_enabled(monkeypatch):
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_ID", "1234567890")
     monkeypatch.setenv("MOZILCODE_QQ_OFFICIAL_APP_SECRET", "secret-value")
 
-    enabled, cfg, _settings = _resolve_qqbot_config({"qqbot": {"enabled": False}})
+    enabled, cfg, _settings = resolve_qqbot_config({"qqbot": {"enabled": False}})
 
     assert enabled is False
     assert cfg.is_configured() is True
 
 
 def test_qqbot_payload_preserves_existing_secret_when_blank():
-    settings = _qqbot_settings_from_payload(
+    settings = qqbot_settings_from_payload(
         {
             "enabled": True,
             "app_id": "1234567890",
@@ -218,7 +230,7 @@ def test_telegrambot_public_status_uses_env_fallback_and_masks_token(monkeypatch
     monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("MOZILCODE_TELEGRAM_COMMAND_PREFIX", "/mew")
 
-    status = _public_telegrambot_status(settings={"telegrambot": {}})
+    status = public_telegrambot_status(settings={"telegrambot": {}})
 
     assert status["enabled"] is True
     assert status["configured"] is True
@@ -230,14 +242,14 @@ def test_telegrambot_saved_disabled_overrides_env_enabled(monkeypatch):
     monkeypatch.setenv("MOZILCODE_TELEGRAM_ENABLED", "true")
     monkeypatch.setenv("MOZILCODE_TELEGRAM_BOT_TOKEN", "test-token")
 
-    enabled, cfg, _settings = _resolve_telegrambot_config({"telegrambot": {"enabled": False}})
+    enabled, cfg, _settings = resolve_telegrambot_config({"telegrambot": {"enabled": False}})
 
     assert enabled is False
     assert cfg.is_configured() is True
 
 
 def test_telegrambot_payload_preserves_existing_token_when_blank():
-    settings = _telegrambot_settings_from_payload(
+    settings = telegrambot_settings_from_payload(
         {
             "enabled": True,
             "bot_token": "",

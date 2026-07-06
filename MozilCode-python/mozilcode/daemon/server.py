@@ -62,9 +62,20 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
+from mozilcode.daemon.gui_settings import (
+    coerce_bool as _coerce_bool,
+    load_gui_settings as _load_gui_settings,
+    public_qqbot_status as _public_qqbot_status,
+    public_telegrambot_status as _public_telegrambot_status,
+    qqbot_settings_from_payload as _qqbot_settings_from_payload,
+    resolve_qqbot_config as _resolve_qqbot_config,
+    resolve_telegrambot_config as _resolve_telegrambot_config,
+    save_gui_settings as _save_gui_settings,
+    telegrambot_settings_from_payload as _telegrambot_settings_from_payload,
+)
 from mozilcode.a2a.bridge import A2ABridge, A2AError
-from mozilcode.a2a.qq_official import DEFAULT_INTENTS, OfficialQQConfig, create_official_qq_gateway
-from mozilcode.a2a.telegram_official import TelegramBotConfig, create_telegram_bot_runner
+from mozilcode.a2a.qq_official import create_official_qq_gateway
+from mozilcode.a2a.telegram_official import create_telegram_bot_runner
 
 log = logging.getLogger(__name__)
 
@@ -73,217 +84,12 @@ log = logging.getLogger(__name__)
 # (append-only serialized events used to replay the conversation on connect).
 _SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
 
-# GUI-managed settings (MCP servers added via the UI, disabled skills, ...).
-_GUI_SETTINGS_FILE = Path.home() / ".mozilcode" / "gui_settings.json"
-
 # First-run model configuration written by the GUI.
 _USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
-
-_QQBOT_PROVIDER = "official"
-_TELEGRAMBOT_PROVIDER = "telegram-official"
 
 
 def _session_dir(sid: str) -> Path:
     return _SESSIONS_DIR / sid
-
-
-def _load_gui_settings() -> dict:
-    try:
-        d = json.loads(_GUI_SETTINGS_FILE.read_text(encoding="utf-8"))
-        if isinstance(d, dict):
-            d.setdefault("mcp_servers", [])
-            d.setdefault("disabled_skills", [])
-            d.setdefault("qqbot", {})
-            d.setdefault("telegrambot", {})
-            return d
-    except Exception:
-        pass
-    return {"mcp_servers": [], "disabled_skills": [], "qqbot": {}, "telegrambot": {}}
-
-
-def _save_gui_settings(data: dict) -> None:
-    try:
-        _GUI_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _GUI_SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        log.warning("Failed to save gui settings: %s", e)
-
-
-def _coerce_bool(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return default
-
-
-def _coerce_int(value: Any, default: int, *, minimum: int | None = None) -> int:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        number = default
-    if minimum is not None:
-        number = max(minimum, number)
-    return number
-
-
-def _split_id_list(value: Any) -> set[str] | None:
-    if value is None:
-        return None
-    if isinstance(value, (list, tuple, set)):
-        items = [str(item).strip() for item in value]
-    else:
-        raw = str(value)
-        for sep in [",", ";", "，", "；", "\r", "\n", "\t"]:
-            raw = raw.replace(sep, " ")
-        items = [item.strip() for item in raw.split(" ")]
-    clean = {item for item in items if item}
-    return clean or None
-
-
-def _id_list_text(value: Any) -> str:
-    ids = _split_id_list(value)
-    if not ids:
-        return ""
-    return "\n".join(sorted(ids))
-
-
-def _normalize_qqbot_settings(raw: dict | None) -> dict:
-    raw = raw if isinstance(raw, dict) else {}
-    return {
-        "provider": _QQBOT_PROVIDER,
-        "enabled": _coerce_bool(raw.get("enabled"), False),
-        "app_id": str(raw.get("app_id") or "").strip(),
-        "app_secret": str(raw.get("app_secret") or "").strip(),
-        "command_prefix": str(raw.get("command_prefix") or "/mew").strip(),
-        "allowed_users": _id_list_text(raw.get("allowed_users")),
-        "allowed_groups": _id_list_text(raw.get("allowed_groups")),
-        "intents": _coerce_int(raw.get("intents"), DEFAULT_INTENTS, minimum=0),
-    }
-
-
-def _qqbot_settings_from_payload(body: dict, current: dict | None = None) -> dict:
-    current = current if isinstance(current, dict) else {}
-    merged = {**current, **(body or {})}
-    secret = body.get("app_secret") if isinstance(body, dict) else None
-    if secret is None or not str(secret).strip():
-        merged["app_secret"] = str(current.get("app_secret") or "").strip()
-    return _normalize_qqbot_settings(merged)
-
-
-def _resolve_qqbot_config(settings: dict | None = None) -> tuple[bool, OfficialQQConfig, dict]:
-    data = settings if isinstance(settings, dict) else _load_gui_settings()
-    raw = data.get("qqbot") if isinstance(data, dict) else {}
-    raw = raw if isinstance(raw, dict) else {}
-    saved = bool(raw)
-    normalized = _normalize_qqbot_settings(raw)
-    env_cfg = OfficialQQConfig.from_env()
-    enabled = _coerce_bool(raw.get("enabled"), False) if saved else OfficialQQConfig.enabled_from_env()
-
-    cfg = OfficialQQConfig.from_env()
-    cfg.app_id = normalized["app_id"] or env_cfg.app_id
-    cfg.app_secret = normalized["app_secret"] or env_cfg.app_secret
-    if saved and "command_prefix" in raw:
-        cfg.command_prefix = normalized["command_prefix"]
-    if saved and "allowed_users" in raw:
-        cfg.allowed_users = _split_id_list(normalized["allowed_users"])
-    if saved and "allowed_groups" in raw:
-        cfg.allowed_groups = _split_id_list(normalized["allowed_groups"])
-    if saved and "intents" in raw:
-        cfg.intents = normalized["intents"]
-    return enabled, cfg, normalized
-
-
-def _public_qqbot_status(app: Starlette | None = None, settings: dict | None = None) -> dict:
-    enabled, cfg, _normalized = _resolve_qqbot_config(settings)
-    gateway = getattr(app.state, "qq_official_gateway", None) if app is not None else None
-    status = gateway.status() if gateway is not None else {}
-    return {
-        "provider": _QQBOT_PROVIDER,
-        "enabled": enabled,
-        "configured": cfg.is_configured(),
-        "running": False,
-        "session_ready": False,
-        "bot_username": "",
-        "last_sequence": None,
-        "last_error": "",
-        "app_id": cfg.app_id,
-        "app_secret_set": bool(cfg.app_secret),
-        "command_prefix": cfg.command_prefix,
-        "allowed_users": _id_list_text(cfg.allowed_users),
-        "allowed_groups": _id_list_text(cfg.allowed_groups),
-        "intents": cfg.intents,
-        "shard": [cfg.shard_id, cfg.shard_count],
-        "config_path": str(_GUI_SETTINGS_FILE),
-        **status,
-    }
-
-
-def _normalize_telegrambot_settings(raw: dict | None) -> dict:
-    raw = raw if isinstance(raw, dict) else {}
-    return {
-        "provider": _TELEGRAMBOT_PROVIDER,
-        "enabled": _coerce_bool(raw.get("enabled"), False),
-        "bot_token": str(raw.get("bot_token") or "").strip(),
-        "command_prefix": str(raw.get("command_prefix") or "/mew").strip(),
-        "allowed_users": _id_list_text(raw.get("allowed_users")),
-        "allowed_chats": _id_list_text(raw.get("allowed_chats")),
-    }
-
-
-def _telegrambot_settings_from_payload(body: dict, current: dict | None = None) -> dict:
-    current = current if isinstance(current, dict) else {}
-    merged = {**current, **(body or {})}
-    token = body.get("bot_token") if isinstance(body, dict) else None
-    if token is None or not str(token).strip():
-        merged["bot_token"] = str(current.get("bot_token") or "").strip()
-    return _normalize_telegrambot_settings(merged)
-
-
-def _resolve_telegrambot_config(settings: dict | None = None) -> tuple[bool, TelegramBotConfig, dict]:
-    data = settings if isinstance(settings, dict) else _load_gui_settings()
-    raw = data.get("telegrambot") if isinstance(data, dict) else {}
-    raw = raw if isinstance(raw, dict) else {}
-    saved = bool(raw)
-    normalized = _normalize_telegrambot_settings(raw)
-    env_cfg = TelegramBotConfig.from_env()
-    enabled = _coerce_bool(raw.get("enabled"), False) if saved else TelegramBotConfig.enabled_from_env()
-
-    cfg = TelegramBotConfig.from_env()
-    cfg.bot_token = normalized["bot_token"] or env_cfg.bot_token
-    if saved and "command_prefix" in raw:
-        cfg.command_prefix = normalized["command_prefix"]
-    if saved and "allowed_users" in raw:
-        cfg.allowed_users = _split_id_list(normalized["allowed_users"])
-    if saved and "allowed_chats" in raw:
-        cfg.allowed_chats = _split_id_list(normalized["allowed_chats"])
-    return enabled, cfg, normalized
-
-
-def _public_telegrambot_status(app: Starlette | None = None, settings: dict | None = None) -> dict:
-    enabled, cfg, _normalized = _resolve_telegrambot_config(settings)
-    gateway = getattr(app.state, "telegram_bot_runner", None) if app is not None else None
-    status = gateway.status() if gateway is not None else {}
-    return {
-        "provider": _TELEGRAMBOT_PROVIDER,
-        "enabled": enabled,
-        "configured": cfg.is_configured(),
-        "running": False,
-        "session_ready": False,
-        "bot_username": "",
-        "last_update_id": None,
-        "last_error": "",
-        "bot_token_set": bool(cfg.bot_token),
-        "command_prefix": cfg.command_prefix,
-        "allowed_users": _id_list_text(cfg.allowed_users),
-        "allowed_chats": _id_list_text(cfg.allowed_chats),
-        "config_path": str(_GUI_SETTINGS_FILE),
-        **status,
-    }
 
 
 def _default_base_url(protocol: str) -> str:
