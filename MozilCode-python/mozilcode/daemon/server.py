@@ -62,13 +62,7 @@ from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.gui_settings import (
     load_gui_settings as _load_gui_settings,
-    public_qqbot_status as _public_qqbot_status,
-    public_telegrambot_status as _public_telegrambot_status,
-    qqbot_settings_from_payload as _qqbot_settings_from_payload,
-    resolve_qqbot_config as _resolve_qqbot_config,
-    resolve_telegrambot_config as _resolve_telegrambot_config,
     save_gui_settings as _save_gui_settings,
-    telegrambot_settings_from_payload as _telegrambot_settings_from_payload,
 )
 from mozilcode.daemon.config_settings import (
     USER_CONFIG_FILE as _USER_CONFIG_FILE,
@@ -89,9 +83,16 @@ from mozilcode.daemon.extension_settings import (
     toggle_skill as _toggle_skill,
     upsert_mcp_server as _upsert_mcp_server,
 )
+from mozilcode.daemon.bot_runtime import (
+    init_bot_state as _init_bot_state,
+    qqbot_status as _qqbot_status,
+    save_qqbot_settings as _save_qqbot_settings,
+    save_telegrambot_settings as _save_telegrambot_settings,
+    start_configured_bots as _start_configured_bots,
+    stop_configured_bots as _stop_configured_bots,
+    telegrambot_status as _telegrambot_status,
+)
 from mozilcode.a2a.bridge import A2ABridge, A2AError
-from mozilcode.a2a.qq_official import create_official_qq_gateway
-from mozilcode.a2a.telegram_official import create_telegram_bot_runner
 
 log = logging.getLogger(__name__)
 
@@ -1254,97 +1255,37 @@ async def a2a_task_cancel(request: Request) -> JSONResponse:
 
 
 async def qq_official_status(request: Request) -> JSONResponse:
-    return JSONResponse(_public_qqbot_status(request.app))
-
-
-async def _apply_qq_official_gateway(app: Starlette, bridge: A2ABridge, *, restart: bool = False) -> None:
-    gateway = getattr(app.state, "qq_official_gateway", None)
-    enabled, cfg, _settings = _resolve_qqbot_config()
-
-    if gateway is not None and (restart or not enabled or not cfg.is_configured()):
-        await gateway.stop()
-        app.state.qq_official_gateway = None
-        gateway = None
-
-    if not enabled:
-        return
-    if not cfg.is_configured():
-        log.warning("Official QQ Gateway requested but AppID/AppSecret are not configured")
-        return
-    if gateway is not None:
-        return
-
-    gateway = create_official_qq_gateway(bridge, cfg)
-    app.state.qq_official_gateway = gateway
-    await gateway.start()
-    log.info("Official QQ Gateway adapter enabled")
+    return JSONResponse(_qqbot_status(request.app))
 
 
 async def qqbot_settings_get(request: Request) -> JSONResponse:
-    return JSONResponse(_public_qqbot_status(request.app))
+    return JSONResponse(_qqbot_status(request.app))
 
 
 async def qqbot_settings_save(request: Request) -> JSONResponse:
-    body = await request.json()
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "JSON object is required"}, status_code=400)
-
-    data = _load_gui_settings()
-    data["qqbot"] = _qqbot_settings_from_payload(body, data.get("qqbot"))
-    enabled, cfg, _settings = _resolve_qqbot_config(data)
-    if enabled and not cfg.is_configured():
-        return JSONResponse({"error": "启用 QQ Bot 需要 AppID 和 AppSecret"}, status_code=400)
-
-    _save_gui_settings(data)
-    await _apply_qq_official_gateway(request.app, request.app.state.a2a_bridge, restart=True)
-    return JSONResponse({"ok": True, **_public_qqbot_status(request.app)})
+    try:
+        body = await request.json()
+        status = await _save_qqbot_settings(request.app, request.app.state.a2a_bridge, body)
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse(status)
 
 
 async def telegrambot_status(request: Request) -> JSONResponse:
-    return JSONResponse(_public_telegrambot_status(request.app))
-
-
-async def _apply_telegram_bot_runner(app: Starlette, bridge: A2ABridge, *, restart: bool = False) -> None:
-    runner = getattr(app.state, "telegram_bot_runner", None)
-    enabled, cfg, _settings = _resolve_telegrambot_config()
-
-    if runner is not None and (restart or not enabled or not cfg.is_configured()):
-        await runner.stop()
-        app.state.telegram_bot_runner = None
-        runner = None
-
-    if not enabled:
-        return
-    if not cfg.is_configured():
-        log.warning("Telegram Bot requested but Bot token is not configured")
-        return
-    if runner is not None:
-        return
-
-    runner = create_telegram_bot_runner(bridge, cfg)
-    app.state.telegram_bot_runner = runner
-    await runner.start()
-    log.info("Telegram Bot adapter enabled")
+    return JSONResponse(_telegrambot_status(request.app))
 
 
 async def telegrambot_settings_get(request: Request) -> JSONResponse:
-    return JSONResponse(_public_telegrambot_status(request.app))
+    return JSONResponse(_telegrambot_status(request.app))
 
 
 async def telegrambot_settings_save(request: Request) -> JSONResponse:
-    body = await request.json()
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "JSON object is required"}, status_code=400)
-
-    data = _load_gui_settings()
-    data["telegrambot"] = _telegrambot_settings_from_payload(body, data.get("telegrambot"))
-    enabled, cfg, _settings = _resolve_telegrambot_config(data)
-    if enabled and not cfg.is_configured():
-        return JSONResponse({"error": "启用 Telegram Bot 需要 Bot Token"}, status_code=400)
-
-    _save_gui_settings(data)
-    await _apply_telegram_bot_runner(request.app, request.app.state.a2a_bridge, restart=True)
-    return JSONResponse({"ok": True, **_public_telegrambot_status(request.app)})
+    try:
+        body = await request.json()
+        status = await _save_telegrambot_settings(request.app, request.app.state.a2a_bridge, body)
+    except (json.JSONDecodeError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse(status)
 
 
 async def serve_gui(request: Request) -> JSONResponse:
@@ -1368,19 +1309,12 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
 
     @asynccontextmanager
     async def lifespan(app: Starlette):
-        app.state.qq_official_gateway = None
-        app.state.telegram_bot_runner = None
-        await _apply_qq_official_gateway(app, a2a_bridge)
-        await _apply_telegram_bot_runner(app, a2a_bridge)
+        _init_bot_state(app)
+        await _start_configured_bots(app, a2a_bridge)
         try:
             yield
         finally:
-            gateway = getattr(app.state, "qq_official_gateway", None)
-            if gateway is not None:
-                await gateway.stop()
-            runner = getattr(app.state, "telegram_bot_runner", None)
-            if runner is not None:
-                await runner.stop()
+            await _stop_configured_bots(app)
 
     routes = [
         Route("/", serve_gui, methods=["GET"]),
