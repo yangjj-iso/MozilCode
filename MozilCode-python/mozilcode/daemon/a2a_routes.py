@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -41,7 +39,7 @@ async def a2a_rpc(request: Request) -> JSONResponse:
     bridge: A2ABridge = a2a_bridge(request)
     try:
         payload = await request.json()
-    except json.JSONDecodeError:
+    except ValueError:
         return json_rpc_parse_error_response()
     return JSONResponse(await bridge.handle_json_rpc(payload))
 

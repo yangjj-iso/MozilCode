@@ -49,6 +49,21 @@ def test_json_object_routes_reject_malformed_json(tmp_path, path):
     assert response.json()["error"] == "Invalid JSON body"
 
 
+@pytest.mark.parametrize("path", ["/api/session", "/a2a/message:send"])
+def test_json_object_routes_reject_invalid_json_encoding(tmp_path, path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            path,
+            content=b"\xff",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid JSON body"
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -193,6 +208,24 @@ def test_a2a_json_rpc_keeps_json_rpc_parse_error_shape(tmp_path):
         response = client.post(
             "/a2a/rpc",
             content="{bad",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "jsonrpc": "2.0",
+        "id": None,
+        "error": {"code": -32700, "message": "Parse error"},
+    }
+
+
+def test_a2a_json_rpc_maps_invalid_json_encoding_to_parse_error(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/a2a/rpc",
+            content=b"\xff",
             headers={"content-type": "application/json"},
         )
 

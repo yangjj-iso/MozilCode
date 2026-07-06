@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,7 +30,7 @@ class JsonObjectBody:
 async def read_json_object(request: Request) -> JsonObjectBody:
     try:
         payload = await request.json()
-    except json.JSONDecodeError:
+    except ValueError:
         return JsonObjectBody(error="Invalid JSON body", status_code=400)
 
     if payload is None:
