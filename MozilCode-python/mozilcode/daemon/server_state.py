@@ -34,6 +34,7 @@ from mozilcode.daemon.task_events import (
     task_error_event,
     user_message_event,
 )
+from mozilcode.daemon.workspace_payloads import worktree_to_dict
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
@@ -341,6 +342,108 @@ class DaemonServer:
                 "status": self.status(sid),
             }
         )
+
+    async def list_worktrees(self, sid: str) -> DaemonActionResult:
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        if deps is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+
+        manager = deps.worktree_manager
+        session = manager.get_current_session()
+        current_name = session.worktree_name if session else None
+        return DaemonActionResult(
+            {
+                "current": current_name,
+                "worktrees": [
+                    worktree_to_dict(worktree, current_name)
+                    for worktree in manager.list_worktrees()
+                ],
+            }
+        )
+
+    async def create_worktree(
+        self,
+        sid: str,
+        name: str,
+        base_branch: str = "HEAD",
+    ) -> DaemonActionResult:
+        name = name.strip()
+        base_branch = (base_branch or "HEAD").strip()
+        if not name:
+            return DaemonActionResult({"error": "name is required"}, status_code=400)
+
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        agent = self.get_agent(sid)
+        if deps is None or agent is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+
+        try:
+            worktree = await deps.worktree_manager.create(name, base_branch)
+            session = await deps.worktree_manager.enter(name)
+            agent.work_dir = session.worktree_path
+            self.update_session_work_dir(sid, session.worktree_path)
+        except Exception as e:
+            return DaemonActionResult({"error": str(e)}, status_code=400)
+
+        return DaemonActionResult(
+            {
+                "worktree": worktree_to_dict(worktree, name),
+                "status": self.status(sid),
+            }
+        )
+
+    async def enter_worktree(self, sid: str, name: str) -> DaemonActionResult:
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        agent = self.get_agent(sid)
+        if deps is None or agent is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+
+        try:
+            session = await deps.worktree_manager.enter(name)
+            agent.work_dir = session.worktree_path
+            self.update_session_work_dir(sid, session.worktree_path)
+        except Exception as e:
+            return DaemonActionResult({"error": str(e)}, status_code=400)
+
+        return DaemonActionResult({"entered": True, "status": self.status(sid)})
+
+    async def exit_worktree(
+        self,
+        sid: str,
+        *,
+        remove: bool = False,
+        discard: bool = False,
+    ) -> DaemonActionResult:
+        if not await self.ensure_agent(sid):
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+        deps = self.get_deps(sid)
+        agent = self.get_agent(sid)
+        if deps is None or agent is None:
+            return DaemonActionResult({"error": "session not found"}, status_code=404)
+
+        manager = deps.worktree_manager
+        session = manager.get_current_session()
+        if session is None:
+            return DaemonActionResult({"error": "not in a worktree"}, status_code=400)
+
+        try:
+            await manager.exit(
+                session.worktree_name,
+                action="remove" if remove else "keep",
+                discard_changes=discard,
+            )
+            agent.work_dir = session.original_cwd
+            self.update_session_work_dir(sid, session.original_cwd)
+        except Exception as e:
+            return DaemonActionResult({"error": str(e)}, status_code=400)
+
+        return DaemonActionResult({"exited": True, "status": self.status(sid)})
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
         configured_mode = (
