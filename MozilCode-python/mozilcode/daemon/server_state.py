@@ -13,6 +13,10 @@ from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
+from mozilcode.daemon.session_status import (
+    command_acceptance_mode,
+    resolve_mode_transition,
+)
 from mozilcode.daemon.session_store import SessionStore
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
@@ -22,12 +26,6 @@ log = logging.getLogger(__name__)
 
 class DaemonServer:
     """Holds shared daemon state across HTTP and WebSocket requests."""
-
-    _COMMAND_ACCEPTANCE_MODES = {
-        PermissionMode.DEFAULT,
-        PermissionMode.ACCEPT_EDITS,
-        PermissionMode.BYPASS,
-    }
 
     def __init__(
         self,
@@ -246,20 +244,16 @@ class DaemonServer:
         if agent is None:
             raise ValueError(f"Session {sid} not found")
 
-        if mode == "do":
-            next_mode = self._pre_plan_modes.pop(sid, None) or PermissionMode.DEFAULT
+        transition = resolve_mode_transition(
+            agent.permission_mode,
+            mode,
+            self._pre_plan_modes.get(sid),
+        )
+        next_mode = transition.next_mode
+        if transition.pre_plan_mode is None:
+            self._pre_plan_modes.pop(sid, None)
         else:
-            requested_mode = PermissionMode(mode)
-            if requested_mode == PermissionMode.PLAN:
-                next_mode = PermissionMode.PLAN
-                if agent.permission_mode != PermissionMode.PLAN:
-                    self._pre_plan_modes[sid] = self._command_acceptance_mode(sid, agent)
-            elif requested_mode in self._COMMAND_ACCEPTANCE_MODES and agent.permission_mode == PermissionMode.PLAN:
-                self._pre_plan_modes[sid] = requested_mode
-                next_mode = PermissionMode.PLAN
-            else:
-                self._pre_plan_modes.pop(sid, None)
-                next_mode = requested_mode
+            self._pre_plan_modes[sid] = transition.pre_plan_mode
 
         agent.set_permission_mode(next_mode)
         status = self.status(sid)
@@ -275,22 +269,16 @@ class DaemonServer:
         return status
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
-        """Return the command acceptance state, excluding plan mode."""
-        if agent is not None:
-            if agent.permission_mode == PermissionMode.PLAN:
-                pre_plan = self._pre_plan_modes.get(sid)
-                if pre_plan in self._COMMAND_ACCEPTANCE_MODES:
-                    return pre_plan
-                return PermissionMode.DEFAULT
-            if agent.permission_mode in self._COMMAND_ACCEPTANCE_MODES:
-                return agent.permission_mode
-            return PermissionMode.DEFAULT
-
-        if self.config is not None:
-            configured_mode = PermissionMode(self.config.permission_mode)
-            if configured_mode in self._COMMAND_ACCEPTANCE_MODES:
-                return configured_mode
-        return PermissionMode.DEFAULT
+        configured_mode = (
+            PermissionMode(self.config.permission_mode)
+            if self.config is not None
+            else None
+        )
+        return command_acceptance_mode(
+            agent.permission_mode if agent is not None else None,
+            self._pre_plan_modes.get(sid),
+            configured_mode,
+        )
 
     def status(self, sid: str) -> dict:
         agent = self.get_agent(sid)
