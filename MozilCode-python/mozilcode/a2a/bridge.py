@@ -494,13 +494,11 @@ def _parse_message_request(params: dict[str, Any]) -> A2AMessageRequest:
 
 
 def _work_dir_from_metadata(metadata: dict[str, Any]) -> str | None:
-    work_dir = (
-        metadata["work_dir"]
-        if "work_dir" in metadata
-        else metadata.get("workDir")
+    work_dir = _string_from_aliases(
+        metadata,
+        ("work_dir", "workDir"),
+        field_label="metadata.work_dir",
     )
-    if work_dir is not None and not isinstance(work_dir, str):
-        raise A2AError("metadata.work_dir must be a string", -32602)
     return work_dir or None
 
 
@@ -512,36 +510,50 @@ def _task_id_from_params(params: Any) -> str:
         return task_id
     if not isinstance(params, dict):
         raise A2AError("task params must be an object", -32602)
-    task_id = params.get("id") or params.get("taskId") or params.get("task_id")
+    task_id = _string_from_aliases(
+        params,
+        ("id", "taskId", "task_id"),
+        field_label="task id",
+    )
     if not task_id:
         raise A2AError("task id is required", -32602)
-    return str(task_id)
+    return task_id
 
 
 def _context_id_from_message(
     params: dict[str, Any],
     message: dict[str, Any],
 ) -> str:
-    context_id = (
-        message.get("contextId")
-        or message.get("context_id")
-        or params.get("contextId")
-        or params.get("context_id")
+    context_id = _string_from_aliases(
+        message,
+        ("contextId", "context_id"),
+        field_label="message.contextId",
     )
-    return str(context_id) if context_id else ""
+    if context_id:
+        return context_id
+    return _string_from_aliases(
+        params,
+        ("contextId", "context_id"),
+        field_label="contextId",
+    )
 
 
 def _task_id_hint_from_message(
     params: dict[str, Any],
     message: dict[str, Any],
 ) -> str:
-    task_id = (
-        message.get("taskId")
-        or message.get("task_id")
-        or params.get("taskId")
-        or params.get("task_id")
+    task_id = _string_from_aliases(
+        message,
+        ("taskId", "task_id"),
+        field_label="message.taskId",
     )
-    return str(task_id) if task_id else ""
+    if task_id:
+        return task_id
+    return _string_from_aliases(
+        params,
+        ("taskId", "task_id"),
+        field_label="taskId",
+    )
 
 
 def _metadata_from_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -560,6 +572,24 @@ def _configuration_from_params(params: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise A2AError("configuration must be an object", -32602)
     return config
+
+
+def _string_from_aliases(
+    data: dict[str, Any],
+    aliases: tuple[str, ...],
+    *,
+    field_label: str,
+) -> str:
+    for alias in aliases:
+        if alias not in data:
+            continue
+        value = data[alias]
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise A2AError(f"{field_label} must be a string", -32602)
+        return value.strip()
+    return ""
 
 
 def _bool_from_config(config: dict[str, Any], key: str) -> bool:

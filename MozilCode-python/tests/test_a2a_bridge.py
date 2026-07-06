@@ -311,6 +311,8 @@ async def test_a2a_json_rpc_rejects_invalid_wait_timeout(timeout):
         ("message/send", [], "message/send params must be an object"),
         ("tasks/get", False, "task params must be an object"),
         ("tasks/get", "", "task id is required"),
+        ("tasks/get", {"id": []}, "task id must be a string"),
+        ("tasks/cancel", {"taskId": {}}, "task id must be a string"),
     ],
 )
 async def test_a2a_json_rpc_preserves_invalid_params_types(
@@ -346,6 +348,60 @@ async def test_a2a_json_rpc_rejects_explicit_non_object_message(message):
     assert response["id"] == 12
     assert response["error"]["code"] == -32602
     assert response["error"]["message"] == "message must be an object"
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("params", "message"),
+    [
+        (
+            {
+                "message": {
+                    "contextId": [],
+                    "parts": [{"kind": "text", "text": "hello"}],
+                },
+            },
+            "message.contextId must be a string",
+        ),
+        (
+            {
+                "message": {
+                    "taskId": {},
+                    "parts": [{"kind": "text", "text": "hello"}],
+                },
+            },
+            "message.taskId must be a string",
+        ),
+        (
+            {
+                "contextId": [],
+                "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            },
+            "contextId must be a string",
+        ),
+        (
+            {
+                "taskId": [],
+                "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            },
+            "taskId must be a string",
+        ),
+    ],
+)
+async def test_a2a_json_rpc_rejects_non_string_message_ids(params, message):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 14,
+        "method": "message/send",
+        "params": params,
+    })
+
+    assert response["id"] == 14
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == message
     assert bridge._server.sessions == []
 
 
