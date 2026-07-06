@@ -145,6 +145,17 @@ async def test_create_worktree_requires_name(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_create_worktree_blank_base_branch_defaults_to_head(tmp_path):
+    server, sid, _agent, manager = _server_with_worktrees(tmp_path)
+
+    result = await server.create_worktree(sid, "feature", "   ")
+
+    assert result.status_code == 200
+    assert manager.created_with == ("feature", "HEAD")
+    assert result.payload["worktree"]["based_on"] == "HEAD"
+
+
+@pytest.mark.asyncio
 async def test_list_worktrees_marks_current_worktree(tmp_path):
     server, sid, _agent, _manager = _server_with_worktrees(tmp_path)
     await server.create_worktree(sid, "feature", "HEAD")

@@ -448,7 +448,7 @@ class DaemonServer:
         base_branch: str = "HEAD",
     ) -> DaemonActionResult:
         name = name.strip()
-        base_branch = (base_branch or "HEAD").strip()
+        base_branch = (base_branch or "").strip() or "HEAD"
         if not name:
             return self._bad_request("name is required")
 
