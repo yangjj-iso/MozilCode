@@ -746,7 +746,7 @@ async def auto_compact(
         return None
 
     if not manual and breaker is not None and breaker.is_open():
-        return "自动压缩已熔断（连续失败 3 次），请手动处理或使用 /compact"
+        return "自动压缩已熔断（连续失败 3 次），请手动处理或调用 daemon compact API"
 
     before_tokens = current
 

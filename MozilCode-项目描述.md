@@ -30,7 +30,7 @@
 - **自研双层上下文压缩**：Layer 1 对超大工具结果按 token 预算替换为"摘要 + 落盘文件"并记录替换快照；Layer 2 在接近 context window 时自动摘要历史对话，并通过 RecoveryState 重新附加最近的文件读取内容，保证压缩后工作上下文不丢失，支持 200K 窗口下无限长对话。
 - **抽象多协议模型适配层**：将 Anthropic、OpenAI Responses、Chat Completions 三种协议的请求/响应统一为内部 StreamEvent 流与 Conversation 格式；新增模型供应商只需实现一个 stream 适配器，业务层无感知。
 - **实现 6 种权限模式 + 规则引擎**：覆盖 default / acceptEdits / plan / bypassPermissions / custom / dontAsk；支持 allow_always 自动生成规则；pre/post hooks 可在工具执行前后拦截、改写或拒绝。
-- **构建扩展体系**：23 个内置工具 + 17 个斜杠命令；Skills（含 commit/review/test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
+- **构建扩展体系**：23 个内置工具；Skills（含 commit/review/test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
 - **设计 Teams 多 Agent 协作框架**：通过 mailbox 实现 Agent 间异步消息通信，支持进程内 / tmux / iTerm2 三种后端，可派生子 Agent 后台执行并共享任务列表。
 - **工程化**：提供 headless CLI 与本地 daemon；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
 
@@ -46,7 +46,7 @@
 - **双层上下文压缩**：Layer 1 对超大工具结果按 token 预算替换为"摘要 + 落盘文件"并记录替换快照；Layer 2 在接近 context window 时自动摘要历史对话，并通过 RecoveryState 重新附加最近的文件读取内容，保证压缩后工作上下文不丢失。
 - **多协议模型适配层**：将 Anthropic、OpenAI Responses、Chat Completions 三种协议的请求/响应统一为内部 StreamEvent 流与 Conversation 格式；新增模型供应商只需实现一个 stream 适配器，业务层无感知。
 - **权限模式 + 规则引擎**：覆盖 default / acceptEdits / plan / bypassPermissions / custom / dontAsk 六种模式；支持 allow_always 自动生成规则；pre/post hooks 可在工具执行前后拦截、改写或拒绝。
-- **扩展体系**：23 个内置工具 + 17 个斜杠命令；Skills（含 commit / review / test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
+- **扩展体系**：23 个内置工具；Skills（含 commit / review / test 等）按 frontmatter 声明式加载；MCP server 工具自动包装为统一 Tool；延迟工具加载（ToolSearch）按需注入 schema，控制 system prompt 体积。
 - **Teams 多 Agent 协作**：通过 mailbox 实现 Agent 间异步消息通信，支持进程内 / tmux / iTerm2 三种后端，可派生子 Agent 后台执行并共享任务列表。
 - **工程化**：提供 headless CLI 与本地 daemon；会话以 JSONL 持久化、支持 rewind 回溯；git worktree 隔离实验性改动；约 7,700 行测试覆盖核心路径。
 
@@ -85,7 +85,7 @@
 - **双层上下文压缩**：超大 tool 结果按 token 预算落盘替换；接近窗口时自动摘要历史并恢复工作集，支持 200K 窗口无限长对话。
 - **多协议适配层**：统一 Anthropic / OpenAI Responses / Chat Completions 三协议为内部 StreamEvent 流；新供应商只需实现一个 stream 适配器。
 - **权限 + 规则引擎**：6 种权限模式 + allow_always 自动生成规则；pre/post hooks 可拦截、改写或拒绝工具执行。
-- **扩展体系**：23 工具 + 17 命令；MCP 工具自动包装为统一 Tool；延迟工具加载按需注入 schema 控制提示词体积。
+- **扩展体系**：23 工具；MCP 工具自动包装为统一 Tool；延迟工具加载按需注入 schema 控制提示词体积。
 - **Teams 多 Agent 协作**：基于 mailbox 异步消息通信，支持进程内 / tmux / iTerm2 三后端，可派生子 Agent 后台执行并共享任务列表。
 
 ---
