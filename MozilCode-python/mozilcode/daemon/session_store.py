@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ log = logging.getLogger(__name__)
 DEFAULT_SESSIONS_DIR = Path.home() / ".mozilcode" / "daemon_sessions"
 META_FILE = "meta.json"
 EVENTS_FILE = "events.jsonl"
+SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 @dataclass
@@ -20,6 +22,14 @@ class PersistedSession:
     events: list[dict | None]
 
 
+def validate_session_id(sid: str) -> str:
+    if not isinstance(sid, str) or not SESSION_ID_PATTERN.fullmatch(sid):
+        raise ValueError(
+            "session_id must be 1-64 characters of letters, digits, '_' or '-'"
+        )
+    return sid
+
+
 class SessionStore:
     """On-disk session store used to replay conversations after daemon restarts."""
 
@@ -27,7 +37,7 @@ class SessionStore:
         self.root = Path(root) if root is not None else DEFAULT_SESSIONS_DIR
 
     def session_dir(self, sid: str) -> Path:
-        return self.root / sid
+        return self.root / validate_session_id(sid)
 
     def _ensure_root(self) -> bool:
         try:
@@ -47,6 +57,7 @@ class SessionStore:
                 continue
             sid = directory.name
             try:
+                validate_session_id(sid)
                 sessions.append(self._load_session(sid, directory))
             except Exception as e:
                 log.warning("Failed to load session %s: %s", sid, e)

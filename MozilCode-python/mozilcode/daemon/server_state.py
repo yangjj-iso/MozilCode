@@ -25,7 +25,7 @@ from mozilcode.daemon.session_status import (
     command_acceptance_mode,
     resolve_mode_transition,
 )
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session_store import SessionStore, validate_session_id
 from mozilcode.daemon.task_events import (
     loop_complete_event,
     serialize_task_event,
@@ -126,7 +126,7 @@ class DaemonServer:
         """Create a new Agent session in the given workspace. Returns session_id."""
         if self.config is None:
             raise ValueError("model provider is not configured")
-        sid = session_id or uuid.uuid4().hex[:12]
+        sid = validate_session_id(session_id or uuid.uuid4().hex[:12])
         wd = work_dir or self.work_dir
         if not Path(wd).is_dir():
             raise ValueError(f"workspace not found: {wd}")
@@ -622,6 +622,7 @@ class DaemonServer:
 
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""
+        validate_session_id(sid)
         task = self._tasks.pop(sid, None)
         if task and not task.done():
             task.cancel()

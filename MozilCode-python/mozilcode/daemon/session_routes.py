@@ -204,5 +204,8 @@ async def manual_compact(request: Request) -> JSONResponse:
 async def close_session(request: Request) -> JSONResponse:
     server = daemon_server(request)
     sid = path_param(request, "sid")
-    await server.close_session(sid)
+    try:
+        await server.close_session(sid)
+    except ValueError as e:
+        return bad_request_response(str(e))
     return JSONResponse({"closed": True})

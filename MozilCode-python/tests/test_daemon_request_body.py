@@ -153,6 +153,39 @@ def test_session_routes_reject_invalid_field_types(tmp_path, path, payload, erro
     assert response.json()["error"] == error
 
 
+def test_create_session_rejects_path_traversal_session_id(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post("/api/session", json={"session_id": "../escape"})
+
+    assert response.status_code == 400
+    assert response.json()["error"].startswith("session_id must be")
+    assert not (tmp_path / "escape").exists()
+    assert app.state.server.list_session_infos() == []
+
+
+def test_create_session_accepts_safe_custom_session_id(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post("/api/session", json={"session_id": "custom-1"})
+
+    assert response.status_code == 200
+    assert response.json()["session_id"] == "custom-1"
+    assert (tmp_path / "sessions" / "custom-1" / "meta.json").exists()
+
+
+def test_close_session_rejects_invalid_session_id(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.delete("/api/session/bad.id")
+
+    assert response.status_code == 400
+    assert response.json()["error"].startswith("session_id must be")
+
+
 def test_a2a_json_rpc_keeps_json_rpc_parse_error_shape(tmp_path):
     app = _app(tmp_path)
 
