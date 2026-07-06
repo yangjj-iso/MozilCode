@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from mozilcode.tools.base import SKIP_DIRS, Tool, ToolResult
+from mozilcode.tools.paths import resolve_tool_path
 
 
 class Params(BaseModel):
@@ -19,12 +20,15 @@ class Glob(Tool):
     category = "read"
     is_concurrency_safe = True
 
+    def __init__(self, base_dir: str | Path | None = None) -> None:
+        self._base_dir = base_dir
+
 
     async def execute(self, params: Params) -> ToolResult:
         if not params.pattern:
             return ToolResult(output="Error: pattern must not be empty", is_error=True)
 
-        base = Path(params.path)
+        base = resolve_tool_path(params.path, self._base_dir)
         if not base.exists():
             return ToolResult(output=f"Error: path not found: {params.path}", is_error=True)
         if not base.is_dir():

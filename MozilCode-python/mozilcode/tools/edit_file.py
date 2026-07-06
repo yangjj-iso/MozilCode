@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from mozilcode.tools.base import Tool, ToolResult
+from mozilcode.tools.paths import resolve_tool_path
 
 if TYPE_CHECKING:
     from mozilcode.cache import FileCache
@@ -28,17 +29,24 @@ class EditFile(Tool):
     category = "write"
 
 
-    def __init__(self, file_cache: FileCache | None = None, file_history: Any = None, file_state_cache: FileStateCache | None = None) -> None:
+    def __init__(
+        self,
+        file_cache: FileCache | None = None,
+        file_history: Any = None,
+        file_state_cache: FileStateCache | None = None,
+        base_dir: str | Path | None = None,
+    ) -> None:
         self._cache = file_cache
         self.file_history = file_history
         self._state_cache = file_state_cache
+        self._base_dir = base_dir
 
 
     async def execute(self, params: Params) -> ToolResult:
-        if self.file_history is not None:
-            self.file_history.track_edit(params.file_path)
+        path = resolve_tool_path(params.file_path, self._base_dir)
 
-        path = Path(params.file_path)
+        if self.file_history is not None:
+            self.file_history.track_edit(str(path))
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
 

@@ -57,7 +57,7 @@ async def create_agent_from_config(
 
     instructions = load_instructions(work_dir)
     memory_hub = build_memory_hub(config.memory, work_dir)
-    registry = _create_base_registry(provider.protocol)
+    registry = _create_base_registry(provider.protocol, work_dir)
 
     agent = Agent(
         client=client,
@@ -93,8 +93,8 @@ def _create_permission_checker(
     )
 
 
-def _create_base_registry(protocol: str) -> ToolRegistry:
-    registry = create_default_registry()
+def _create_base_registry(protocol: str, work_dir: str) -> ToolRegistry:
+    registry = create_default_registry(base_dir=work_dir)
     registry.register(ToolSearchTool(registry, protocol=protocol))
     registry.register(AskUserTool())
     registry.register(ExitPlanModeTool())

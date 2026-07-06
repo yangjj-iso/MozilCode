@@ -25,11 +25,13 @@ from mozilcode.client import LLMClient
 from mozilcode.conversation import ConversationManager
 from mozilcode.serialization import build_anthropic_messages
 from mozilcode.tools import create_default_registry
+from mozilcode.tools import ToolRegistry
 from mozilcode.tools.base import (
     StreamEnd,
     StreamEvent,
     TextDelta,
     ToolCallComplete,
+    ToolResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,6 +82,29 @@ def _collect(events: list) -> dict[str, list]:
         elif isinstance(e, ErrorEvent):
             result["error"].append(e)
     return result
+
+
+def test_read_file_recovery_snapshot_uses_agent_work_dir(tmp_path, monkeypatch):
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+    (tmp_path / "note.txt").write_text("from work dir", encoding="utf-8")
+    agent = Agent(
+        MockLLMClient([]),
+        ToolRegistry(),
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    agent._snapshot_for_recovery(
+        ToolCallComplete("t1", "ReadFile", {"file_path": "note.txt"}),
+        ToolResult(output="1\tfrom work dir"),
+    )
+
+    files = agent.recovery_state.snapshot_files(1)
+    assert len(files) == 1
+    assert Path(files[0].path) == tmp_path / "note.txt"
+    assert files[0].content == "from work dir"
 
 # ---------------------------------------------------------------------------
 # 测试用例

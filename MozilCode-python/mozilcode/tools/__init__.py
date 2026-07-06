@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mozilcode.tools.base import Tool
@@ -132,7 +133,11 @@ class ToolRegistry:
         return schemas
 
 
-def create_default_registry(file_cache: FileCache | None = None, file_history: Any = None) -> ToolRegistry:
+def create_default_registry(
+    file_cache: FileCache | None = None,
+    file_history: Any = None,
+    base_dir: str | Path | None = None,
+) -> ToolRegistry:
     from mozilcode.tools.bash import Bash
     from mozilcode.tools.edit_file import EditFile
     from mozilcode.tools.file_state_cache import FileStateCache
@@ -144,10 +149,30 @@ def create_default_registry(file_cache: FileCache | None = None, file_history: A
     file_state_cache = FileStateCache()
 
     registry = ToolRegistry()
-    registry.register(ReadFile(file_cache=file_cache, file_state_cache=file_state_cache))
-    registry.register(WriteFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
-    registry.register(EditFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
+    registry.register(
+        ReadFile(
+            file_cache=file_cache,
+            file_state_cache=file_state_cache,
+            base_dir=base_dir,
+        )
+    )
+    registry.register(
+        WriteFile(
+            file_cache=file_cache,
+            file_history=file_history,
+            file_state_cache=file_state_cache,
+            base_dir=base_dir,
+        )
+    )
+    registry.register(
+        EditFile(
+            file_cache=file_cache,
+            file_history=file_history,
+            file_state_cache=file_state_cache,
+            base_dir=base_dir,
+        )
+    )
     registry.register(Bash())
-    registry.register(Glob())
-    registry.register(Grep())
+    registry.register(Glob(base_dir=base_dir))
+    registry.register(Grep(base_dir=base_dir))
     return registry

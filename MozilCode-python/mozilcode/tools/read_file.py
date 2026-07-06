@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from mozilcode.tools.base import Tool, ToolResult
+from mozilcode.tools.paths import resolve_tool_path
 
 if TYPE_CHECKING:
     from mozilcode.cache import FileCache
@@ -34,9 +35,15 @@ class ReadFile(Tool):
     is_concurrency_safe = True
 
 
-    def __init__(self, file_cache: FileCache | None = None, file_state_cache: FileStateCache | None = None) -> None:
+    def __init__(
+        self,
+        file_cache: FileCache | None = None,
+        file_state_cache: FileStateCache | None = None,
+        base_dir: str | Path | None = None,
+    ) -> None:
         self._cache = file_cache
         self._state_cache = file_state_cache
+        self._base_dir = base_dir
 
 
     async def execute(self, params: Params) -> ToolResult:
@@ -45,7 +52,7 @@ class ReadFile(Tool):
         if params.limit <= 0:
             return ToolResult(output="Error: limit must be positive", is_error=True)
 
-        path = Path(params.file_path)
+        path = resolve_tool_path(params.file_path, self._base_dir)
         if not path.exists():
             return ToolResult(output=f"Error: file not found: {params.file_path}", is_error=True)
         if not path.is_file():

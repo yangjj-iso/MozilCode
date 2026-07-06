@@ -47,6 +47,43 @@ async def test_create_agent_from_config_wires_core_tools_and_deps(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_created_agent_file_tools_are_rooted_at_work_dir(tmp_path, monkeypatch):
+    async def fake_resolve_context_window(_provider):
+        return None
+
+    monkeypatch.setattr(
+        agent_factory,
+        "resolve_context_window",
+        fake_resolve_context_window,
+    )
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+    (tmp_path / "README.md").write_text("project readme\n", encoding="utf-8")
+    provider = ProviderConfig(
+        name="local",
+        protocol="openai-compat",
+        base_url="http://127.0.0.1:9999/v1",
+        model="smoke-model",
+        api_key="test-key",
+    )
+
+    agent, _deps = await create_agent_from_config(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        PermissionMode.DEFAULT,
+    )
+
+    read_file = agent.registry.get("ReadFile")
+    assert read_file is not None
+    params = read_file.params_model(file_path="README.md")
+    result = await read_file.execute(params)
+
+    assert not result.is_error
+    assert result.output == "1\tproject readme"
+
+
+@pytest.mark.asyncio
 async def test_create_agent_from_config_passes_team_mode_to_team_create_tool(
     tmp_path,
     monkeypatch,

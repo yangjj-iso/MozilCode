@@ -9,6 +9,10 @@ from mozilcode.tools.grep import Grep
 from mozilcode.tools.grep import Params as GrepParams
 from mozilcode.tools.read_file import Params as ReadFileParams
 from mozilcode.tools.read_file import ReadFile
+from mozilcode.tools.write_file import Params as WriteFileParams
+from mozilcode.tools.write_file import WriteFile
+from mozilcode.tools.edit_file import Params as EditFileParams
+from mozilcode.tools.edit_file import EditFile
 
 
 @pytest.mark.asyncio
@@ -22,6 +26,52 @@ async def test_read_file_respects_offset_and_limit(tmp_path):
 
     assert not result.is_error
     assert result.output == "2\ttwo"
+
+
+@pytest.mark.asyncio
+async def test_file_tools_resolve_relative_paths_from_base_dir(tmp_path, monkeypatch):
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    other_cwd = tmp_path / "cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    read_target = work_dir / "sample.txt"
+    read_target.write_text("one\ntwo\n", encoding="utf-8")
+
+    read = await ReadFile(base_dir=work_dir).execute(
+        ReadFileParams(file_path="sample.txt")
+    )
+    assert not read.is_error
+    assert read.output == "1\tone\n2\ttwo"
+
+    write = await WriteFile(base_dir=work_dir).execute(
+        WriteFileParams(file_path="nested/out.txt", content="hello")
+    )
+    assert not write.is_error
+    assert (work_dir / "nested" / "out.txt").read_text(encoding="utf-8") == "hello"
+
+    edit = await EditFile(base_dir=work_dir).execute(
+        EditFileParams(
+            file_path="nested/out.txt",
+            old_string="hello",
+            new_string="updated",
+        )
+    )
+    assert not edit.is_error
+    assert (work_dir / "nested" / "out.txt").read_text(encoding="utf-8") == "updated"
+
+    grep = await Grep(base_dir=work_dir).execute(
+        GrepParams(pattern="updated", path="nested")
+    )
+    assert not grep.is_error
+    assert grep.output == "out.txt:1:updated"
+
+    glob = await Glob(base_dir=work_dir).execute(
+        GlobParams(pattern="**/*.txt", path="nested")
+    )
+    assert not glob.is_error
+    assert glob.output.replace("\\", "/") == "out.txt"
 
 
 @pytest.mark.parametrize(

@@ -61,6 +61,7 @@ from mozilcode.tools.base import (
     ToolCallStart,
     ToolResult,
 )
+from mozilcode.tools.paths import resolve_tool_path
 
 log = logging.getLogger(__name__)
 
@@ -1218,12 +1219,13 @@ class Agent:
         path = tc.arguments.get("file_path") if isinstance(tc.arguments, dict) else None
         if not path:
             return
+        resolved = resolve_tool_path(path, self.work_dir)
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()
         except OSError:
             return
-        self.recovery_state.record_file_read(path, content)
+        self.recovery_state.record_file_read(str(resolved), content)
 
     async def _extract_memories(
         self, conversation: ConversationManager
