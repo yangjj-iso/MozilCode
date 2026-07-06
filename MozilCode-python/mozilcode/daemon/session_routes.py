@@ -19,6 +19,7 @@ from mozilcode.daemon.responses import (
     bad_request_response,
     not_found_response,
 )
+from mozilcode.daemon.server_state import ACTIVE_TASK_RUNNING_ERROR
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 PERMISSION_RESPONSES = {"allow", "deny", "allow_always"}
@@ -154,6 +155,8 @@ async def start_task(request: Request) -> JSONResponse:
     try:
         task_id = await server.start_task(sid, prompt)
     except ValueError as e:
+        if str(e) == ACTIVE_TASK_RUNNING_ERROR:
+            return bad_request_response(str(e))
         return not_found_response(str(e))
     return JSONResponse({"task_id": task_id, "session_id": sid})
 

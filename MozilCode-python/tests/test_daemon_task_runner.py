@@ -45,6 +45,17 @@ class _PermissionAgent(_Agent):
         )
 
 
+class _BlockingAgent(_Agent):
+    def __init__(self, started: asyncio.Event) -> None:
+        self.started = started
+        self.release = asyncio.Event()
+
+    async def run(self, _conversation):
+        self.started.set()
+        await self.release.wait()
+        yield StreamText("released")
+
+
 class _Conversation:
     def __init__(self) -> None:
         self.user_messages: list[str] = []
@@ -104,6 +115,26 @@ async def test_start_task_runs_agent_and_cleans_active_task(tmp_path):
         {"type": "StreamText", "task_id": task_id, "data": {"text": "done"}},
         {"type": "LoopComplete", "task_id": task_id, "data": {}},
     ]
+
+
+@pytest.mark.asyncio
+async def test_start_task_rejects_concurrent_session_task(tmp_path):
+    started = asyncio.Event()
+    agent = _BlockingAgent(started)
+    conversation = _Conversation()
+    server, sid = await _create_server_with_agent(tmp_path, agent, conversation)
+
+    first_task_id = await server.start_task(sid, "first")
+    await started.wait()
+
+    with pytest.raises(ValueError, match="task already running"):
+        await server.start_task(sid, "second")
+
+    assert server._active_task_ids[sid] == first_task_id
+    assert conversation.user_messages == ["first"]
+
+    agent.release.set()
+    await server._tasks[sid]
 
 
 @pytest.mark.asyncio

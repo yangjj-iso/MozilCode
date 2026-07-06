@@ -22,6 +22,11 @@ def _app(tmp_path):
     )
 
 
+class _RunningTask:
+    def done(self) -> bool:
+        return False
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -189,6 +194,20 @@ def test_create_session_accepts_safe_custom_session_id(tmp_path):
     assert response.status_code == 200
     assert response.json()["session_id"] == "custom-1"
     assert (tmp_path / "sessions" / "custom-1" / "meta.json").exists()
+
+
+def test_start_task_rejects_active_session_task(tmp_path):
+    app = _app(tmp_path)
+    app.state.server._tasks["busy"] = _RunningTask()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/task",
+            json={"session_id": "busy", "prompt": "second"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "task already running"
 
 
 def test_close_session_rejects_invalid_session_id(tmp_path):

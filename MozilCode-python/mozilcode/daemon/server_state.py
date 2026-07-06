@@ -40,6 +40,8 @@ from mozilcode.permissions import PermissionMode
 
 log = logging.getLogger(__name__)
 
+ACTIVE_TASK_RUNNING_ERROR = "task already running"
+
 
 @dataclass(frozen=True)
 class DaemonSessionRuntime:
@@ -258,6 +260,13 @@ class DaemonServer:
 
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
+        current_task = self._tasks.get(sid)
+        if current_task is not None:
+            if not current_task.done():
+                raise ValueError(ACTIVE_TASK_RUNNING_ERROR)
+            self._tasks.pop(sid, None)
+            self._active_task_ids.pop(sid, None)
+
         await self.ensure_agent(sid)
         agent = self.get_agent(sid)
         conv = self.get_conversation(sid)
