@@ -235,3 +235,30 @@ async def test_a2a_json_rpc_rejects_non_object_configuration():
     assert response["error"]["code"] == -32602
     assert response["error"]["message"] == "configuration must be an object"
     assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "params", "message"),
+    [
+        ("message/send", [], "message/send params must be an object"),
+        ("tasks/get", False, "task params must be an object"),
+        ("tasks/get", "", "task id is required"),
+    ],
+)
+async def test_a2a_json_rpc_preserves_invalid_params_types(
+    method, params, message
+):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": method,
+        "params": params,
+    })
+
+    assert response["id"] == 9
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == message
+    assert bridge._server.sessions == []

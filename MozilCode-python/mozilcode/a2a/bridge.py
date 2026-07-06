@@ -208,7 +208,9 @@ class A2ABridge:
 
         req_id = payload.get("id")
         method = str(payload.get("method") or "")
-        params = payload.get("params") or {}
+        params = payload.get("params")
+        if params is None:
+            params = {}
 
         try:
             result = await self._dispatch(method, params)
@@ -446,7 +448,10 @@ def _extract_text(message: dict[str, Any]) -> str:
 
 def _task_id_from_params(params: Any) -> str:
     if isinstance(params, str):
-        return params
+        task_id = params.strip()
+        if not task_id:
+            raise A2AError("task id is required", -32602)
+        return task_id
     if not isinstance(params, dict):
         raise A2AError("task params must be an object", -32602)
     task_id = params.get("id") or params.get("taskId") or params.get("task_id")
