@@ -4,6 +4,7 @@ from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
+from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.stream_routes import parse_client_action
 
 
@@ -14,7 +15,11 @@ def _app(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    return create_app(AppConfig(providers=[provider]), str(tmp_path))
+    return create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
 
 
 def test_stream_unknown_session_reports_session_not_found(tmp_path):

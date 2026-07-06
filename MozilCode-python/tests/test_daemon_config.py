@@ -42,6 +42,14 @@ class _FakeDeps:
         self.provider = provider
 
 
+def _create_app(provider, tmp_path):
+    return create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
+
+
 def test_root_route_is_not_an_application_shell(tmp_path):
     provider = ProviderConfig(
         name="openai",
@@ -49,12 +57,31 @@ def test_root_route_is_not_an_application_shell(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         response = client.get("/")
 
     assert response.status_code == 404
+
+
+def test_create_app_uses_injected_session_store(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    store = SessionStore(tmp_path / "sessions")
+
+    app = create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=store,
+    )
+
+    assert app.state.server.session_store is store
+    assert app.state.server.list_session_infos() == []
 
 
 def test_daemon_does_not_enable_browser_cors(tmp_path):
@@ -64,7 +91,7 @@ def test_daemon_does_not_enable_browser_cors(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         response = client.get(
@@ -82,7 +109,7 @@ def test_a2a_agent_card_route_is_available(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         response = client.get("/a2a/agent-card.json")
@@ -100,7 +127,7 @@ def test_a2a_message_send_rejects_non_object_metadata(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
     session_count = len(app.state.server.list_session_infos())
 
     with TestClient(app) as client:
@@ -127,7 +154,7 @@ def test_a2a_message_send_rejects_non_object_configuration(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
     session_count = len(app.state.server.list_session_infos())
 
     with TestClient(app) as client:
@@ -170,7 +197,7 @@ def test_external_bot_settings_routes_are_removed(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         qq = client.get("/api/settings/qqbot")
@@ -191,7 +218,7 @@ def test_gui_management_routes_are_removed(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         responses = [
@@ -215,7 +242,7 @@ def test_create_session_rejects_malformed_json(tmp_path):
         base_url="http://127.0.0.1:8080/v1",
         model="gpt-local",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
         response = client.post(

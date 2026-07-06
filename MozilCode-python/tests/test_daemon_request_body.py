@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
+from mozilcode.daemon.session_store import SessionStore
 
 
 def _app(tmp_path):
@@ -14,7 +15,11 @@ def _app(tmp_path):
         base_url="http://127.0.0.1:9999/v1",
         model="smoke-model",
     )
-    return create_app(AppConfig(providers=[provider]), str(tmp_path))
+    return create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
 
 
 @pytest.mark.parametrize(

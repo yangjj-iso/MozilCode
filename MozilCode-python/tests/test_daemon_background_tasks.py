@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.responses import DaemonActionResult
+from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
 from mozilcode.permissions import PermissionMode
 
@@ -152,7 +153,11 @@ def test_background_task_route_uses_server_action_result(tmp_path, monkeypatch):
         base_url="http://127.0.0.1:9999/v1",
         model="smoke-model",
     )
-    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    app = create_app(
+        AppConfig(providers=[provider]),
+        str(tmp_path),
+        session_store=SessionStore(tmp_path / "sessions"),
+    )
 
     async def fake_cancel_background_task(sid: str, task_id: str):
         assert (sid, task_id) == ("sid-1", "task-7")
