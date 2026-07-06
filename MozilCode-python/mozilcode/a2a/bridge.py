@@ -135,6 +135,15 @@ def _apply_task_log_event(task: A2ATask, event: object) -> None:
             _set_task_state(task, TASK_COMPLETED, status_message="")
 
 
+def _task_metadata(task: A2ATask) -> dict[str, Any]:
+    return {
+        **task.metadata,
+        "source": task.source,
+        "session_id": task.session_id,
+        "internal_task_id": task.internal_task_id,
+    }
+
+
 class A2ABridge:
     """Expose the daemon Agent as a small A2A-compatible task bridge.
 
@@ -366,12 +375,7 @@ class A2ABridge:
                     "parts": [{"kind": "text", "text": task.prompt}],
                 }
             ],
-            "metadata": {
-                "source": task.source,
-                "session_id": task.session_id,
-                "internal_task_id": task.internal_task_id,
-                **task.metadata,
-            },
+            "metadata": _task_metadata(task),
         }
         if task.output:
             out["artifacts"] = [

@@ -175,6 +175,29 @@ async def test_a2a_task_ignores_malformed_event_data():
 
 
 @pytest.mark.asyncio
+async def test_a2a_task_metadata_cannot_override_internal_fields():
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    result = await bridge.send_message({
+        "message": {
+            "parts": [{"kind": "text", "text": "metadata"}],
+        },
+        "metadata": {
+            "source": "user-source",
+            "session_id": "fake-session",
+            "internal_task_id": "fake-task",
+            "ticket": "T-1",
+        },
+        "configuration": {"returnImmediately": False},
+    })
+
+    assert result["metadata"]["source"] == "a2a"
+    assert result["metadata"]["session_id"] == "session-1"
+    assert result["metadata"]["internal_task_id"] == "task-1"
+    assert result["metadata"]["ticket"] == "T-1"
+
+
+@pytest.mark.asyncio
 async def test_a2a_json_rpc_rejects_non_object_metadata():
     bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
 
