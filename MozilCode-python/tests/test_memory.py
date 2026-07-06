@@ -304,6 +304,22 @@ class TestValidateMessageChain:
     def test_empty_records(self) -> None:
         assert validate_message_chain([]) == 0
 
+    def test_malformed_tool_use_blocks_do_not_break_validation(self) -> None:
+        now = datetime.now(timezone.utc)
+        records = [
+            SessionRecord(
+                type=RecordType.ASSISTANT,
+                content=[
+                    {"type": "tool_use", "id": ["bad"], "name": "Bash", "input": {}},
+                    {"type": "tool_use", "id": "t1", "name": "", "input": {}},
+                ],
+                timestamp=now,
+            ),
+            SessionRecord(type=RecordType.ASSISTANT, content="done", timestamp=now),
+        ]
+
+        assert validate_message_chain(records) == 2
+
 class TestRecordsToMessages:
     def test_basic_roundtrip(self) -> None:
         now = datetime.now(timezone.utc)
@@ -354,6 +370,31 @@ class TestRecordsToMessages:
         messages = records_to_messages(records)
         assert len(messages) == 1
         assert messages[0].content == "hi"
+
+    def test_malformed_assistant_blocks_are_safely_ignored(self) -> None:
+        now = datetime.now(timezone.utc)
+        records = [
+            SessionRecord(
+                type=RecordType.ASSISTANT,
+                content=[
+                    {"type": "text", "text": "ok"},
+                    {"type": "text", "text": ["bad"]},
+                    {"type": "tool_use", "id": ["bad"], "name": "Bash", "input": {}},
+                    {"type": "tool_use", "id": "t1", "name": "", "input": {}},
+                    {"type": "tool_use", "id": "t2", "name": "Bash", "input": []},
+                    ["not", "a", "block"],
+                ],
+                timestamp=now,
+            ),
+        ]
+
+        messages = records_to_messages(records)
+
+        assert len(messages) == 1
+        assert messages[0].content == "ok"
+        assert len(messages[0].tool_uses) == 1
+        assert messages[0].tool_uses[0].tool_use_id == "t2"
+        assert messages[0].tool_uses[0].arguments == {}
 
 class TestSessionResume:
     def test_resume_restores_messages(self, tmp_path: Path) -> None:

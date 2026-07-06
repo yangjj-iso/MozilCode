@@ -250,6 +250,44 @@ def parse_compact_boundary(record: SessionRecord) -> tuple[str, list[Message]]:
     return summary, records_to_messages(keep_records)
 
 
+def _tool_use_from_block(block: dict[str, Any]) -> ToolUseBlock | None:
+    if block.get("type") != "tool_use":
+        return None
+    tool_id = block.get("id")
+    tool_name = block.get("name")
+    if not isinstance(tool_id, str) or not tool_id:
+        return None
+    if not isinstance(tool_name, str) or not tool_name:
+        return None
+    arguments = block.get("input", {})
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return ToolUseBlock(
+        tool_use_id=tool_id,
+        tool_name=tool_name,
+        arguments=arguments,
+    )
+
+
+def _assistant_content_from_blocks(
+    blocks: list[Any],
+) -> tuple[str, list[ToolUseBlock]]:
+    text = ""
+    tool_uses: list[ToolUseBlock] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            block_text = block.get("text", "")
+            if isinstance(block_text, str):
+                text += block_text
+            continue
+        tool_use = _tool_use_from_block(block)
+        if tool_use is not None:
+            tool_uses.append(tool_use)
+    return text, tool_uses
+
+
 # ---------------------------------------------------------------------------
 # Record ↔ Message 转换
 # ---------------------------------------------------------------------------
@@ -306,21 +344,7 @@ def records_to_messages(records: list[SessionRecord]) -> list[Message]:
             messages.append(Message(role="user", content=record.content or ""))
         elif record.type == RecordType.ASSISTANT:
             if isinstance(record.content, list):
-                text = ""
-                tool_uses: list[ToolUseBlock] = []
-                for block in record.content:
-                    if not isinstance(block, dict):
-                        continue
-                    if block.get("type") == "text":
-                        text += block.get("text", "")
-                    elif block.get("type") == "tool_use":
-                        tool_uses.append(
-                            ToolUseBlock(
-                                tool_use_id=block.get("id", ""),
-                                tool_name=block.get("name", ""),
-                                arguments=block.get("input", {}),
-                            )
-                        )
+                text, tool_uses = _assistant_content_from_blocks(record.content)
                 messages.append(
                     Message(role="assistant", content=text, tool_uses=tool_uses)
                 )
@@ -349,10 +373,11 @@ def validate_message_chain(records: list[SessionRecord]) -> int:
     for i, record in enumerate(records):
         if record.type == RecordType.ASSISTANT and isinstance(record.content, list):
             for block in record.content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    tool_id = block.get("id", "")
-                    if tool_id:
-                        pending_tool_uses.add(tool_id)
+                if not isinstance(block, dict):
+                    continue
+                tool_use = _tool_use_from_block(block)
+                if tool_use is not None:
+                    pending_tool_uses.add(tool_use.tool_use_id)
 
         if record.type == RecordType.TOOL_RESULT and record.tool_use_id:
             pending_tool_uses.discard(record.tool_use_id)
