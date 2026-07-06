@@ -58,6 +58,13 @@ class A2AMessageRequest:
     work_dir: str | None
 
 
+@dataclass(frozen=True)
+class JsonRpcRequest:
+    id: Any
+    method: str
+    params: Any
+
+
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -214,23 +221,20 @@ class A2ABridge:
         return await self._handle_json_rpc_single(payload)
 
     async def _handle_json_rpc_single(self, payload: Any) -> dict[str, Any]:
-        if not isinstance(payload, dict):
-            return self._json_error(None, -32600, "Invalid JSON-RPC request")
-
-        req_id = payload.get("id")
-        method = str(payload.get("method") or "")
-        params = payload.get("params")
-        if params is None:
-            params = {}
+        try:
+            request = _parse_json_rpc_request(payload)
+        except A2AError as e:
+            req_id = payload.get("id") if isinstance(payload, dict) else None
+            return self._json_error(req_id, e.code, e.message, e.data)
 
         try:
-            result = await self._dispatch(method, params)
+            result = await self._dispatch(request.method, request.params)
         except A2AError as e:
-            return self._json_error(req_id, e.code, e.message, e.data)
+            return self._json_error(request.id, e.code, e.message, e.data)
         except Exception as e:
-            return self._json_error(req_id, -32000, str(e))
+            return self._json_error(request.id, -32000, str(e))
 
-        return {"jsonrpc": "2.0", "id": req_id, "result": result}
+        return {"jsonrpc": "2.0", "id": request.id, "result": result}
 
     async def _dispatch(self, method: str, params: Any) -> Any:
         normalized = method.strip()
@@ -467,6 +471,26 @@ def _extract_text(message: dict[str, Any]) -> str:
         if isinstance(part.get("data"), str):
             chunks.append(part["data"])
     return "\n".join(c.strip() for c in chunks if c and c.strip()).strip()
+
+
+def _parse_json_rpc_request(payload: Any) -> JsonRpcRequest:
+    if not isinstance(payload, dict):
+        raise A2AError("Invalid JSON-RPC request", -32600)
+    if payload.get("jsonrpc") != "2.0":
+        raise A2AError("Invalid JSON-RPC request", -32600)
+
+    method = payload.get("method")
+    if not isinstance(method, str) or not method.strip():
+        raise A2AError("Invalid JSON-RPC request", -32600)
+
+    params = payload.get("params")
+    if params is None:
+        params = {}
+    return JsonRpcRequest(
+        id=payload.get("id"),
+        method=method,
+        params=params,
+    )
 
 
 def _message_from_params(params: dict[str, Any]) -> dict[str, Any]:

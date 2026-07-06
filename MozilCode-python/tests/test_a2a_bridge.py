@@ -239,6 +239,27 @@ async def test_a2a_json_rpc_rejects_non_object_configuration():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "payload",
+    [
+        {"id": "missing-version", "method": "tasks/list"},
+        {"jsonrpc": "1.0", "id": "bad-version", "method": "tasks/list"},
+        {"jsonrpc": "2.0", "id": "bad-method-type", "method": 7},
+        {"jsonrpc": "2.0", "id": "empty-method", "method": "   "},
+    ],
+)
+async def test_a2a_json_rpc_rejects_invalid_request_envelope(payload):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc(payload)
+
+    assert response["id"] == payload["id"]
+    assert response["error"]["code"] == -32600
+    assert response["error"]["message"] == "Invalid JSON-RPC request"
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("configuration", "message"),
     [
         (
