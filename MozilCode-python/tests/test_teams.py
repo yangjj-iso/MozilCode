@@ -700,6 +700,88 @@ class TestTranscript:
             result = load_transcript("no-team", "no-agent")
         assert result is None
 
+    def test_rejects_unsafe_agent_id(self, tmp_dir):
+        from mozilcode.conversation import ConversationManager
+        from mozilcode.teams.transcript import save_transcript
+
+        with patch("mozilcode.teams.models.Path.home", return_value=Path(tmp_dir)):
+            with pytest.raises(ValueError, match="agent_id must be"):
+                save_transcript("test-team", "../escape", ConversationManager())
+
+        assert not (Path(tmp_dir) / ".mozilcode" / "teams" / "escape.json").exists()
+
+    def test_load_malformed_transcript_returns_none(self, tmp_dir):
+        from mozilcode.teams.transcript import load_transcript
+
+        transcript_dir = (
+            Path(tmp_dir)
+            / ".mozilcode"
+            / "teams"
+            / "test-team"
+            / "transcripts"
+        )
+        transcript_dir.mkdir(parents=True)
+
+        with patch("mozilcode.teams.models.Path.home", return_value=Path(tmp_dir)):
+            (transcript_dir / "bad-json.json").write_text("{bad", encoding="utf-8")
+            assert load_transcript("test-team", "bad-json") is None
+
+            (transcript_dir / "bad-shape.json").write_text("{}", encoding="utf-8")
+            assert load_transcript("test-team", "bad-shape") is None
+
+    def test_load_transcript_skips_malformed_messages(self, tmp_dir):
+        from mozilcode.teams.transcript import load_transcript
+
+        transcript_dir = (
+            Path(tmp_dir)
+            / ".mozilcode"
+            / "teams"
+            / "test-team"
+            / "transcripts"
+        )
+        transcript_dir.mkdir(parents=True)
+        (transcript_dir / "agent-001.json").write_text(
+            json.dumps(
+                [
+                    {"role": "user", "content": "valid"},
+                    {"role": "system", "content": "bad role"},
+                    {"role": 123, "content": "bad"},
+                    {"role": "assistant", "content": "bad tool", "tool_uses": [[]]},
+                    {
+                        "role": "assistant",
+                        "content": "bad tool",
+                        "tool_uses": [
+                            {
+                                "tool_use_id": "t1",
+                                "tool_name": "ReadFile",
+                                "arguments": [],
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": "",
+                        "tool_results": [
+                            {
+                                "tool_use_id": "t1",
+                                "content": "bad flag",
+                                "is_error": "false",
+                            }
+                        ],
+                    },
+                    [],
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("mozilcode.teams.models.Path.home", return_value=Path(tmp_dir)):
+            restored = load_transcript("test-team", "agent-001")
+
+        assert restored is not None
+        assert len(restored.history) == 1
+        assert restored.history[0].content == "valid"
+
 # =====================================================================
 # 10. Agent build_system_prompt 集成测试
 # =====================================================================
