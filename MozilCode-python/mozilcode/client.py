@@ -15,6 +15,13 @@ from mozilcode.serialization import (
     build_chat_completion_messages,
     build_openai_input,
 )
+from mozilcode.llm_errors import (
+    AuthenticationError,
+    LLMError,
+    NetworkError,
+    RateLimitError,
+    rate_limit_error as _rate_limit_error,
+)
 from mozilcode.openai_streaming import (
     RESPONSE_REASONING_DELTA_EVENTS as _RESPONSE_REASONING_DELTA_EVENTS,
     RESPONSE_REASONING_DONE_EVENTS as _RESPONSE_REASONING_DONE_EVENTS,
@@ -104,58 +111,6 @@ def _resolve_openai_api_key(config: ProviderConfig) -> str:
     if _is_local_base_url(config.base_url):
         return "mozilcode-local"
     return ""
-
-
-class LLMError(Exception):
-    pass
-
-
-class AuthenticationError(LLMError):
-    pass
-
-
-class RateLimitError(LLMError):
-    def __init__(self, message: str, retry_after: float | None = None):
-        super().__init__(message)
-        self.retry_after = retry_after
-
-
-class NetworkError(LLMError):
-    pass
-
-
-def _response_header(error: BaseException, name: str) -> str:
-    response = getattr(error, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers is None:
-        return ""
-    try:
-        value = headers.get(name)
-    except Exception:
-        return ""
-    return str(value).strip() if value is not None else ""
-
-
-def _parse_retry_after_seconds(value: str) -> float | None:
-    if not value:
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        return None
-    if seconds < 0:
-        return None
-    return seconds
-
-
-def _rate_limit_error(error: BaseException) -> RateLimitError:
-    retry_after = _parse_retry_after_seconds(_response_header(error, "retry-after"))
-    if retry_after is None:
-        return RateLimitError("Rate limited. Please wait.")
-    return RateLimitError(
-        f"Rate limited. Retry after {retry_after:g}s.",
-        retry_after=retry_after,
-    )
 
 
 class LLMClient(ABC):

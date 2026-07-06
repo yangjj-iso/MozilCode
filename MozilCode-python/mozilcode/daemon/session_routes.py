@@ -5,7 +5,6 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import parse_json_object
 from mozilcode.daemon.request_context import daemon_server, path_param
 from mozilcode.daemon.responses import (
@@ -21,6 +20,7 @@ from mozilcode.daemon.session_payloads import (
     parse_permission_resolution_body,
     parse_start_task_body,
 )
+from mozilcode.llm_errors import LLMError
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 

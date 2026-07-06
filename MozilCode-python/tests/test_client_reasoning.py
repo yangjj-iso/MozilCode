@@ -5,15 +5,21 @@ from types import SimpleNamespace
 import pytest
 
 from mozilcode.client import (
+    LLMError,
     OpenAIClient,
     OpenAICompatClient,
-    RateLimitError,
+    RateLimitError as CLIENT_RATE_LIMIT_ERROR,
     _rate_limit_error,
     _stream_end_from_openai_chat_usage,
     _stream_end_from_openai_response_usage,
 )
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
+from mozilcode.llm_errors import (
+    LLMError as BASE_LLM_ERROR,
+    RateLimitError,
+    rate_limit_error,
+)
 from mozilcode.openai_streaming import (
     stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage,
@@ -47,6 +53,12 @@ def test_client_keeps_openai_streaming_helper_exports():
         _stream_end_from_openai_response_usage
         is stream_end_from_openai_response_usage
     )
+
+
+def test_client_keeps_llm_error_exports():
+    assert LLMError is BASE_LLM_ERROR
+    assert CLIENT_RATE_LIMIT_ERROR is RateLimitError
+    assert _rate_limit_error is rate_limit_error
 
 
 @pytest.mark.asyncio
