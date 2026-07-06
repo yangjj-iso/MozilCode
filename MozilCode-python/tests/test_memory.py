@@ -963,6 +963,35 @@ class TestMemoryProviders:
         ):
             build_memory_hub(cfg, str(tmp_path))
 
+    def test_python_provider_required_positional_only_param_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "positional_only_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class PositionalOnlyProvider(BaseMemoryProvider):\n"
+            "    def __init__(self, project_root, /):\n"
+            "        self.project_root = project_root\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="pos-only",
+                    type="python",
+                    module=module_name,
+                    class_name="PositionalOnlyProvider",
+                )
+            ]
+        )
+
+        with pytest.raises(
+            MemoryProviderLoadError,
+            match="required parameter\\(s\\) cannot be injected by name: project_root",
+        ):
+            build_memory_hub(cfg, str(tmp_path))
+
     def test_duplicate_memory_provider_names_are_rejected(self, tmp_path: Path) -> None:
         cfg = MemoryConfig(
             providers=[

@@ -156,6 +156,18 @@ def _provider_constructor_kwargs(
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     }
+    unsupported_required = [
+        param.name
+        for param in params
+        if param.kind not in supported_kinds
+        and param.default is inspect.Parameter.empty
+    ]
+    if unsupported_required:
+        raise MemoryProviderLoadError(
+            f"Unsupported memory provider constructor for {cls!r}; "
+            f"required parameter(s) cannot be injected by name: "
+            f"{', '.join(unsupported_required)}"
+        )
     accepted = {
         param.name
         for param in params
