@@ -1,5 +1,5 @@
 import pytest
-from starlette.routing import Route, WebSocketRoute
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.testclient import TestClient
 
 from mozilcode.config import (
@@ -101,6 +101,22 @@ def test_daemon_does_not_enable_browser_cors(tmp_path):
         )
 
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_app_does_not_mount_gui_or_cloud_shells(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = _create_app(provider, tmp_path)
+
+    assert app.user_middleware == []
+    assert [route for route in app.routes if isinstance(route, Mount)] == []
+    assert {route.path for route in app.routes if isinstance(route, Route)}.isdisjoint(
+        {"/", "/app", "/cloud", "/login", "/models"}
+    )
 
 
 def test_a2a_agent_card_route_is_available(tmp_path):
