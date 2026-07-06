@@ -10,7 +10,6 @@ from mozilcode.agent import Agent, PermissionResponse
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
-from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
     build_session_status,
@@ -18,6 +17,13 @@ from mozilcode.daemon.session_status import (
     resolve_mode_transition,
 )
 from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.task_events import (
+    loop_complete_event,
+    serialize_task_event,
+    task_cancelled_event,
+    task_error_event,
+    user_message_event,
+)
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
@@ -194,36 +200,29 @@ class DaemonServer:
             """Drive agent.run(), append serialized events to the session log."""
             try:
                 conv.add_user_message(prompt)
-                self._emit(sid, {"type": "UserMessage", "task_id": task_id, "data": {"content": prompt}})
+                self._emit(sid, user_message_event(task_id, prompt))
                 async for event in agent.run(conv):
-                    if hasattr(event, "future") and event.future is not None:
-                        request_id = str(id(event.future))
+                    task_event = serialize_task_event(event, task_id)
+                    if task_event.future is not None:
                         session = await self.session_mgr.get_session(sid)
                         if session:
-                            session.register_future(request_id, event.future)
+                            session.register_future(
+                                task_event.request_id,
+                                task_event.future,
+                            )
+                    if task_event.pending_request_id:
+                        self._pending_prompts.setdefault(sid, {})[
+                            task_event.pending_request_id
+                        ] = task_event.message
+                    self._emit(sid, task_event.message)
 
-                    msg = serialize_event(event, task_id=task_id)
-                    if msg.get("type") in ("PermissionRequest", "AskUserRequest"):
-                        rid = (msg.get("data") or {}).get("request_id")
-                        if rid:
-                            self._pending_prompts.setdefault(sid, {})[rid] = msg
-                    self._emit(sid, msg)
-
-                self._emit(sid, {"type": "LoopComplete", "task_id": task_id, "data": {}})
+                self._emit(sid, loop_complete_event(task_id))
             except asyncio.CancelledError:
-                self._emit(sid, {
-                    "type": "TaskCancelled",
-                    "task_id": task_id,
-                    "data": {"message": "Task cancelled"},
-                })
-                self._emit(sid, {"type": "LoopComplete", "task_id": task_id, "data": {}})
+                self._emit(sid, task_cancelled_event(task_id))
+                self._emit(sid, loop_complete_event(task_id))
             except Exception as e:
                 log.exception("Agent task %s failed", task_id)
-                self._emit(sid, {
-                    "type": "ErrorEvent",
-                    "task_id": task_id,
-                    "data": {"message": str(e)},
-                })
+                self._emit(sid, task_error_event(task_id, str(e)))
             finally:
                 current = self._tasks.get(sid)
                 task = asyncio.current_task()
