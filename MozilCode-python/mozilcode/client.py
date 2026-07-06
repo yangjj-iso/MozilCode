@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
-from urllib.parse import urlparse
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -38,6 +37,10 @@ from mozilcode.openai_streaming import (
     stream_end_from_openai_chat_usage as _stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage as _stream_end_from_openai_response_usage,
 )
+from mozilcode.provider_auth import (
+    is_local_base_url as _is_local_base_url,
+    resolve_openai_api_key as _resolve_openai_api_key,
+)
 from mozilcode.tools.base import (
     StreamEnd,
     StreamEvent,
@@ -48,23 +51,6 @@ from mozilcode.tools.base import (
     ToolCallDelta,
     ToolCallStart,
 )
-
-
-def _is_local_base_url(base_url: str) -> bool:
-    try:
-        host = urlparse(base_url).hostname or ""
-    except Exception:
-        return False
-    return host.lower() in {"127.0.0.1", "localhost", "::1"}
-
-
-def _resolve_openai_api_key(config: ProviderConfig) -> str:
-    api_key = config.resolve_api_key()
-    if api_key:
-        return api_key
-    if _is_local_base_url(config.base_url):
-        return "mozilcode-local"
-    return ""
 
 
 class LLMClient(ABC):
