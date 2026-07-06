@@ -4,30 +4,15 @@ import re
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import yaml
+
+from mozilcode.permissions.tool_fields import extract_content, extract_sandbox_path
 
 Effect = Literal["allow", "deny"]
 
 _RULE_RE = re.compile(r"^(\w+)\((.+)\)$")
-
-_CONTENT_FIELDS: dict[str, str] = {
-    "Bash": "command",
-    "ReadFile": "file_path",
-    "WriteFile": "file_path",
-    "EditFile": "file_path",
-    "Glob": "pattern",
-    "Grep": "pattern",
-}
-
-_SANDBOX_PATH_FIELDS: dict[str, tuple[str, str]] = {
-    "ReadFile": ("file_path", ""),
-    "WriteFile": ("file_path", ""),
-    "EditFile": ("file_path", ""),
-    "Glob": ("path", "."),
-    "Grep": ("path", "."),
-}
 
 
 @dataclass(frozen=True)
@@ -48,27 +33,6 @@ def parse_rule(raw: str, effect: Effect) -> Rule:
     if not m:
         raise ValueError(f"无效的规则语法: {raw}")
     return Rule(tool_name=m.group(1), pattern=m.group(2), effect=effect)
-
-
-def extract_content(tool_name: str, arguments: dict[str, Any]) -> str:
-    field = _CONTENT_FIELDS.get(tool_name)
-    if field is None:
-        return ""
-    value = arguments.get(field, "")
-    return "" if value is None else str(value)
-
-
-def extract_sandbox_path(tool_name: str, arguments: dict[str, Any]) -> str | None:
-    field_spec = _SANDBOX_PATH_FIELDS.get(tool_name)
-    if field_spec is None:
-        return None
-    field, default = field_spec
-    value = arguments.get(field, default)
-    if value is None:
-        return ""
-    if not isinstance(value, str):
-        return ""
-    return value
 
 
 def _load_rules_file(path: Path) -> list[Rule]:

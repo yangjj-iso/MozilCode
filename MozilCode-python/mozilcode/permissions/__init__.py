@@ -5,11 +5,10 @@ from mozilcode.permissions.modes import DecisionEffect, PermissionMode, mode_dec
 from mozilcode.permissions.rules import (
     Rule,
     RuleEngine,
-    extract_content,
-    extract_sandbox_path,
     parse_rule,
 )
 from mozilcode.permissions.sandbox import PathSandbox
+from mozilcode.permissions.tool_fields import extract_content, extract_sandbox_path
 
 
 __all__ = [

@@ -8,10 +8,9 @@ from mozilcode.permissions.dangerous import DangerousCommandDetector, is_safe_co
 from mozilcode.permissions.modes import DecisionEffect, PermissionMode, mode_decide
 from mozilcode.permissions.rules import (
     RuleEngine,
-    extract_content,
-    extract_sandbox_path,
 )
 from mozilcode.permissions.sandbox import PathSandbox
+from mozilcode.permissions.tool_fields import extract_content, extract_sandbox_path
 from mozilcode.tools.base import Tool
 
 _PLAN_MODE_ALLOWED_TOOLS = frozenset({"Agent", "ToolSearch", "AskUserQuestion", "ExitPlanMode"})
