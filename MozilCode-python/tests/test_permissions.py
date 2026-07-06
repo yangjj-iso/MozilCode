@@ -424,6 +424,65 @@ class TestPermissionChecker:
         d = self.checker.check(tool, {"file_path": str(self.tmpdir / "x.txt"), "content": "hi"})
         assert d.effect == "ask"
 
+    def test_plan_mode_allows_configured_plan_file(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        self.checker.mode = PermissionMode.PLAN
+        plan_file = self.tmpdir / ".mozilcode" / "plans" / "plan.md"
+        self.checker.plan_file_path = str(plan_file)
+
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(plan_file), "content": "plan"},
+        )
+
+        assert d.effect == "allow"
+
+    def test_plan_mode_does_not_allow_same_basename_outside_plan_path(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        self.checker.mode = PermissionMode.PLAN
+        plan_file = self.tmpdir / ".mozilcode" / "plans" / "plan.md"
+        self.checker.plan_file_path = str(plan_file)
+        unrelated_same_name = self.tmpdir / "notes" / "plan.md"
+
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(unrelated_same_name), "content": "not a plan"},
+        )
+
+        assert d.effect == "ask"
+
+    def test_plan_mode_allows_project_plan_directory(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        self.checker.mode = PermissionMode.PLAN
+        project_plan_file = self.tmpdir / ".mozilcode" / "plans" / "other.md"
+
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(project_plan_file), "content": "plan"},
+        )
+
+        assert d.effect == "allow"
+
+    def test_plan_mode_rejects_plan_directory_outside_project(self) -> None:
+        from mozilcode.tools.write_file import WriteFile
+
+        self.checker.mode = PermissionMode.PLAN
+        outside_plan = self.tmpdir.parent / ".mozilcode" / "plans" / "escape.md"
+
+        tool = WriteFile()
+        d = self.checker.check(
+            tool,
+            {"file_path": str(outside_plan), "content": "escape"},
+        )
+
+        assert d.effect == "ask"
+
     def test_bypass_mode_allows_all(self) -> None:
         from mozilcode.tools.bash import Bash
         self.checker.mode = PermissionMode.BYPASS

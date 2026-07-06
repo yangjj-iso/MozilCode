@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from mozilcode.permissions.dangerous import DangerousCommandDetector, is_safe_command
@@ -24,8 +24,6 @@ class Decision:
 
 
 class PermissionChecker:
-
-
     def __init__(
         self,
         detector: DangerousCommandDetector,
@@ -38,7 +36,6 @@ class PermissionChecker:
         self.rule_engine = rule_engine
         self.mode = mode
         self.plan_file_path: str = ""
-
 
     def check(self, tool: Tool, arguments: dict[str, Any]) -> Decision:
         content = extract_content(tool.name, arguments)
@@ -126,17 +123,33 @@ class PermissionChecker:
             return Decision(effect="deny", reason=f"权限模式 {self.mode.value} 拒绝")
         return None
 
-
     def _is_plan_file(self, target_path: str) -> bool:
-        if not self.plan_file_path or not target_path:
-            return ".mozilcode/plans/" in target_path
-        try:
-            abs_target = os.path.abspath(target_path)
-            abs_plan = os.path.abspath(self.plan_file_path)
-            if abs_target == abs_plan:
+        if not target_path:
+            return False
+
+        target = self._normalize_plan_candidate(target_path)
+        if target is None:
+            return False
+
+        if self.plan_file_path:
+            plan = self._normalize_plan_candidate(self.plan_file_path)
+            if plan is not None and target == plan:
                 return True
-        except Exception:
-            pass
-        if os.path.basename(target_path) == os.path.basename(self.plan_file_path):
+
+        plans_dir = (
+            self.sandbox.project_root / ".mozilcode" / "plans"
+        ).resolve(strict=False)
+        try:
+            target.relative_to(plans_dir)
             return True
-        return ".mozilcode/plans/" in target_path
+        except ValueError:
+            return False
+
+    def _normalize_plan_candidate(self, path: str) -> Path | None:
+        try:
+            candidate = Path(path).expanduser()
+            if not candidate.is_absolute():
+                candidate = self.sandbox.project_root / candidate
+            return candidate.resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            return None
