@@ -53,28 +53,14 @@ class HookEngine:
             result = await execute_action(hook.action, ctx)
             if hook.action.type == "prompt" and result.success:
                 self._prompt_messages.append(result.output)
-            self._notifications.append(
-                HookNotification(
-                    hook_id=hook.id,
-                    event=hook.event,
-                    output=result.output,
-                    success=result.success,
-                )
-            )
+            self._record_result(hook, hook.event, result)
             if not result.success:
                 log.warning(
                     "Hook '%s' action failed: %s", hook.id, result.output
                 )
         except Exception as e:
             log.warning("Hook '%s' execution error: %s", hook.id, e)
-            self._notifications.append(
-                HookNotification(
-                    hook_id=hook.id,
-                    event=hook.event,
-                    output=str(e),
-                    success=False,
-                )
-            )
+            self._record_error(hook, hook.event, e)
 
 
     async def run_pre_tool_hooks(
@@ -85,14 +71,7 @@ class HookEngine:
             hook.mark_executed()
             try:
                 result = await execute_action(hook.action, ctx)
-                self._notifications.append(
-                    HookNotification(
-                        hook_id=hook.id,
-                        event="pre_tool_use",
-                        output=result.output,
-                        success=result.success,
-                    )
-                )
+                self._record_result(hook, "pre_tool_use", result)
                 if hook.reject:
                     return ToolRejectedError(
                         tool=ctx.tool_name,
@@ -101,7 +80,33 @@ class HookEngine:
                     )
             except Exception as e:
                 log.warning("Hook '%s' execution error: %s", hook.id, e)
+                self._record_error(hook, "pre_tool_use", e)
         return None
+
+    def _record_result(
+        self,
+        hook: Hook,
+        event: str,
+        result: ActionResult,
+    ) -> None:
+        self._notifications.append(
+            HookNotification(
+                hook_id=hook.id,
+                event=event,
+                output=result.output,
+                success=result.success,
+            )
+        )
+
+    def _record_error(self, hook: Hook, event: str, error: Exception) -> None:
+        self._notifications.append(
+            HookNotification(
+                hook_id=hook.id,
+                event=event,
+                output=str(error),
+                success=False,
+            )
+        )
 
     def get_prompt_messages(self) -> list[str]:
         messages = list(self._prompt_messages)

@@ -468,6 +468,27 @@ class TestHookEngine:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_run_pre_tool_hook_exception_records_notification(self):
+        h = self._make_hook(
+            id="broken",
+            event="pre_tool_use",
+            action=Action(type="command", command="echo ok"),
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="pre_tool_use", tool_name="WriteFile")
+
+        with patch("mozilcode.hooks.engine.execute_action", side_effect=RuntimeError("boom")):
+            result = await engine.run_pre_tool_hooks(ctx)
+
+        assert result is None
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "broken"
+        assert notifications[0].event == "pre_tool_use"
+        assert notifications[0].success is False
+        assert "boom" in notifications[0].output
+
+    @pytest.mark.asyncio
     async def test_prompt_message_collection(self):
         h = self._make_hook(
             id="inject",
