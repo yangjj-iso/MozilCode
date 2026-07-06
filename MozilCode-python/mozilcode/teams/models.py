@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from mozilcode.teams.fields import optional_bool_field, string_field
 from mozilcode.teams.mailbox import validate_mailbox_id
 from mozilcode.teams.progress import TeammateProgress
 
@@ -44,30 +45,26 @@ class TeammateInfo:
     def from_dict(cls, data: dict) -> TeammateInfo:
         if not isinstance(data, dict):
             raise ValueError("teammate must be an object")
-        backend_type = _string_field(data, "backend_type")
+        backend_type = _team_string_field(data, "backend_type")
         if backend_type not in {item.value for item in BackendType}:
             raise ValueError("teammate.backend_type is invalid")
-        is_active = data.get("is_active")
-        if is_active is not None and not isinstance(is_active, bool):
-            raise ValueError("teammate.is_active must be a boolean or null")
+        is_active = optional_bool_field(data, "is_active", prefix="teammate")
         return cls(
-            name=_string_field(data, "name"),
-            agent_id=validate_mailbox_id(_string_field(data, "agent_id"), "agent_id"),
-            agent_type=_string_field(data, "agent_type"),
-            model=_string_field(data, "model", required=False),
-            worktree_path=_string_field(data, "worktree_path", required=False),
+            name=_team_string_field(data, "name"),
+            agent_id=validate_mailbox_id(
+                _team_string_field(data, "agent_id"),
+                "agent_id",
+            ),
+            agent_type=_team_string_field(data, "agent_type"),
+            model=_team_string_field(data, "model", required=False),
+            worktree_path=_team_string_field(data, "worktree_path", required=False),
             backend_type=backend_type,
             is_active=is_active,
         )
 
 
-def _string_field(data: dict[str, Any], name: str, *, required: bool = True) -> str:
-    value = data.get(name, "")
-    if not isinstance(value, str):
-        raise ValueError(f"team.{name} must be a string")
-    if required and not value:
-        raise ValueError(f"team.{name} is required")
-    return value
+def _team_string_field(data: dict[str, Any], name: str, *, required: bool = True) -> str:
+    return string_field(data, name, prefix="team", required=required)
 
 
 def _sanitize_name(name: str) -> str:
@@ -140,14 +137,14 @@ class AgentTeam:
             except ValueError:
                 continue
         return cls(
-            name=_string_field(data, "name"),
+            name=_team_string_field(data, "name"),
             lead_agent_id=validate_mailbox_id(
-                _string_field(data, "lead_agent_id"),
+                _team_string_field(data, "lead_agent_id"),
                 "lead_agent_id",
             ),
             members=members,
-            config_path=_string_field(data, "config_path", required=False),
-            description=_string_field(data, "description", required=False),
+            config_path=_team_string_field(data, "config_path", required=False),
+            description=_team_string_field(data, "description", required=False),
         )
 
     def save(self) -> None:

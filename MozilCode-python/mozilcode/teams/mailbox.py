@@ -8,6 +8,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mozilcode.teams.fields import (
+    non_negative_number_field,
+    object_field,
+    string_field,
+)
+
 
 MAILBOX_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 VALID_MESSAGE_TYPES = {"text", "shutdown_request", "shutdown_response"}
@@ -21,20 +27,13 @@ def validate_mailbox_id(value: str, field_name: str = "agent_id") -> str:
     return value
 
 
-def _string_field(data: dict[str, Any], name: str, *, required: bool = True) -> str:
-    value = data.get(name, "")
-    if not isinstance(value, str):
-        raise ValueError(f"message.{name} must be a string")
-    if required and not value:
-        raise ValueError(f"message.{name} is required")
-    return value
-
-
-def _timestamp_field(data: dict[str, Any]) -> float:
-    value = data.get("timestamp", 0.0)
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
-        raise ValueError("message.timestamp must be a non-negative number")
-    return float(value)
+def _message_string_field(
+    data: dict[str, Any],
+    name: str,
+    *,
+    required: bool = True,
+) -> str:
+    return string_field(data, name, prefix="message", required=required)
 
 
 @dataclass
@@ -56,24 +55,31 @@ class MailboxMessage:
     def from_dict(cls, data: dict[str, Any]) -> MailboxMessage:
         if not isinstance(data, dict):
             raise ValueError("message must be an object")
-        message_id = validate_mailbox_id(_string_field(data, "id"), "message.id")
-        message_type = _string_field(data, "message_type", required=False) or "text"
+        message_id = validate_mailbox_id(
+            _message_string_field(data, "id"),
+            "message.id",
+        )
+        message_type = (
+            _message_string_field(data, "message_type", required=False) or "text"
+        )
         if message_type not in VALID_MESSAGE_TYPES:
             raise ValueError(
                 f"message.message_type must be one of: "
                 f"{', '.join(sorted(VALID_MESSAGE_TYPES))}"
             )
-        metadata = data.get("metadata", {})
-        if not isinstance(metadata, dict):
-            raise ValueError("message.metadata must be an object")
+        metadata = object_field(data, "metadata", prefix="message")
         return cls(
             id=message_id,
-            from_agent=_string_field(data, "from_agent"),
-            to_agent=_string_field(data, "to_agent"),
-            content=_string_field(data, "content"),
-            summary=_string_field(data, "summary", required=False),
+            from_agent=_message_string_field(data, "from_agent"),
+            to_agent=_message_string_field(data, "to_agent"),
+            content=_message_string_field(data, "content"),
+            summary=_message_string_field(data, "summary", required=False),
             message_type=message_type,
-            timestamp=_timestamp_field(data),
+            timestamp=non_negative_number_field(
+                data,
+                "timestamp",
+                prefix="message",
+            ),
             metadata=metadata,
         )
 

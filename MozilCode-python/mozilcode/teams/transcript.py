@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mozilcode.conversation import ConversationManager, Message, ToolResultBlock, ToolUseBlock
+from mozilcode.conversation import (
+    ConversationManager,
+    Message,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+from mozilcode.teams.fields import object_field, string_field
 from mozilcode.teams.mailbox import validate_mailbox_id
 
 TRANSCRIPT_ROLES = {"user", "assistant"}
@@ -36,30 +42,23 @@ def _serialize_conversation(conv: ConversationManager) -> list[dict[str, Any]]:
     return messages
 
 
-def _string_field(data: dict[str, Any], name: str, *, required: bool = True) -> str:
-    value = data.get(name, "")
-    if not isinstance(value, str):
-        raise ValueError(f"transcript.{name} must be a string")
-    if required and not value:
-        raise ValueError(f"transcript.{name} is required")
-    return value
-
-
-def _dict_field(data: dict[str, Any], name: str) -> dict[str, Any]:
-    value = data.get(name, {})
-    if not isinstance(value, dict):
-        raise ValueError(f"transcript.{name} must be an object")
-    return value
+def _transcript_string_field(
+    data: dict[str, Any],
+    name: str,
+    *,
+    required: bool = True,
+) -> str:
+    return string_field(data, name, prefix="transcript", required=required)
 
 
 def _message_from_payload(entry: object) -> Message | None:
     if not isinstance(entry, dict):
         return None
     try:
-        role = _string_field(entry, "role")
+        role = _transcript_string_field(entry, "role")
         if role not in TRANSCRIPT_ROLES:
             return None
-        content = _string_field(entry, "content", required=False)
+        content = _transcript_string_field(entry, "content", required=False)
         raw_tool_uses = entry.get("tool_uses", [])
         if not isinstance(raw_tool_uses, list):
             return None
@@ -73,9 +72,9 @@ def _message_from_payload(entry: object) -> Message | None:
                 return None
             tool_uses.append(
                 ToolUseBlock(
-                    tool_use_id=_string_field(tu, "tool_use_id"),
-                    tool_name=_string_field(tu, "tool_name"),
-                    arguments=_dict_field(tu, "arguments"),
+                    tool_use_id=_transcript_string_field(tu, "tool_use_id"),
+                    tool_name=_transcript_string_field(tu, "tool_name"),
+                    arguments=object_field(tu, "arguments", prefix="transcript"),
                 )
             )
         tool_results = []
@@ -87,8 +86,8 @@ def _message_from_payload(entry: object) -> Message | None:
                 return None
             tool_results.append(
                 ToolResultBlock(
-                    tool_use_id=_string_field(tr, "tool_use_id"),
-                    content=_string_field(tr, "content"),
+                    tool_use_id=_transcript_string_field(tr, "tool_use_id"),
+                    content=_transcript_string_field(tr, "content"),
                     is_error=is_error,
                 )
             )

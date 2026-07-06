@@ -5,30 +5,26 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mozilcode.teams.fields import string_field, string_list_field
+
 
 VALID_TASK_STATUSES = {"pending", "in_progress", "completed", "blocked"}
 
 
-def _string_field(
+def _task_string_field(
     data: dict[str, Any],
     name: str,
     *,
     default: str = "",
     required: bool = False,
 ) -> str:
-    value = data.get(name, default)
-    if not isinstance(value, str):
-        raise ValueError(f"task.{name} must be a string")
-    if required and not value:
-        raise ValueError(f"task.{name} is required")
-    return value
-
-
-def _string_list_field(data: dict[str, Any], name: str) -> list[str]:
-    value = data.get(name, [])
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError(f"task.{name} must be a list of strings")
-    return value
+    return string_field(
+        data,
+        name,
+        prefix="task",
+        default=default,
+        required=required,
+    )
 
 
 @dataclass
@@ -50,21 +46,21 @@ class SharedTask:
     def from_dict(cls, data: dict[str, Any]) -> SharedTask:
         if not isinstance(data, dict):
             raise ValueError("task must be an object")
-        status = _string_field(data, "status", default="pending")
+        status = _task_string_field(data, "status", default="pending")
         if status not in VALID_TASK_STATUSES:
             raise ValueError(
                 f"task.status must be one of: "
                 f"{', '.join(sorted(VALID_TASK_STATUSES))}"
             )
         return cls(
-            id=_string_field(data, "id", required=True),
-            title=_string_field(data, "title", required=True),
-            description=_string_field(data, "description"),
+            id=_task_string_field(data, "id", required=True),
+            title=_task_string_field(data, "title", required=True),
+            description=_task_string_field(data, "description"),
             status=status,
-            assignee=_string_field(data, "assignee"),
-            blocks=_string_list_field(data, "blocks"),
-            blocked_by=_string_list_field(data, "blocked_by"),
-            created_by=_string_field(data, "created_by"),
+            assignee=_task_string_field(data, "assignee"),
+            blocks=string_list_field(data, "blocks", prefix="task"),
+            blocked_by=string_list_field(data, "blocked_by", prefix="task"),
+            created_by=_task_string_field(data, "created_by"),
         )
 
 
