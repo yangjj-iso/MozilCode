@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from starlette.requests import Request
@@ -12,6 +11,7 @@ from mozilcode.daemon.config_settings import (
     public_memory_settings,
     write_user_config,
 )
+from mozilcode.daemon.request_body import read_json_object
 from mozilcode.daemon.extension_settings import (
     create_skill_from_payload,
     delete_mcp_server,
@@ -34,11 +34,14 @@ async def mcp_list(request: Request) -> JSONResponse:
 
 async def mcp_add(request: Request) -> JSONResponse:
     try:
-        body = await request.json()
+        parsed = await read_json_object(request)
+        if not parsed.ok:
+            return parsed.error_response()
+        body = parsed.payload
         data = load_daemon_settings()
         servers = upsert_mcp_server(data, body or {})
         save_daemon_settings(data)
-    except (json.JSONDecodeError, ValueError) as e:
+    except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     return JSONResponse({"ok": True, "servers": servers})
 
@@ -72,7 +75,13 @@ async def memory_settings_save(request: Request) -> JSONResponse:
             status_code=400,
         )
     try:
-        body = await request.json()
+        parsed = await read_json_object(request)
+        if not parsed.ok:
+            return JSONResponse(
+                public_memory_settings(server.config, parsed.error),
+                status_code=parsed.status_code,
+            )
+        body = parsed.payload
         raw = app_config_to_raw(server.config)
         raw["memory"] = memory_settings_from_payload(body or {}, server.config)
         validate_config_structure(raw)
@@ -105,9 +114,12 @@ async def skill_toggle(request: Request) -> JSONResponse:
 
 async def skill_create(request: Request) -> JSONResponse:
     try:
-        body = await request.json()
+        parsed = await read_json_object(request)
+        if not parsed.ok:
+            return parsed.error_response()
+        body = parsed.payload
         create_skill_from_payload(body or {})
-    except (json.JSONDecodeError, ValueError) as e:
+    except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

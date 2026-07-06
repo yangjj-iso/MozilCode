@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from starlette.requests import Request
@@ -13,6 +12,7 @@ from mozilcode.daemon.config_settings import (
     public_config,
     write_user_config,
 )
+from mozilcode.daemon.request_body import read_json_object
 from mozilcode.daemon.workspace_payloads import task_to_dict
 from mozilcode.validator import ConfigError
 
@@ -40,7 +40,13 @@ async def config_status(request: Request) -> JSONResponse:
 async def save_config(request: Request) -> JSONResponse:
     server = request.app.state.server
     try:
-        body = await request.json()
+        parsed = await read_json_object(request)
+        if not parsed.ok:
+            return JSONResponse(
+                public_config(server.config, parsed.error),
+                status_code=parsed.status_code,
+            )
+        body = parsed.payload
         raw = config_from_settings_payload(body or {}, server.config)
         server.config = write_user_config(raw)
         await server.invalidate_idle_agents()
@@ -54,12 +60,10 @@ async def save_config(request: Request) -> JSONResponse:
 
 async def create_session(request: Request) -> JSONResponse:
     server = request.app.state.server
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-    if body is not None and not isinstance(body, dict):
-        return JSONResponse({"error": "JSON object is required"}, status_code=400)
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     session_id = body.get("session_id") if body else None
     work_dir = body.get("work_dir") if body else None
     try:
@@ -102,7 +106,10 @@ async def session_status(request: Request) -> JSONResponse:
 async def set_session_mode(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     mode = (body.get("mode") or "").strip()
     if not mode:
         return JSONResponse({"error": "mode is required"}, status_code=400)
@@ -146,7 +153,10 @@ async def cancel_background_task(request: Request) -> JSONResponse:
 
 async def start_task(request: Request) -> JSONResponse:
     server = request.app.state.server
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     sid = body.get("session_id")
     prompt = body.get("prompt", "")
     if not sid or not prompt:
@@ -163,7 +173,10 @@ async def start_task(request: Request) -> JSONResponse:
 async def resolve_permission(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     request_id = body.get("request_id", "")
     response = body.get("response", "deny")
     ok = await server.resolve_permission(sid, request_id, response)
@@ -175,7 +188,10 @@ async def resolve_permission(request: Request) -> JSONResponse:
 async def resolve_askuser(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     request_id = body.get("request_id", "")
     answers = body.get("answers", {})
     ok = await server.resolve_askuser(sid, request_id, answers)

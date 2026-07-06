@@ -5,6 +5,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from mozilcode.daemon.request_body import read_json_object
 from mozilcode.daemon.workspace_payloads import (
     WorkspacePathError,
     list_workspace_directory,
@@ -32,7 +33,10 @@ async def list_worktrees(request: Request) -> JSONResponse:
 async def create_worktree(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     name = (body.get("name") or "").strip()
     base_branch = (body.get("base_branch") or "HEAD").strip()
     if not name:
@@ -75,7 +79,10 @@ async def enter_worktree(request: Request) -> JSONResponse:
 async def exit_worktree(request: Request) -> JSONResponse:
     server = request.app.state.server
     sid = request.path_params["sid"]
-    body = await request.json()
+    parsed = await read_json_object(request)
+    if not parsed.ok:
+        return parsed.error_response()
+    body = parsed.payload
     remove = bool(body.get("remove", False))
     discard = bool(body.get("discard", False))
     if not await server.ensure_agent(sid):

@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.a2a.bridge import A2ABridge, A2AError
+from mozilcode.daemon.request_body import read_json_object
 
 
 def public_base_url(request: Request) -> str:
@@ -32,7 +33,10 @@ async def a2a_rpc(request: Request) -> JSONResponse:
 async def a2a_message_send(request: Request) -> JSONResponse:
     bridge: A2ABridge = request.app.state.a2a_bridge
     try:
-        body = await request.json()
+        parsed = await read_json_object(request)
+        if not parsed.ok:
+            return parsed.error_response()
+        body = parsed.payload
         result = await bridge.send_message(body or {})
     except A2AError as e:
         return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
