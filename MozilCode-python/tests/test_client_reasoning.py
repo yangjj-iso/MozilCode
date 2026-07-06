@@ -7,6 +7,8 @@ import pytest
 from mozilcode.client import (
     OpenAIClient,
     OpenAICompatClient,
+    RateLimitError,
+    _rate_limit_error,
     _stream_end_from_openai_chat_usage,
     _stream_end_from_openai_response_usage,
 )
@@ -165,3 +167,33 @@ def test_openai_usage_never_reports_negative_uncached_input():
 
     assert event.input_tokens == 0
     assert event.cache_read == 300
+
+
+def test_rate_limit_error_extracts_numeric_retry_after():
+    source = RuntimeError("rate limited")
+    source.response = SimpleNamespace(headers={"retry-after": "2.5"})
+
+    error = _rate_limit_error(source)
+
+    assert isinstance(error, RateLimitError)
+    assert error.retry_after == 2.5
+    assert str(error) == "Rate limited. Retry after 2.5s."
+
+
+def test_rate_limit_error_ignores_missing_retry_after():
+    source = RuntimeError("rate limited")
+
+    error = _rate_limit_error(source)
+
+    assert error.retry_after is None
+    assert str(error) == "Rate limited. Please wait."
+
+
+def test_rate_limit_error_ignores_non_numeric_retry_after():
+    source = RuntimeError("rate limited")
+    source.response = SimpleNamespace(headers={"retry-after": "soon"})
+
+    error = _rate_limit_error(source)
+
+    assert error.retry_after is None
+    assert str(error) == "Rate limited. Please wait."

@@ -232,8 +232,6 @@ class AuthenticationError(LLMError):
 
 
 class RateLimitError(LLMError):
-
-
     def __init__(self, message: str, retry_after: float | None = None):
         super().__init__(message)
         self.retry_after = retry_after
@@ -241,6 +239,40 @@ class RateLimitError(LLMError):
 
 class NetworkError(LLMError):
     pass
+
+
+def _response_header(error: BaseException, name: str) -> str:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        value = headers.get(name)
+    except Exception:
+        return ""
+    return str(value).strip() if value is not None else ""
+
+
+def _parse_retry_after_seconds(value: str) -> float | None:
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    if seconds < 0:
+        return None
+    return seconds
+
+
+def _rate_limit_error(error: BaseException) -> RateLimitError:
+    retry_after = _parse_retry_after_seconds(_response_header(error, "retry-after"))
+    if retry_after is None:
+        return RateLimitError("Rate limited. Please wait.")
+    return RateLimitError(
+        f"Rate limited. Retry after {retry_after:g}s.",
+        retry_after=retry_after,
+    )
 
 
 class LLMClient(ABC):
@@ -415,11 +447,7 @@ class AnthropicClient(LLMClient):
         except _anthropic.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
         except _anthropic.RateLimitError as e:
-            retry = e.response.headers.get("retry-after") if e.response else None
-            raise RateLimitError(
-                f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
-            ) from e
+            raise _rate_limit_error(e) from e
         except _anthropic.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _anthropic.APIStatusError as e:
@@ -542,13 +570,7 @@ class OpenAIClient(LLMClient):
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
         except _openai.RateLimitError as e:
-            retry = None
-            if hasattr(e, "response") and e.response is not None:
-                retry = e.response.headers.get("retry-after")
-            raise RateLimitError(
-                f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
-            ) from e
+            raise _rate_limit_error(e) from e
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
@@ -699,13 +721,7 @@ class OpenAICompatClient(LLMClient):
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e
         except _openai.RateLimitError as e:
-            retry = None
-            if hasattr(e, "response") and e.response is not None:
-                retry = e.response.headers.get("retry-after")
-            raise RateLimitError(
-                f"Rate limited. {f'Retry after {retry}s.' if retry else 'Please wait.'}",
-                retry_after=float(retry) if retry else None,
-            ) from e
+            raise _rate_limit_error(e) from e
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
