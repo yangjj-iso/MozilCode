@@ -75,7 +75,7 @@ async def test_run_prompt_uses_shared_agent_factory(
         )
         return agent, deps
 
-    import mozilcode.daemon.agent_factory as agent_factory
+    import mozilcode.agent_factory as agent_factory
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(

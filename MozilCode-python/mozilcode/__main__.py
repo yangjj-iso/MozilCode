@@ -70,7 +70,7 @@ def main() -> None:
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
     from mozilcode.conversation import ConversationManager
     work_dir = os.getcwd()
-    from mozilcode.daemon.agent_factory import create_agent_from_config
+    from mozilcode.agent_factory import create_agent_from_config
 
     agent, deps = await create_agent_from_config(
         config,

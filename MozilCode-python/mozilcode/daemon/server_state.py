@@ -10,7 +10,7 @@ from mozilcode.agent import Agent, PermissionResponse
 from mozilcode.config import AppConfig
 from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
-from mozilcode.daemon.agent_factory import AgentDeps, create_agent_from_config
+from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_store import SessionStore

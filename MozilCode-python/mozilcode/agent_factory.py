@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Shared construction for headless MozilCode Agent runtimes."""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -94,7 +96,10 @@ async def create_agent_from_config(
     )
     trace_manager = TraceManager()
     task_manager = TaskManager()
-    agent_loader = AgentLoader(work_dir, enable_verification=config.enable_verification_agent)
+    agent_loader = AgentLoader(
+        work_dir,
+        enable_verification=config.enable_verification_agent,
+    )
     agent_loader.load_all()
     team_manager = TeamManager(worktree_manager=wt_manager, trace_manager=trace_manager)
 
@@ -109,13 +114,15 @@ async def create_agent_from_config(
         team_manager=team_manager,
     )
     registry.register(agent_tool)
-    registry.register(TeamCreateTool(
-        team_manager=team_manager,
-        parent_agent=agent,
-        teammate_mode="in-process",
-        is_interactive=False,
-        enable_coordinator_mode=config.enable_coordinator_mode,
-    ))
+    registry.register(
+        TeamCreateTool(
+            team_manager=team_manager,
+            parent_agent=agent,
+            teammate_mode="in-process",
+            is_interactive=False,
+            enable_coordinator_mode=config.enable_coordinator_mode,
+        )
+    )
     registry.register(TeamDeleteTool(team_manager=team_manager, parent_agent=agent))
 
     def drain_mailbox() -> list[str]:
