@@ -154,6 +154,22 @@ class TestParseCondition:
         assert c.operator == "=~"
         assert c.value == "/rm\\s+-rf/"
 
+    def test_operator_in_regex_value_does_not_override_condition_operator(self):
+        group = parse_condition('args.command =~ /foo==bar/')
+        assert group is not None
+        c = group.conditions[0]
+        assert c.field == "args.command"
+        assert c.operator == "=~"
+        assert c.value == "/foo==bar/"
+
+    def test_later_operator_like_text_stays_in_value(self):
+        group = parse_condition('tool != "Bash == nope"')
+        assert group is not None
+        c = group.conditions[0]
+        assert c.field == "tool"
+        assert c.operator == "!="
+        assert c.value == "Bash == nope"
+
     def test_no_valid_operator(self):
         with pytest.raises(ConditionParseError, match="No valid operator"):
             parse_condition("tool Bash")

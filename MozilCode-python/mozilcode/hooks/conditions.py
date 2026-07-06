@@ -82,10 +82,13 @@ def _parse_single(expr: str) -> Condition:
     expr = expr.strip()
     if not expr:
         raise ConditionParseError("Empty condition segment")
-    for op in _OPERATORS:
-        idx = expr.find(op)
-        if idx == -1:
-            continue
+    found = [
+        (idx, op)
+        for op in _OPERATORS
+        if (idx := expr.find(op)) != -1
+    ]
+    if found:
+        idx, op = min(found, key=lambda match: match[0])
         field_part = expr[:idx].strip()
         value_part = expr[idx + len(op):].strip()
         _validate_field(field_part, expr)
