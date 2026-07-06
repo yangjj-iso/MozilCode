@@ -1025,19 +1025,90 @@ class TestMemoryProviders:
                 {
                     "name": "vector",
                     "type": "python",
-                    "module": "my_memory.provider",
-                    "class_name": "VectorMemory",
+                    "module": " my_memory.provider ",
+                    "class_name": " VectorMemory ",
                     "config": {"top_k": 8},
                 }
             ],
         })
 
+        assert cleaned["providers"][0]["module"] == "my_memory.provider"
         assert cleaned["providers"][0]["class"] == "VectorMemory"
         assert cleaned["providers"][0]["config"] == {"top_k": 8}
 
     def test_validate_memory_rejects_bad_config_shape(self) -> None:
         with pytest.raises(ConfigError):
             validate_memory({"providers": [{"name": "bad", "type": "python", "config": []}]})
+
+    @pytest.mark.parametrize(
+        "provider, message",
+        [
+            (
+                {"name": "bad", "type": 123},
+                "type must be a string",
+            ),
+            (
+                {
+                    "name": "bad",
+                    "type": "python",
+                    "module": ["my_memory.provider"],
+                    "class": "Provider",
+                },
+                "module must be a string",
+            ),
+            (
+                {
+                    "name": "bad",
+                    "type": "python",
+                    "module": "my_memory.provider",
+                    "class": ["Provider"],
+                },
+                "class must be a string",
+            ),
+            (
+                {
+                    "name": "bad",
+                    "type": "python",
+                    "module": "my_memory.provider",
+                    "class_name": ["Provider"],
+                },
+                "class_name must be a string",
+            ),
+        ],
+    )
+    def test_validate_memory_rejects_bad_string_fields(
+        self, provider: dict, message: str
+    ) -> None:
+        with pytest.raises(ConfigError, match=message):
+            validate_memory({"providers": [provider]})
+
+    @pytest.mark.parametrize(
+        "provider",
+        [
+            {"name": "bad", "type": "python", "class": "Provider"},
+            {"name": "bad", "type": "python", "module": "my_memory.provider"},
+            {
+                "name": "bad",
+                "type": "python",
+                "module": " ",
+                "class": "Provider",
+            },
+            {
+                "name": "bad",
+                "type": "python",
+                "module": "my_memory.provider",
+                "class": " ",
+            },
+        ],
+    )
+    def test_validate_memory_requires_python_provider_target(
+        self, provider: dict
+    ) -> None:
+        with pytest.raises(
+            ConfigError,
+            match="python provider requires module and class",
+        ):
+            validate_memory({"providers": [provider]})
 
     def test_validate_memory_rejects_duplicate_provider_names(self) -> None:
         with pytest.raises(ConfigError, match="duplicate name"):

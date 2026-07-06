@@ -300,17 +300,29 @@ def validate_memory(raw_memory: object) -> dict:
     for i, entry in enumerate(raw_providers):
         if not isinstance(entry, dict):
             raise ConfigError(f"Memory provider #{i + 1}: must be a mapping")
-        name = _required_name(entry.get("name"), f"Memory provider #{i + 1}")
-        provider_type = str(entry.get("type") or "").strip()
+        item_label = f"Memory provider #{i + 1}"
+        name = _required_name(entry.get("name"), item_label)
         _remember_unique_name(name, seen_names, item_label="Memory provider")
-        if not provider_type:
+        if "type" not in entry:
             raise ConfigError(f"Memory provider '{name}': missing 'type'")
+        provider_label = f"Memory provider '{name}'"
+        provider_type = _required_string_field(entry, "type", provider_label)
         provider_enabled = entry.get("enabled", True)
         if not isinstance(provider_enabled, bool):
             raise ConfigError(f"Memory provider '{name}': 'enabled' must be a boolean")
         provider_config = entry.get("config", {})
         if not isinstance(provider_config, dict):
             raise ConfigError(f"Memory provider '{name}': 'config' must be a mapping")
+        module = _optional_string_field(entry, "module", provider_label)
+        class_name = ""
+        if "class" in entry:
+            class_name = _optional_string_field(entry, "class", provider_label)
+        if not class_name and "class_name" in entry:
+            class_name = _optional_string_field(entry, "class_name", provider_label)
+        if provider_type == "python" and (not module or not class_name):
+            raise ConfigError(
+                f"Memory provider '{name}': python provider requires module and class"
+            )
 
         providers.append(
             {
@@ -318,8 +330,8 @@ def validate_memory(raw_memory: object) -> dict:
                 "type": provider_type,
                 "enabled": provider_enabled,
                 "config": provider_config,
-                "module": str(entry.get("module") or "").strip(),
-                "class": str(entry.get("class") or entry.get("class_name") or "").strip(),
+                "module": module,
+                "class": class_name,
             }
         )
 
