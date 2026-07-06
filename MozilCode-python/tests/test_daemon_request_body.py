@@ -6,7 +6,11 @@ import pytest
 from starlette.testclient import TestClient
 
 from mozilcode.config import AppConfig, ProviderConfig
-from mozilcode.daemon.request_body import parse_json_object, string_field
+from mozilcode.daemon.request_body import (
+    parse_json_object,
+    string_field,
+    string_mapping_field,
+)
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.session_store import SessionStore
 
@@ -60,6 +64,21 @@ async def test_parse_json_object_maps_field_error_to_bad_request():
     assert parsed.error is not None
     assert parsed.error.status_code == 400
     assert json.loads(parsed.error.body) == {"error": "'name' must be a string"}
+
+
+@pytest.mark.asyncio
+async def test_parse_json_object_rejects_non_string_mapping_values():
+    parsed = await parse_json_object(
+        _JsonRequest({"answers": {"language": ["Python"]}}),
+        lambda body: string_mapping_field(body, "answers"),
+    )
+
+    assert not parsed.ok
+    assert parsed.error is not None
+    assert parsed.error.status_code == 400
+    assert json.loads(parsed.error.body) == {
+        "error": "'answers' must be an object of strings"
+    }
 
 
 @pytest.mark.parametrize(
@@ -175,6 +194,11 @@ def test_json_object_routes_reject_non_object_json(tmp_path, path):
             "/api/askuser/missing",
             {"request_id": "req", "answers": []},
             "'answers' must be an object",
+        ),
+        (
+            "/api/askuser/missing",
+            {"request_id": "req", "answers": {"language": []}},
+            "'answers' must be an object of strings",
         ),
         (
             "/api/session/missing/worktrees",

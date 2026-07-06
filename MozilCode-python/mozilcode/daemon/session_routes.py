@@ -10,9 +10,9 @@ from starlette.responses import JSONResponse
 from mozilcode.client import LLMError
 from mozilcode.daemon.request_body import (
     choice_field,
-    object_field,
     parse_json_object,
     string_field,
+    string_mapping_field,
 )
 from mozilcode.daemon.request_context import daemon_server, path_param
 from mozilcode.daemon.responses import (
@@ -56,7 +56,7 @@ class PermissionResolutionBody:
 @dataclass(frozen=True)
 class AskUserResolutionBody:
     request_id: str
-    answers: dict[str, Any]
+    answers: dict[str, str]
 
 
 def _parse_create_session_body(body: dict[str, Any]) -> CreateSessionBody:
@@ -89,7 +89,7 @@ def _parse_permission_resolution_body(
 def _parse_askuser_resolution_body(body: dict[str, Any]) -> AskUserResolutionBody:
     return AskUserResolutionBody(
         request_id=string_field(body, "request_id"),
-        answers=object_field(body, "answers"),
+        answers=string_mapping_field(body, "answers"),
     )
 
 
