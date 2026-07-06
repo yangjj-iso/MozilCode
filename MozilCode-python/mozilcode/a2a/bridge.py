@@ -49,6 +49,15 @@ class A2ATask:
         return "".join(self.output_parts).strip()
 
 
+@dataclass(frozen=True)
+class A2AMessageRequest:
+    prompt: str
+    context_id: str
+    task_id_hint: str
+    metadata: dict[str, Any]
+    work_dir: str | None
+
+
 def _iso_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -279,27 +288,27 @@ class A2ABridge:
         await self.wait_for_task(task.id, timeout=timeout or self._default_wait_timeout)
         return task
 
-    async def start_task_from_message(self, params: dict[str, Any], source: str) -> A2ATask:
-        message = params.get("message") or params
-        if not isinstance(message, dict):
-            raise A2AError("message must be an object", -32602)
-
-        prompt = _extract_text(message)
-        if not prompt:
-            raise A2AError("message must contain a text part", -32602)
-
-        context_id = _context_id_from_message(params, message)
-        task_id_hint = _task_id_hint_from_message(params, message)
-        if not context_id and task_id_hint and task_id_hint in self._tasks:
-            context_id = self._tasks[task_id_hint].context_id
+    async def start_task_from_message(
+        self,
+        params: dict[str, Any],
+        source: str,
+    ) -> A2ATask:
+        request = _parse_message_request(params)
+        context_id = request.context_id
+        if (
+            not context_id
+            and request.task_id_hint
+            and request.task_id_hint in self._tasks
+        ):
+            context_id = self._tasks[request.task_id_hint].context_id
         context_id = str(context_id or f"ctx-{uuid.uuid4().hex[:12]}")
 
-        metadata = _metadata_from_params(params)
-        work_dir = metadata.get("work_dir") or metadata.get("workDir")
         session_id = self._contexts.get(context_id)
         if session_id is None:
             try:
-                session_id = await self._server.init_session(work_dir=work_dir)
+                session_id = await self._server.init_session(
+                    work_dir=request.work_dir
+                )
             except ValueError as e:
                 raise A2AError(str(e), -32001) from e
             self._contexts[context_id] = session_id
@@ -307,11 +316,18 @@ class A2ABridge:
         log_list = self._server.get_event_log(session_id)
         start_cursor = len(log_list) if log_list is not None else 0
         try:
-            internal_task_id = await self._server.start_task(session_id, prompt)
+            internal_task_id = await self._server.start_task(
+                session_id,
+                request.prompt,
+            )
         except ValueError as e:
             raise A2AError(str(e), -32002) from e
 
-        task_id = str(task_id_hint or internal_task_id or uuid.uuid4().hex[:8])
+        task_id = str(
+            request.task_id_hint
+            or internal_task_id
+            or uuid.uuid4().hex[:8]
+        )
         if task_id in self._tasks:
             task_id = f"{task_id}-{uuid.uuid4().hex[:4]}"
         task = A2ATask(
@@ -319,11 +335,11 @@ class A2ABridge:
             context_id=context_id,
             session_id=session_id,
             internal_task_id=internal_task_id,
-            prompt=prompt,
+            prompt=request.prompt,
             source=source,
             state=TASK_WORKING,
             cursor=start_cursor,
-            metadata=metadata,
+            metadata=request.metadata,
         )
         self._tasks[task.id] = task
         return task
@@ -451,6 +467,41 @@ def _extract_text(message: dict[str, Any]) -> str:
         if isinstance(part.get("data"), str):
             chunks.append(part["data"])
     return "\n".join(c.strip() for c in chunks if c and c.strip()).strip()
+
+
+def _message_from_params(params: dict[str, Any]) -> dict[str, Any]:
+    message = params["message"] if "message" in params else params
+    if not isinstance(message, dict):
+        raise A2AError("message must be an object", -32602)
+    return message
+
+
+def _parse_message_request(params: dict[str, Any]) -> A2AMessageRequest:
+    message = _message_from_params(params)
+    prompt = _extract_text(message)
+    if not prompt:
+        raise A2AError("message must contain a text part", -32602)
+
+    metadata = _metadata_from_params(params)
+    work_dir = _work_dir_from_metadata(metadata)
+    return A2AMessageRequest(
+        prompt=prompt,
+        context_id=_context_id_from_message(params, message),
+        task_id_hint=_task_id_hint_from_message(params, message),
+        metadata=metadata,
+        work_dir=work_dir,
+    )
+
+
+def _work_dir_from_metadata(metadata: dict[str, Any]) -> str | None:
+    work_dir = (
+        metadata["work_dir"]
+        if "work_dir" in metadata
+        else metadata.get("workDir")
+    )
+    if work_dir is not None and not isinstance(work_dir, str):
+        raise A2AError("metadata.work_dir must be a string", -32602)
+    return work_dir or None
 
 
 def _task_id_from_params(params: Any) -> str:

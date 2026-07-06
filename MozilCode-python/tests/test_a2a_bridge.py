@@ -332,6 +332,45 @@ async def test_a2a_json_rpc_preserves_invalid_params_types(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("message", [[], "", None])
+async def test_a2a_json_rpc_rejects_explicit_non_object_message(message):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "message/send",
+        "params": {"message": message},
+    })
+
+    assert response["id"] == 12
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "message must be an object"
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["work_dir", "workDir"])
+async def test_a2a_json_rpc_rejects_non_string_work_dir_metadata(field):
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "message/send",
+        "params": {
+            "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            "metadata": {field: []},
+        },
+    })
+
+    assert response["id"] == 13
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "metadata.work_dir must be a string"
+    assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
 async def test_a2a_json_rpc_rejects_empty_batch():
     bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
 
