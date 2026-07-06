@@ -14,9 +14,16 @@ import pytest
 
 from mozilcode.client import resolve_context_window
 from mozilcode.config import ProviderConfig
+from mozilcode.model_context import (
+    DEFAULT_CONTEXT_WINDOW,
+    MODEL_CONTEXT_WINDOWS,
+    lookup_model_context_window,
+)
 from mozilcode.validator import (
     ConfigError,
-    lookup_model_context_window,
+    DEFAULT_CONTEXT_WINDOW as VALIDATOR_DEFAULT_CONTEXT_WINDOW,
+    MODEL_CONTEXT_WINDOWS as VALIDATOR_MODEL_CONTEXT_WINDOWS,
+    lookup_model_context_window as validator_lookup_model_context_window,
     validate_providers,
 )
 
@@ -60,6 +67,11 @@ class TestConfigPriority:
 # ---------------------------------------------------------------------------
 
 class TestMappingTable:
+    def test_validator_reexports_model_context_policy(self):
+        assert VALIDATOR_DEFAULT_CONTEXT_WINDOW == DEFAULT_CONTEXT_WINDOW
+        assert VALIDATOR_MODEL_CONTEXT_WINDOWS is MODEL_CONTEXT_WINDOWS
+        assert validator_lookup_model_context_window is lookup_model_context_window
+
     @pytest.mark.parametrize(
         "model, expected",
         [

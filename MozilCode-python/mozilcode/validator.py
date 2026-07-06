@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from mozilcode.model_context import (
+    DEFAULT_CONTEXT_WINDOW,
+    MODEL_CONTEXT_WINDOWS,
+    lookup_model_context_window,
+)
 from mozilcode.removed_capabilities import (
     REMOVED_CONFIG_SECTIONS,
     find_removed_config_sections,
@@ -19,34 +24,6 @@ VALID_PERMISSION_MODES = {
 }
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
-
-DEFAULT_CONTEXT_WINDOW = 200_000
-
-# 内置的"模型名子串 -> context window（最大输入 token 数）"映射表，
-# 是 context window 回退链的第 3 层（见 ProviderConfig.get_context_window）。
-# 按从最具体到最通用排序，第一个子串命中即生效。值仅为合理起始点，
-# 模型更新/重命名后可能过时。如果值不准确，在配置中设置 context_window 覆盖（最高优先级）。
-MODEL_CONTEXT_WINDOWS: list[tuple[str, int]] = [
-    ("1m", 1_000_000),       # 也覆盖 "-1m" 后缀（如 claude-...-1m）
-    ("gpt-4.1", 1_000_000),  # GPT-4.1 系列的 window 为 1M
-    ("gpt-4o", 128_000),
-    ("gpt-4-turbo", 128_000),
-    ("o1", 200_000),         # OpenAI 推理模型 o1 / o3 / o4
-    ("o3", 200_000),
-    ("o4", 200_000),
-    ("gpt-3.5", 16_385),
-    ("claude", 200_000),
-]
-
-
-def lookup_model_context_window(model: str) -> int:
-    """通过子串匹配（第 3 层），返回内置映射表中该模型对应的
-    context window；没有匹配则返回 0。"""
-    m = model.lower()
-    for substr, window in MODEL_CONTEXT_WINDOWS:
-        if substr in m:
-            return window
-    return 0
 
 
 class ConfigError(Exception):

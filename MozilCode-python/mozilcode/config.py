@@ -7,13 +7,12 @@ from pathlib import Path
 
 import yaml
 
+from .model_context import DEFAULT_CONTEXT_WINDOW, lookup_model_context_window
 from .validator import (
     ConfigError,
-    DEFAULT_CONTEXT_WINDOW,
     VALID_PERMISSION_MODES,
     VALID_PROTOCOLS,
     VALID_TEAMMATE_MODES,
-    lookup_model_context_window,
     validate_config_structure,
 )
 
