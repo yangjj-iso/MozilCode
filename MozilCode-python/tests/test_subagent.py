@@ -319,6 +319,18 @@ class TestToolFilter:
         for name in names:
             assert name in ASYNC_AGENT_ALLOWED_TOOLS
 
+    def test_mcp_tools_bypass_agent_filters(self):
+        reg = make_registry("ReadFile", "SomeOtherTool", "mcp_github_search")
+        definition = AgentDef(
+            agent_type="test",
+            when_to_use="test",
+            tools=["ReadFile"],
+            source="builtin",
+        )
+        filtered = resolve_agent_tools(reg, definition, is_background=True)
+        names = {t.name for t in filtered.list_tools()}
+        assert names == {"ReadFile", "mcp_github_search"}
+
     def test_combined_whitelist_and_blacklist(self):
         reg = make_registry("ReadFile", "EditFile", "WriteFile", "Bash", "Grep")
         definition = AgentDef(

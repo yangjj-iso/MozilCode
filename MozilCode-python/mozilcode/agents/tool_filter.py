@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mozilcode.tools import ToolRegistry
+from mozilcode.tools.base import Tool
 
 if TYPE_CHECKING:
     from mozilcode.agents.parser import AgentDef
@@ -74,7 +75,46 @@ COORDINATOR_MODE_ALLOWED_TOOLS: frozenset[str] = frozenset({
 
 
 def _is_mcp_tool(name: str) -> bool:
-    return name.startswith("mcp__")
+    return name.startswith("mcp_")
+
+
+def _tools_by_name(registry: ToolRegistry) -> dict[str, Tool]:
+    return {tool.name: tool for tool in registry.list_tools()}
+
+
+def _registry_from_tools(tools: dict[str, Tool]) -> ToolRegistry:
+    registry = ToolRegistry()
+    for tool in tools.values():
+        registry.register(tool)
+    return registry
+
+
+def _remove_tools(tools: dict[str, Tool], names: set[str] | frozenset[str]) -> None:
+    for name in names:
+        tools.pop(name, None)
+
+
+def _only_tools(
+    tools: dict[str, Tool],
+    names: set[str] | frozenset[str],
+) -> dict[str, Tool]:
+    return {name: tool for name, tool in tools.items() if name in names}
+
+
+def _apply_definition_filters(
+    tools: dict[str, Tool],
+    definition: AgentDef | None,
+    *,
+    always_allowed: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, Tool]:
+    if definition is None:
+        return tools
+    if definition.disallowed_tools:
+        _remove_tools(tools, set(definition.disallowed_tools))
+    if definition.tools:
+        allowed_set = set(definition.tools) | set(always_allowed)
+        return _only_tools(tools, allowed_set)
+    return tools
 
 
 def resolve_agent_tools(
@@ -82,48 +122,26 @@ def resolve_agent_tools(
     definition: AgentDef,
     is_background: bool = False,
 ) -> ToolRegistry:
-    all_tools = {t.name: t for t in parent_registry.list_tools()}
+    all_tools = _tools_by_name(parent_registry)
 
     # 第 0 层：MCP 工具始终放行，先分离出来再做后续过滤
     mcp_tools = {name: tool for name, tool in all_tools.items() if _is_mcp_tool(name)}
     all_tools = {name: tool for name, tool in all_tools.items() if not _is_mcp_tool(name)}
 
     # 第 1 层：全局禁用工具
-    for name in ALL_AGENT_DISALLOWED_TOOLS:
-        all_tools.pop(name, None)
+    _remove_tools(all_tools, ALL_AGENT_DISALLOWED_TOOLS)
 
     # 第 2 层：自定义 agent 额外限制
     if definition.source in ("project", "user", "plugin"):
-        for name in CUSTOM_AGENT_DISALLOWED_TOOLS:
-            all_tools.pop(name, None)
+        _remove_tools(all_tools, CUSTOM_AGENT_DISALLOWED_TOOLS)
 
     # 第 3 层：后台任务白名单
     if is_background:
-        all_tools = {
-            name: tool
-            for name, tool in all_tools.items()
-            if name in ASYNC_AGENT_ALLOWED_TOOLS
-        }
+        all_tools = _only_tools(all_tools, ASYNC_AGENT_ALLOWED_TOOLS)
 
     # 第 4 层：按 agent 定义中的禁用/允许列表过滤
-    if definition.disallowed_tools:
-        for name in definition.disallowed_tools:
-            all_tools.pop(name, None)
-
-    if definition.tools:
-        allowed_set = set(definition.tools)
-        all_tools = {
-            name: tool
-            for name, tool in all_tools.items()
-            if name in allowed_set
-        }
-
-    filtered = ToolRegistry()
-    for tool in mcp_tools.values():
-        filtered.register(tool)
-    for tool in all_tools.values():
-        filtered.register(tool)
-    return filtered
+    all_tools = _apply_definition_filters(all_tools, definition)
+    return _registry_from_tools({**mcp_tools, **all_tools})
 
 
 def build_teammate_tools(
@@ -143,29 +161,21 @@ def build_teammate_tools(
     from mozilcode.tools.task_update import TaskUpdateTool
 
     if backend_type == BackendType.IN_PROCESS.value:
-        all_tools = {t.name: t for t in parent_registry.list_tools()}
-        filtered = {
-            name: tool
-            for name, tool in all_tools.items()
-            if name in IN_PROCESS_TEAMMATE_ALLOWED_TOOLS
-        }
+        filtered = _only_tools(
+            _tools_by_name(parent_registry),
+            IN_PROCESS_TEAMMATE_ALLOWED_TOOLS,
+        )
     else:
-        filtered = {t.name: t for t in parent_registry.list_tools()}
+        filtered = _tools_by_name(parent_registry)
         filtered.pop("TeamCreate", None)
         filtered.pop("TeamDelete", None)
 
     # 应用 agent 定义中的工具限制
-    if definition is not None:
-        if definition.disallowed_tools:
-            for name in definition.disallowed_tools:
-                filtered.pop(name, None)
-        if definition.tools:
-            allowed_set = set(definition.tools) | TEAMMATE_COORDINATION_TOOLS
-            filtered = {
-                name: tool
-                for name, tool in filtered.items()
-                if name in allowed_set
-            }
+    filtered = _apply_definition_filters(
+        filtered,
+        definition,
+        always_allowed=TEAMMATE_COORDINATION_TOOLS,
+    )
 
     coordination_tools = [
         TaskCreateTool(team_manager, team_name, agent_name),
@@ -175,9 +185,7 @@ def build_teammate_tools(
         SendMessageTool(team_manager, team_name, agent_id, agent_name),
     ]
 
-    registry = ToolRegistry()
-    for tool in filtered.values():
-        registry.register(tool)
+    registry = _registry_from_tools(filtered)
     for tool in coordination_tools:
         registry.register(tool)
 
@@ -185,9 +193,6 @@ def build_teammate_tools(
 
 
 def apply_coordinator_filter(registry: ToolRegistry) -> ToolRegistry:
-    all_tools = {t.name: t for t in registry.list_tools()}
-    filtered = ToolRegistry()
-    for name, tool in all_tools.items():
-        if name in COORDINATOR_MODE_ALLOWED_TOOLS:
-            filtered.register(tool)
-    return filtered
+    return _registry_from_tools(
+        _only_tools(_tools_by_name(registry), COORDINATOR_MODE_ALLOWED_TOOLS)
+    )
