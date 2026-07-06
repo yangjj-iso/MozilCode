@@ -69,6 +69,39 @@ def test_session_store_skips_corrupt_session_and_loads_valid_ones(tmp_path):
     assert loaded[0].events == [{"type": "LoopComplete"}]
 
 
+def test_session_store_skips_malformed_event_lines(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+    store.persist_meta(sid, {"title": "recover"})
+    events_path = store.session_dir(sid) / "events.jsonl"
+    events_path.write_text(
+        '{"type": "UserMessage"}\n'
+        '{bad\n'
+        'null\n'
+        '[]\n'
+        '{"type": "LoopComplete"}\n',
+        encoding="utf-8",
+    )
+
+    loaded = store.load_sessions()
+
+    assert len(loaded) == 1
+    assert loaded[0].events == [
+        {"type": "UserMessage"},
+        {"type": "LoopComplete"},
+    ]
+
+
+def test_session_store_skips_non_object_meta(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = "session-a"
+    session_dir = store.session_dir(sid)
+    session_dir.mkdir(parents=True)
+    (session_dir / "meta.json").write_text("[]", encoding="utf-8")
+
+    assert store.load_sessions() == []
+
+
 @pytest.mark.parametrize(
     "sid",
     ["../escape", "..", ".", "nested/session", "bad.id", "bad id", "", "a" * 65],

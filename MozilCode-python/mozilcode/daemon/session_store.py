@@ -19,7 +19,7 @@ SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 class PersistedSession:
     sid: str
     meta: dict
-    events: list[dict | None]
+    events: list[dict]
 
 
 def validate_session_id(sid: str) -> str:
@@ -69,17 +69,40 @@ class SessionStore:
         return PersistedSession(sid=sid, meta=meta, events=events)
 
     def _read_meta(self, directory: Path) -> dict:
-        return json.loads((directory / META_FILE).read_text(encoding="utf-8"))
+        meta = json.loads((directory / META_FILE).read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            raise ValueError(f"{META_FILE} must contain a JSON object")
+        return meta
 
-    def _read_events(self, directory: Path) -> list[dict | None]:
-        events: list[dict | None] = []
+    def _read_events(self, directory: Path) -> list[dict]:
+        events: list[dict] = []
         events_path = directory / EVENTS_FILE
         if not events_path.exists():
             return events
-        for line in events_path.read_text(encoding="utf-8").splitlines():
+        for line_number, line in enumerate(
+            events_path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             line = line.strip()
-            if line:
-                events.append(json.loads(line))
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as e:
+                log.warning(
+                    "Skipping malformed event in %s line %d: %s",
+                    events_path,
+                    line_number,
+                    e,
+                )
+                continue
+            if not isinstance(event, dict):
+                log.warning(
+                    "Skipping non-object event in %s line %d",
+                    events_path,
+                    line_number,
+                )
+                continue
+            events.append(event)
         return events
 
     def persist_meta(self, sid: str, meta: dict) -> None:
