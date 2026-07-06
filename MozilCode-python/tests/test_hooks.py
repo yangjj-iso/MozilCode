@@ -440,6 +440,19 @@ class TestLoadHooks:
                 }
             ])
 
+    def test_action_timeout_rejects_boolean(self):
+        with pytest.raises(HookConfigError, match="timeout.*positive integer"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "command",
+                        "command": "echo ok",
+                        "timeout": True,
+                    },
+                }
+            ])
+
 # ---------------------------------------------------------------------------
 # HookEngine
 # ---------------------------------------------------------------------------

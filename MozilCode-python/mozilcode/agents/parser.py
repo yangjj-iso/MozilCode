@@ -35,6 +35,63 @@ class AgentDef:
     source: str = "builtin"
 
 
+def _required_string(meta: dict, field_name: str, ctx: str) -> str:
+    if field_name not in meta:
+        raise AgentParseError(f"Missing required field '{field_name}'{ctx}")
+    value = meta[field_name]
+    if not isinstance(value, str) or not value.strip():
+        raise AgentParseError(f"Field '{field_name}'{ctx} must be a non-empty string")
+    return value.strip()
+
+
+def _optional_string_choice(
+    meta: dict,
+    field_name: str,
+    default: str,
+    valid_values: set[str],
+    ctx: str,
+) -> str:
+    value = meta.get(field_name, default)
+    if not isinstance(value, str):
+        raise AgentParseError(f"Field '{field_name}'{ctx} must be a string")
+    value = value.strip()
+    if value not in valid_values:
+        allowed = valid_values - {""}
+        raise AgentParseError(
+            f"Invalid {field_name} '{value}'{ctx}: must be one of {allowed}"
+        )
+    return value
+
+
+def _optional_string_list(
+    meta: dict,
+    field_name: str,
+    ctx: str,
+) -> list[str]:
+    value = meta.get(field_name, [])
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise AgentParseError(f"Field '{field_name}'{ctx} must be a list of strings")
+    return value
+
+
+def _optional_positive_int(meta: dict, field_name: str, default: int, ctx: str) -> int:
+    value = meta.get(field_name, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise AgentParseError(
+            f"Invalid {field_name} '{value}'{ctx}: must be a positive integer"
+        )
+    return value
+
+
+def _optional_bool(meta: dict, field_name: str, default: bool, ctx: str) -> bool:
+    value = meta.get(field_name, default)
+    if not isinstance(value, bool):
+        raise AgentParseError(f"Field '{field_name}'{ctx} must be a boolean")
+    return value
+
+
 def parse_frontmatter(raw: str) -> tuple[dict, str]:
     stripped = raw.lstrip()
     if not stripped.startswith("---"):
@@ -61,37 +118,57 @@ def parse_frontmatter(raw: str) -> tuple[dict, str]:
 def _validate_agent_meta(meta: dict, source: str = "") -> None:
     ctx = f" in {source}" if source else ""
 
-    if "name" not in meta:
-        raise AgentParseError(f"Missing required field 'name'{ctx}")
-    if "description" not in meta:
-        raise AgentParseError(f"Missing required field 'description'{ctx}")
+    _required_string(meta, "name", ctx)
+    _required_string(meta, "description", ctx)
+    _optional_string_choice(meta, "model", "inherit", VALID_MODELS, ctx)
+    _optional_string_choice(
+        meta,
+        "permissionMode",
+        "default",
+        VALID_PERMISSION_MODES,
+        ctx,
+    )
+    _optional_positive_int(meta, "maxTurns", 50, ctx)
+    _optional_string_choice(meta, "isolation", "", VALID_ISOLATION_MODES, ctx)
+    _optional_bool(meta, "background", False, ctx)
+    _optional_string_list(meta, "tools", ctx)
+    _optional_string_list(meta, "disallowedTools", ctx)
 
-    model = str(meta.get("model", "inherit"))
-    if model not in VALID_MODELS:
-        raise AgentParseError(
-            f"Invalid model '{model}'{ctx}: must be one of {VALID_MODELS - {''}}"
-        )
 
-    pm = str(meta.get("permissionMode", "default"))
-    if pm not in VALID_PERMISSION_MODES:
-        raise AgentParseError(
-            f"Invalid permissionMode '{pm}'{ctx}: "
-            f"must be one of {VALID_PERMISSION_MODES - {''}}"
-        )
-
-    max_turns = meta.get("maxTurns")
-    if max_turns is not None:
-        if not isinstance(max_turns, int) or max_turns <= 0:
-            raise AgentParseError(
-                f"Invalid maxTurns '{max_turns}'{ctx}: must be a positive integer"
-            )
-
-    isolation = str(meta.get("isolation", ""))
-    if isolation not in VALID_ISOLATION_MODES:
-        raise AgentParseError(
-            f"Invalid isolation '{isolation}'{ctx}: "
-            f"must be one of {VALID_ISOLATION_MODES - {''}}"
-        )
+def build_agent_def(
+    meta: dict,
+    body: str,
+    *,
+    file_path: Path | None = None,
+    source: str = "builtin",
+) -> AgentDef:
+    _validate_agent_meta(meta, str(file_path) if file_path is not None else "")
+    return AgentDef(
+        agent_type=_required_string(meta, "name", ""),
+        when_to_use=_required_string(meta, "description", ""),
+        system_prompt=body,
+        tools=_optional_string_list(meta, "tools", ""),
+        disallowed_tools=_optional_string_list(meta, "disallowedTools", ""),
+        model=_optional_string_choice(meta, "model", "inherit", VALID_MODELS, ""),
+        max_turns=_optional_positive_int(meta, "maxTurns", 50, ""),
+        permission_mode=_optional_string_choice(
+            meta,
+            "permissionMode",
+            "default",
+            VALID_PERMISSION_MODES,
+            "",
+        ),
+        background=_optional_bool(meta, "background", False, ""),
+        isolation=_optional_string_choice(
+            meta,
+            "isolation",
+            "",
+            VALID_ISOLATION_MODES,
+            "",
+        ),
+        file_path=file_path,
+        source=source,
+    )
 
 
 def parse_agent_file(path: Path) -> AgentDef:
@@ -101,19 +178,4 @@ def parse_agent_file(path: Path) -> AgentDef:
         raise AgentParseError(f"Cannot read agent file {path}: {e}") from e
 
     meta, body = parse_frontmatter(raw)
-    _validate_agent_meta(meta, str(path))
-
-    return AgentDef(
-        agent_type=meta["name"],
-        when_to_use=meta["description"],
-        system_prompt=body,
-        tools=meta.get("tools", []),
-        disallowed_tools=meta.get("disallowedTools", []),
-        model=str(meta.get("model", "inherit")),
-        max_turns=meta.get("maxTurns", 50),
-        permission_mode=str(meta.get("permissionMode", "default")),
-        background=bool(meta.get("background", False)),
-        isolation=str(meta.get("isolation", "")),
-        file_path=path,
-        source="builtin",
-    )
+    return build_agent_def(meta, body, file_path=path, source="builtin")

@@ -89,7 +89,7 @@ def _load_action(raw_action: object, label: str) -> Action:
             )
 
     timeout = raw_action.get("timeout", 30)
-    if not isinstance(timeout, int) or timeout <= 0:
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise HookConfigError(f"{label}: timeout must be a positive integer")
 
     return Action(

@@ -4,7 +4,13 @@ import importlib.resources
 import logging
 from pathlib import Path
 
-from mozilcode.agents.parser import AgentDef, AgentParseError, parse_agent_file
+from mozilcode.agents.parser import (
+    AgentDef,
+    AgentParseError,
+    build_agent_def,
+    parse_agent_file,
+    parse_frontmatter,
+)
 
 log = logging.getLogger(__name__)
 
@@ -56,21 +62,10 @@ class AgentLoader:
                 continue
             try:
                 raw = item.read_text(encoding="utf-8")
-                from mozilcode.agents.parser import parse_frontmatter, _validate_agent_meta
-
                 meta, body = parse_frontmatter(raw)
-                _validate_agent_meta(meta, item.name)
-
-                agent_def = AgentDef(
-                    agent_type=meta["name"],
-                    when_to_use=meta["description"],
-                    system_prompt=body,
-                    tools=meta.get("tools", []),
-                    disallowed_tools=meta.get("disallowedTools", []),
-                    model=str(meta.get("model", "inherit")),
-                    max_turns=meta.get("maxTurns", 50),
-                    permission_mode=str(meta.get("permissionMode", "default")),
-                    background=bool(meta.get("background", False)),
+                agent_def = build_agent_def(
+                    meta,
+                    body,
                     file_path=None,
                     source="builtin",
                 )

@@ -118,6 +118,33 @@ class TestAgentParser:
         with pytest.raises(AgentParseError, match="maxTurns"):
             parse_agent_file(f)
 
+    def test_parse_rejects_boolean_max_turns(self, tmp_path: Path):
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: t\ndescription: t\nmaxTurns: true\n---\nbody")
+        with pytest.raises(AgentParseError, match="maxTurns"):
+            parse_agent_file(f)
+
+    def test_parse_rejects_non_boolean_background(self, tmp_path: Path):
+        f = tmp_path / "bad.md"
+        f.write_text("---\nname: t\ndescription: t\nbackground: 'false'\n---\nbody")
+        with pytest.raises(AgentParseError, match="background.*boolean"):
+            parse_agent_file(f)
+
+    def test_parse_rejects_non_string_tool_lists(self, tmp_path: Path):
+        f = tmp_path / "bad.md"
+        f.write_text(
+            "---\n"
+            "name: t\n"
+            "description: t\n"
+            "tools:\n"
+            "  - ReadFile\n"
+            "  - 123\n"
+            "---\n"
+            "body"
+        )
+        with pytest.raises(AgentParseError, match="tools.*list of strings"):
+            parse_agent_file(f)
+
     def test_parse_bad_yaml(self, tmp_path: Path):
         f = tmp_path / "bad.md"
         f.write_text("---\n: :\n---\nbody")
