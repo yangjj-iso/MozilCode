@@ -4,13 +4,10 @@ import asyncio
 import logging
 import os
 import subprocess
-import time
-from datetime import datetime
 from pathlib import Path
 
 from mozilcode.worktree.changes import (
     CleanupResult,
-    Changes,
     count_worktree_changes,
     has_worktree_changes,
 )
@@ -262,6 +259,28 @@ class WorktreeManager:
     def get_current_session(self) -> WorktreeSession | None:
         return self.current_session
 
+    def _restored_worktree_path(self, session: WorktreeSession) -> Path | None:
+        err = validate_slug(session.worktree_name)
+        if err:
+            log.warning(
+                "Ignoring persisted worktree session with invalid name %r: %s",
+                session.worktree_name,
+                err,
+            )
+            return None
+
+        managed_root = Path(self.worktree_dir).resolve()
+        wt_path = Path(session.worktree_path).resolve()
+        try:
+            wt_path.relative_to(managed_root)
+        except ValueError:
+            log.warning(
+                "Ignoring persisted worktree outside managed directory: %s",
+                wt_path,
+            )
+            return None
+        return wt_path
+
     # ------------------------------------------------------------------
     # 从持久化的 session 中恢复
     # ------------------------------------------------------------------
@@ -270,15 +289,19 @@ class WorktreeManager:
         session = load_worktree_session(self._mozilcode_dir)
         if session is None:
             return None
-        wt_path = session.worktree_path
-        head_sha = self.read_worktree_head_sha(wt_path)
+        wt_path = self._restored_worktree_path(session)
+        if wt_path is None:
+            save_worktree_session(self._mozilcode_dir, None)
+            return None
+
+        head_sha = self.read_worktree_head_sha(str(wt_path))
         if head_sha is None:
             save_worktree_session(self._mozilcode_dir, None)
             return None
 
         wt = Worktree(
             name=session.worktree_name,
-            path=wt_path,
+            path=str(wt_path),
             branch=f"worktree-{flatten_slug(session.worktree_name)}",
             based_on="unknown",
             head_commit=head_sha,

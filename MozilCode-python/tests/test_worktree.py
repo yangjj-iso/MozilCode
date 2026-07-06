@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -194,6 +192,27 @@ class TestSessionPersistence:
         path.write_text("not json")
         assert load_worktree_session(tmp_path) is None
 
+    def test_load_non_object_json(self, tmp_path):
+        path = tmp_path / "worktree_session.json"
+        path.write_text("[]", encoding="utf-8")
+        assert load_worktree_session(tmp_path) is None
+
+    def test_load_invalid_field_type(self, tmp_path):
+        path = tmp_path / "worktree_session.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "original_cwd": [],
+                    "worktree_path": "/wt/path",
+                    "worktree_name": "my-feature",
+                    "original_branch": "main",
+                    "original_head_commit": "abc123",
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert load_worktree_session(tmp_path) is None
+
 # =========================================================================
 # 集成辅助函数
 # =========================================================================
@@ -322,6 +341,42 @@ class TestWorktreeManager:
     def test_enter_nonexistent(self, manager):
         with pytest.raises(WorktreeError, match="not found"):
             _run(manager.enter("nope"))
+
+    def test_restore_session_rejects_invalid_persisted_name(self, manager):
+        session = WorktreeSession(
+            original_cwd=manager.repo_root,
+            worktree_path=str(Path(manager.worktree_dir) / "bad"),
+            worktree_name="../bad",
+            original_branch="main",
+            original_head_commit="abc123",
+        )
+        save_worktree_session(Path(manager.repo_root) / ".mozilcode", session)
+
+        assert manager.restore_session() is None
+        assert load_worktree_session(Path(manager.repo_root) / ".mozilcode") is None
+
+    def test_restore_session_rejects_path_outside_managed_worktree_dir(
+        self,
+        manager,
+        tmp_path,
+        monkeypatch,
+    ):
+        session = WorktreeSession(
+            original_cwd=manager.repo_root,
+            worktree_path=str(tmp_path / "outside-worktree"),
+            worktree_name="outside",
+            original_branch="main",
+            original_head_commit="abc123",
+        )
+        save_worktree_session(Path(manager.repo_root) / ".mozilcode", session)
+        monkeypatch.setattr(
+            WorktreeManager,
+            "read_worktree_head_sha",
+            staticmethod(lambda _path: "a" * 40),
+        )
+
+        assert manager.restore_session() is None
+        assert load_worktree_session(Path(manager.repo_root) / ".mozilcode") is None
 
 # =========================================================================
 # F. 变更检测与自动清理
