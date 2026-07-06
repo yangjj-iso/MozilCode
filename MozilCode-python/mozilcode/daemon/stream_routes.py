@@ -8,6 +8,7 @@ from typing import Any
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.daemon.request_context import daemon_server, path_param
+from mozilcode.daemon.task_events import pending_prompt_request_id
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,17 @@ async def listen_client_actions(
         disconnected.set()
 
 
+def pending_prompt_events_after_replay(
+    pending_events: list[dict],
+    replayed_request_ids: set[str],
+) -> list[dict]:
+    return [
+        event
+        for event in pending_events
+        if pending_prompt_request_id(event) not in replayed_request_ids
+    ]
+
+
 async def stream_events(websocket: WebSocket) -> None:
     """Replay a session's full event history, then tail it live."""
     await websocket.accept()
@@ -69,6 +81,7 @@ async def stream_events(websocket: WebSocket) -> None:
     )
     idx = 0
     replay_marked = False
+    replayed_request_ids: set[str] = set()
     try:
         while not disconnected.is_set():
             if idx < len(log_list):
@@ -79,6 +92,9 @@ async def stream_events(websocket: WebSocket) -> None:
                     if event is None:
                         stop = True
                         break
+                    request_id = pending_prompt_request_id(event)
+                    if request_id:
+                        replayed_request_ids.add(request_id)
                     await websocket.send_json(event)
                 if stop:
                     break
@@ -87,7 +103,11 @@ async def stream_events(websocket: WebSocket) -> None:
                     replay_marked = True
                     try:
                         await websocket.send_json({"type": "ReplayDone", "data": {}})
-                        for event in server.pending_prompt_events(sid):
+                        pending_events = pending_prompt_events_after_replay(
+                            server.pending_prompt_events(sid),
+                            replayed_request_ids,
+                        )
+                        for event in pending_events:
                             await websocket.send_json(event)
                     except Exception:
                         pass

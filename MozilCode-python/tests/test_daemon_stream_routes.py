@@ -5,7 +5,10 @@ from starlette.testclient import TestClient
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.session_store import SessionStore
-from mozilcode.daemon.stream_routes import parse_client_action
+from mozilcode.daemon.stream_routes import (
+    parse_client_action,
+    pending_prompt_events_after_replay,
+)
 
 
 def _app(tmp_path):
@@ -61,3 +64,38 @@ def test_parse_client_action_rejects_invalid_messages() -> None:
     assert parse_client_action("{bad") == ""
     assert parse_client_action("[]") == ""
     assert parse_client_action('{"action": 7}') == ""
+
+
+def test_pending_prompt_events_after_replay_skips_replayed_requests() -> None:
+    replayed = {"req-1"}
+    pending_events = [
+        {
+            "type": "PermissionRequest",
+            "data": {"request_id": "req-1"},
+        },
+        {
+            "type": "AskUserRequest",
+            "data": {"request_id": "req-2"},
+        },
+    ]
+
+    assert pending_prompt_events_after_replay(pending_events, replayed) == [
+        {
+            "type": "AskUserRequest",
+            "data": {"request_id": "req-2"},
+        }
+    ]
+
+
+def test_pending_prompt_events_after_replay_keeps_events_without_request_id() -> None:
+    pending_events = [
+        {
+            "type": "PermissionRequest",
+            "data": {},
+        }
+    ]
+
+    assert (
+        pending_prompt_events_after_replay(pending_events, {"req-1"})
+        == pending_events
+    )
