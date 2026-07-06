@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 from dataclasses import replace
 from typing import Any
 
@@ -104,15 +105,72 @@ def _load_class_provider(
     module_name, _, class_name = target.partition(":")
     if not module_name or not class_name:
         raise MemoryProviderLoadError(f"Invalid memory provider target: {target}")
-    module = importlib.import_module(module_name)
-    cls = getattr(module, class_name)
-    kwargs = {"project_root": project_root, "config": config}
-    if legacy_manager is not None:
-        kwargs["manager"] = legacy_manager
     try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        raise MemoryProviderLoadError(
+            f"Cannot import memory provider module '{module_name}': {e}"
+        ) from e
+    try:
+        cls = getattr(module, class_name)
+    except AttributeError as e:
+        raise MemoryProviderLoadError(
+            f"Memory provider class '{class_name}' not found in module '{module_name}'"
+        ) from e
+    try:
+        kwargs = _provider_constructor_kwargs(
+            cls,
+            project_root,
+            config,
+            legacy_manager,
+        )
         return cls(**kwargs)
-    except TypeError:
-        try:
-            return cls(project_root=project_root, config=config)
-        except TypeError:
-            return cls(config)
+    except TypeError as e:
+        raise MemoryProviderLoadError(
+            f"Failed to construct memory provider {target}: {e}"
+        ) from e
+
+
+def _provider_constructor_kwargs(
+    cls: type,
+    project_root: str,
+    config: dict[str, Any],
+    legacy_manager: MemoryManager | None,
+) -> dict[str, Any]:
+    available = {"project_root": project_root, "config": config}
+    if legacy_manager is not None:
+        available["manager"] = legacy_manager
+
+    try:
+        signature = inspect.signature(cls)
+    except (TypeError, ValueError) as e:
+        raise MemoryProviderLoadError(
+            f"Cannot inspect memory provider constructor for {cls!r}: {e}"
+        ) from e
+
+    params = list(signature.parameters.values())
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params):
+        return available
+
+    supported_kinds = {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
+    accepted = {
+        param.name
+        for param in params
+        if param.kind in supported_kinds and param.name in available
+    }
+    missing = [
+        param.name
+        for param in params
+        if param.kind in supported_kinds
+        and param.default is inspect.Parameter.empty
+        and param.name not in accepted
+    ]
+    if missing:
+        raise MemoryProviderLoadError(
+            f"Unsupported memory provider constructor for {cls!r}; "
+            f"unrecognized required parameter(s): {', '.join(missing)}"
+        )
+    return {name: available[name] for name in accepted}

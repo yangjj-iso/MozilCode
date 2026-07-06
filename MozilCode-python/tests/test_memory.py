@@ -37,6 +37,7 @@ from mozilcode.memory.providers import (
     MemoryEvent,
     MemoryHub,
     MemoryItem,
+    MemoryProviderLoadError,
     MemoryScope,
     build_memory_hub,
 )
@@ -877,6 +878,89 @@ class TestMemoryProviders:
         )
 
         with pytest.raises(Exception, match="Unsupported memory provider type"):
+            build_memory_hub(cfg, str(tmp_path))
+
+    @pytest.mark.asyncio
+    async def test_python_provider_can_use_config_only_constructor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "config_only_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class ConfigOnlyProvider(BaseMemoryProvider):\n"
+            "    def __init__(self, config):\n"
+            "        self.name = config['name']\n"
+            "    async def load_context(self, query, scope):\n"
+            "        return self.name\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="config-only",
+                    type="python",
+                    module=module_name,
+                    class_name="ConfigOnlyProvider",
+                    config={"name": "loaded-config-only"},
+                )
+            ]
+        )
+
+        hub = build_memory_hub(cfg, str(tmp_path))
+        assert hub is not None
+
+        context = await hub.load_context("", MemoryScope(project_root=str(tmp_path)))
+
+        assert "loaded-config-only" in context
+
+    def test_python_provider_constructor_type_error_is_not_masked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "broken_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text(
+            "from mozilcode.memory.providers import BaseMemoryProvider\n"
+            "class BrokenProvider(BaseMemoryProvider):\n"
+            "    def __init__(self, project_root, config):\n"
+            "        raise TypeError('internal constructor bug')\n",
+            encoding="utf-8",
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="broken",
+                    type="python",
+                    module=module_name,
+                    class_name="BrokenProvider",
+                )
+            ]
+        )
+
+        with pytest.raises(MemoryProviderLoadError, match="internal constructor bug"):
+            build_memory_hub(cfg, str(tmp_path))
+
+    def test_python_provider_missing_class_reports_loader_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        module_name = "missing_class_memory_provider_for_test"
+        (tmp_path / f"{module_name}.py").write_text("", encoding="utf-8")
+        monkeypatch.syspath_prepend(str(tmp_path))
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(
+                    name="missing",
+                    type="python",
+                    module=module_name,
+                    class_name="MissingProvider",
+                )
+            ]
+        )
+
+        with pytest.raises(
+            MemoryProviderLoadError,
+            match="class 'MissingProvider' not found",
+        ):
             build_memory_hub(cfg, str(tmp_path))
 
     def test_duplicate_memory_provider_names_are_rejected(self, tmp_path: Path) -> None:
