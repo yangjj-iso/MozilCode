@@ -6,7 +6,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mozilcode.client import LLMError
-from mozilcode.daemon.request_body import read_json_object
+from mozilcode.daemon.request_body import (
+    BodyFieldError,
+    object_field,
+    read_json_object,
+    string_field,
+)
 from mozilcode.daemon.request_context import daemon_server, path_param
 from mozilcode.daemon.responses import (
     action_response,
@@ -36,8 +41,11 @@ async def create_session(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    session_id = body.get("session_id") if body else None
-    work_dir = body.get("work_dir") if body else None
+    try:
+        session_id = string_field(body, "session_id") or None
+        work_dir = string_field(body, "work_dir") or None
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     try:
         sid = await server.init_session(session_id, work_dir)
     except ValueError as e:
@@ -82,7 +90,10 @@ async def set_session_mode(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    mode = (body.get("mode") or "").strip()
+    try:
+        mode = string_field(body, "mode").strip()
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     if not mode:
         return bad_request_response("mode is required")
     try:
@@ -122,8 +133,11 @@ async def start_task(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    sid = body.get("session_id")
-    prompt = body.get("prompt", "")
+    try:
+        sid = string_field(body, "session_id")
+        prompt = string_field(body, "prompt")
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     if not sid or not prompt:
         return bad_request_response("session_id and prompt are required")
     try:
@@ -140,8 +154,11 @@ async def resolve_permission(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    request_id = body.get("request_id", "")
-    response = body.get("response", "deny")
+    try:
+        request_id = string_field(body, "request_id")
+        response = string_field(body, "response", "deny")
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     ok = await server.resolve_permission(sid, request_id, response)
     if not ok:
         return not_found_response("request not found")
@@ -155,8 +172,11 @@ async def resolve_askuser(request: Request) -> JSONResponse:
     if not parsed.ok:
         return parsed.error_response()
     body = parsed.payload
-    request_id = body.get("request_id", "")
-    answers = body.get("answers", {})
+    try:
+        request_id = string_field(body, "request_id")
+        answers = object_field(body, "answers")
+    except BodyFieldError as e:
+        return bad_request_response(str(e))
     ok = await server.resolve_askuser(sid, request_id, answers)
     if not ok:
         return not_found_response("request not found")
