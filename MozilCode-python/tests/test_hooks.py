@@ -385,6 +385,64 @@ class TestLoadHooks:
         with pytest.raises(HookConfigError, match="invalid event"):
             load_hooks([{"event": "bad_event", "action": {"type": "command", "command": "x"}}])
 
+    def test_event_must_be_string(self):
+        with pytest.raises(HookConfigError, match="event.*string"):
+            load_hooks([{"event": 7, "action": {"type": "command", "command": "x"}}])
+
+    def test_hook_id_must_be_string(self):
+        with pytest.raises(HookConfigError, match="id.*string"):
+            load_hooks([
+                {
+                    "id": ["bad"],
+                    "event": "startup",
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_hook_id_must_not_be_empty(self):
+        with pytest.raises(HookConfigError, match="id.*empty"):
+            load_hooks([
+                {
+                    "id": "   ",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_condition_must_be_string(self):
+        with pytest.raises(HookConfigError, match="if.*string"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "if": ["tool == Bash"],
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_empty_condition_is_ignored(self):
+        hooks = load_hooks([
+            {
+                "event": "startup",
+                "if": "   ",
+                "action": {"type": "command", "command": "x"},
+            }
+        ])
+        assert hooks[0].condition is None
+
+    def test_top_level_string_fields_are_trimmed(self):
+        hooks = load_hooks([
+            {
+                "id": "  trimmed  ",
+                "event": " startup ",
+                "if": ' tool == "Bash" ',
+                "action": {"type": "command", "command": "x"},
+            }
+        ])
+
+        assert hooks[0].id == "trimmed"
+        assert hooks[0].event == "startup"
+        assert hooks[0].condition is not None
+
     def test_invalid_action_type(self):
         with pytest.raises(HookConfigError, match="invalid action type"):
             load_hooks([{"event": "startup", "action": {"type": "bad"}}])

@@ -21,8 +21,44 @@ class HookConfigError(Exception):
 
 
 def _identify(entry: object, index: int) -> str:
-    hook_id = entry.get("id", "") if isinstance(entry, dict) else ""
-    return f"hook '{hook_id}'" if hook_id else f"hook #{index + 1}"
+    if isinstance(entry, dict):
+        hook_id = entry.get("id", "")
+        if isinstance(hook_id, str) and hook_id.strip():
+            return f"hook '{hook_id.strip()}'"
+    return f"hook #{index + 1}"
+
+
+def _required_top_string(data: dict, field_name: str, label: str) -> str:
+    if field_name not in data or data[field_name] is None:
+        raise HookConfigError(f"{label}: missing '{field_name}' field")
+    value = data[field_name]
+    if not isinstance(value, str):
+        raise HookConfigError(f"{label}: '{field_name}' must be a string")
+    value = value.strip()
+    if not value:
+        raise HookConfigError(f"{label}: missing '{field_name}' field")
+    return value
+
+
+def _optional_top_string(
+    data: dict,
+    field_name: str,
+    label: str,
+    default: str | None = None,
+    *,
+    allow_empty: bool = False,
+) -> str | None:
+    if field_name not in data or data[field_name] is None:
+        return default
+    value = data[field_name]
+    if not isinstance(value, str):
+        raise HookConfigError(f"{label}: '{field_name}' must be a string")
+    value = value.strip()
+    if not value:
+        if allow_empty:
+            return default
+        raise HookConfigError(f"{label}: '{field_name}' must not be empty")
+    return value
 
 
 def _string_field(
@@ -116,9 +152,7 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
         if not isinstance(entry, dict):
             raise HookConfigError(f"{label}: must be a mapping")
 
-        event = entry.get("event")
-        if not event:
-            raise HookConfigError(f"{label}: missing 'event' field")
+        event = _required_top_string(entry, "event", label)
         if event not in _VALID_EVENTS:
             raise HookConfigError(
                 f"{label}: invalid event '{event}', "
@@ -140,14 +174,14 @@ def load_hooks(raw_hooks: list[object] | None) -> list[Hook]:
             )
 
         condition = None
-        raw_if = entry.get("if")
+        raw_if = _optional_top_string(entry, "if", label, allow_empty=True)
         if raw_if:
             try:
-                condition = parse_condition(str(raw_if))
+                condition = parse_condition(raw_if)
             except ConditionParseError as e:
                 raise HookConfigError(f"{label}: condition error: {e}") from e
 
-        hook_id = entry.get("id", f"{event}_{i}")
+        hook_id = _optional_top_string(entry, "id", label, default=f"{event}_{i}")
 
         hooks.append(
             Hook(
