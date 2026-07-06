@@ -274,19 +274,7 @@ class DaemonServer:
             conv.add_user_message(prompt)
             self._emit(sid, user_message_event(task_id, prompt))
             async for event in agent.run(conv):
-                task_event = serialize_task_event(event, task_id)
-                if task_event.future is not None:
-                    session = await self.session_mgr.get_session(sid)
-                    if session:
-                        session.register_future(
-                            task_event.request_id,
-                            task_event.future,
-                        )
-                if task_event.pending_request_id:
-                    self._pending_prompts.setdefault(sid, {})[
-                        task_event.pending_request_id
-                    ] = task_event.message
-                self._emit(sid, task_event.message)
+                await self._record_agent_task_event(sid, task_id, event)
 
             self._emit(sid, loop_complete_event(task_id))
         except asyncio.CancelledError:
@@ -302,6 +290,26 @@ class DaemonServer:
                 self._tasks.pop(sid, None)
                 self._active_task_ids.pop(sid, None)
             self._persist_events(sid)
+
+    async def _record_agent_task_event(
+        self,
+        sid: str,
+        task_id: str,
+        event: object,
+    ) -> None:
+        task_event = serialize_task_event(event, task_id)
+        if task_event.future is not None:
+            session = await self.session_mgr.get_session(sid)
+            if session:
+                session.register_future(
+                    task_event.request_id,
+                    task_event.future,
+                )
+        if task_event.pending_request_id:
+            self._pending_prompts.setdefault(sid, {})[
+                task_event.pending_request_id
+            ] = task_event.message
+        self._emit(sid, task_event.message)
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
         """Switch a session's permission mode and return fresh status."""
