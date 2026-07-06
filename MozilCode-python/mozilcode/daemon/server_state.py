@@ -568,18 +568,6 @@ class DaemonServer:
             self._emit(sid, {"type": "AskUserResolved", "data": {"request_id": request_id}})
         return ok
 
-    async def invalidate_idle_agents(self) -> None:
-        """Drop cached Agent instances so updated provider config applies."""
-        for sid in list(self._agents.keys()):
-            task = self._tasks.get(sid)
-            if task and not task.done():
-                continue
-            entry = self._agents.pop(sid, None)
-            if entry is not None and entry[0].memory_hub is not None:
-                await entry[0].memory_hub.shutdown()
-            await self.session_mgr.close_session(sid)
-            self._pre_plan_modes.pop(sid, None)
-
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""
         task = self._tasks.pop(sid, None)
