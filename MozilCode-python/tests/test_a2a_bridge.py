@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from mozilcode.a2a.bridge import A2ABridge, TASK_COMPLETED
+from mozilcode.a2a.bridge import (
+    A2ABridge,
+    TASK_COMPLETED,
+    TASK_FAILED,
+    TASK_INPUT_REQUIRED,
+)
 from mozilcode.config import AppConfig, ProviderConfig
 
 
@@ -44,6 +49,18 @@ class _FakeDaemon:
     def cancel_active_task(self, sid):
         self.logs[sid].append({"type": "TaskCancelled", "task_id": "task-x", "data": {}})
         return True
+
+
+class _ScriptedDaemon(_FakeDaemon):
+    def __init__(self, script):
+        super().__init__()
+        self.script = script
+
+    async def start_task(self, sid, prompt):
+        self._task_counter += 1
+        task_id = f"task-{self._task_counter}"
+        self.logs[sid].extend(self.script(task_id, prompt))
+        return task_id
 
 
 @pytest.mark.asyncio
@@ -91,3 +108,45 @@ async def test_a2a_json_rpc_send_and_get_task():
 
     assert get["result"]["id"] == task_id
     assert get["result"]["status"]["state"] == TASK_COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_a2a_task_enters_input_required_for_interactive_events():
+    bridge = A2ABridge(
+        _ScriptedDaemon(
+            lambda task_id, _prompt: [
+                {"type": "PermissionRequest", "task_id": task_id, "data": {}},
+            ]
+        ),
+        default_wait_timeout=1,
+    )
+
+    result = await bridge.send_message({
+        "message": {"parts": [{"kind": "text", "text": "needs input"}]},
+        "configuration": {"returnImmediately": True},
+    })
+
+    assert result["status"]["state"] == TASK_INPUT_REQUIRED
+    assert "requires interactive input" in result["status"]["message"]["parts"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a2a_task_ignores_foreign_events_before_failure():
+    bridge = A2ABridge(
+        _ScriptedDaemon(
+            lambda task_id, _prompt: [
+                {"type": "StreamText", "task_id": "other", "data": {"text": "ignore"}},
+                {"type": "ErrorEvent", "task_id": task_id, "data": {"message": "boom"}},
+            ]
+        ),
+        default_wait_timeout=1,
+    )
+
+    result = await bridge.send_message({
+        "message": {"parts": [{"kind": "text", "text": "fail"}]},
+        "configuration": {"returnImmediately": True},
+    })
+
+    assert result["status"]["state"] == TASK_FAILED
+    assert result["metadata"]["error"] == "boom"
+    assert "artifacts" not in result
