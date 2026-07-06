@@ -1,11 +1,12 @@
 import pytest
+from starlette.routing import Route, WebSocketRoute
 from starlette.testclient import TestClient
 
 from mozilcode.config import (
     AppConfig,
     ProviderConfig,
 )
-from mozilcode.daemon.routes import build_routes
+from mozilcode.daemon.routes import HTTP_ROUTES, WEBSOCKET_ROUTES, build_routes
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime
@@ -175,32 +176,56 @@ def test_a2a_message_send_rejects_non_object_configuration(tmp_path):
 
 
 def test_route_registry_keeps_local_daemon_surface_only():
-    assert {route.path for route in build_routes()} == {
-        "/.well-known/agent-card.json",
-        "/a2a/agent-card.json",
-        "/a2a/rpc",
-        "/a2a/message:send",
-        "/a2a/tasks/{task_id}",
-        "/a2a/tasks/{task_id}:cancel",
-        "/api/health",
-        "/api/session",
-        "/api/sessions",
-        "/api/task",
-        "/api/session/{sid}/status",
-        "/api/session/{sid}/mode",
-        "/api/session/{sid}/cancel",
-        "/api/session/{sid}/tasks",
-        "/api/session/{sid}/tasks/{task_id}/cancel",
-        "/api/session/{sid}/worktrees",
-        "/api/session/{sid}/worktrees/{name:path}/enter",
-        "/api/session/{sid}/worktrees/exit",
-        "/api/permission/{sid}",
-        "/api/askuser/{sid}",
-        "/api/compact/{sid}",
-        "/api/session/{sid}",
-        "/api/fs/{sid}",
-        "/api/stream/{sid}",
-    }
+    assert [(spec.path, spec.methods) for spec in HTTP_ROUTES] == [
+        ("/.well-known/agent-card.json", ("GET",)),
+        ("/a2a/agent-card.json", ("GET",)),
+        ("/a2a/rpc", ("POST",)),
+        ("/a2a/message:send", ("POST",)),
+        ("/a2a/tasks/{task_id}", ("GET",)),
+        ("/a2a/tasks/{task_id}:cancel", ("POST",)),
+        ("/api/health", ("GET",)),
+        ("/api/session", ("POST",)),
+        ("/api/sessions", ("GET",)),
+        ("/api/task", ("POST",)),
+        ("/api/session/{sid}/status", ("GET",)),
+        ("/api/session/{sid}/mode", ("POST",)),
+        ("/api/session/{sid}/cancel", ("POST",)),
+        ("/api/session/{sid}/tasks", ("GET",)),
+        ("/api/session/{sid}/tasks/{task_id}/cancel", ("POST",)),
+        ("/api/session/{sid}/worktrees", ("GET",)),
+        ("/api/session/{sid}/worktrees", ("POST",)),
+        ("/api/session/{sid}/worktrees/{name:path}/enter", ("POST",)),
+        ("/api/session/{sid}/worktrees/exit", ("POST",)),
+        ("/api/permission/{sid}", ("POST",)),
+        ("/api/askuser/{sid}", ("POST",)),
+        ("/api/compact/{sid}", ("POST",)),
+        ("/api/session/{sid}", ("GET",)),
+        ("/api/session/{sid}", ("DELETE",)),
+        ("/api/fs/{sid}", ("GET",)),
+    ]
+    assert [(spec.path, "WEBSOCKET") for spec in WEBSOCKET_ROUTES] == [
+        ("/api/stream/{sid}", "WEBSOCKET"),
+    ]
+
+
+def test_build_routes_matches_declared_route_specs():
+    actual_http = []
+    actual_websocket = []
+    for route in build_routes():
+        if isinstance(route, WebSocketRoute):
+            actual_websocket.append((route.path, route.endpoint))
+        elif isinstance(route, Route):
+            methods = tuple(sorted((route.methods or set()) - {"HEAD"}))
+            actual_http.append((route.path, route.endpoint, methods))
+
+    assert actual_http == [
+        (spec.path, spec.endpoint, spec.methods)
+        for spec in HTTP_ROUTES
+    ]
+    assert actual_websocket == [
+        (spec.path, spec.endpoint)
+        for spec in WEBSOCKET_ROUTES
+    ]
 
 
 def test_create_session_rejects_malformed_json(tmp_path):

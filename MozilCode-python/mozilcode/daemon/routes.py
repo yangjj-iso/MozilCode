@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
 from starlette.routing import BaseRoute, Route, WebSocketRoute
 
 from mozilcode.daemon.a2a_routes import (
@@ -35,32 +39,67 @@ from mozilcode.daemon.workspace_routes import (
 )
 
 
+@dataclass(frozen=True)
+class HttpRouteSpec:
+    path: str
+    endpoint: Callable[..., Any]
+    methods: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WebSocketRouteSpec:
+    path: str
+    endpoint: Callable[..., Any]
+
+
+HTTP_ROUTES: tuple[HttpRouteSpec, ...] = (
+    HttpRouteSpec("/.well-known/agent-card.json", a2a_agent_card, ("GET",)),
+    HttpRouteSpec("/a2a/agent-card.json", a2a_agent_card, ("GET",)),
+    HttpRouteSpec("/a2a/rpc", a2a_rpc, ("POST",)),
+    HttpRouteSpec("/a2a/message:send", a2a_message_send, ("POST",)),
+    HttpRouteSpec("/a2a/tasks/{task_id}", a2a_task_get, ("GET",)),
+    HttpRouteSpec("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, ("POST",)),
+    HttpRouteSpec("/api/health", health, ("GET",)),
+    HttpRouteSpec("/api/session", create_session, ("POST",)),
+    HttpRouteSpec("/api/sessions", list_sessions, ("GET",)),
+    HttpRouteSpec("/api/task", start_task, ("POST",)),
+    HttpRouteSpec("/api/session/{sid}/status", session_status, ("GET",)),
+    HttpRouteSpec("/api/session/{sid}/mode", set_session_mode, ("POST",)),
+    HttpRouteSpec("/api/session/{sid}/cancel", cancel_active_task, ("POST",)),
+    HttpRouteSpec("/api/session/{sid}/tasks", list_background_tasks, ("GET",)),
+    HttpRouteSpec(
+        "/api/session/{sid}/tasks/{task_id}/cancel",
+        cancel_background_task,
+        ("POST",),
+    ),
+    HttpRouteSpec("/api/session/{sid}/worktrees", list_worktrees, ("GET",)),
+    HttpRouteSpec("/api/session/{sid}/worktrees", create_worktree, ("POST",)),
+    HttpRouteSpec(
+        "/api/session/{sid}/worktrees/{name:path}/enter",
+        enter_worktree,
+        ("POST",),
+    ),
+    HttpRouteSpec("/api/session/{sid}/worktrees/exit", exit_worktree, ("POST",)),
+    HttpRouteSpec("/api/permission/{sid}", resolve_permission, ("POST",)),
+    HttpRouteSpec("/api/askuser/{sid}", resolve_askuser, ("POST",)),
+    HttpRouteSpec("/api/compact/{sid}", manual_compact, ("POST",)),
+    HttpRouteSpec("/api/session/{sid}", session_info, ("GET",)),
+    HttpRouteSpec("/api/session/{sid}", close_session, ("DELETE",)),
+    HttpRouteSpec("/api/fs/{sid}", list_files, ("GET",)),
+)
+
+WEBSOCKET_ROUTES: tuple[WebSocketRouteSpec, ...] = (
+    WebSocketRouteSpec("/api/stream/{sid}", stream_events),
+)
+
+
 def build_routes() -> list[BaseRoute]:
-    return [
-        Route("/.well-known/agent-card.json", a2a_agent_card, methods=["GET"]),
-        Route("/a2a/agent-card.json", a2a_agent_card, methods=["GET"]),
-        Route("/a2a/rpc", a2a_rpc, methods=["POST"]),
-        Route("/a2a/message:send", a2a_message_send, methods=["POST"]),
-        Route("/a2a/tasks/{task_id}", a2a_task_get, methods=["GET"]),
-        Route("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, methods=["POST"]),
-        Route("/api/health", health, methods=["GET"]),
-        Route("/api/session", create_session, methods=["POST"]),
-        Route("/api/sessions", list_sessions, methods=["GET"]),
-        Route("/api/task", start_task, methods=["POST"]),
-        Route("/api/session/{sid}/status", session_status, methods=["GET"]),
-        Route("/api/session/{sid}/mode", set_session_mode, methods=["POST"]),
-        Route("/api/session/{sid}/cancel", cancel_active_task, methods=["POST"]),
-        Route("/api/session/{sid}/tasks", list_background_tasks, methods=["GET"]),
-        Route("/api/session/{sid}/tasks/{task_id}/cancel", cancel_background_task, methods=["POST"]),
-        Route("/api/session/{sid}/worktrees", list_worktrees, methods=["GET"]),
-        Route("/api/session/{sid}/worktrees", create_worktree, methods=["POST"]),
-        Route("/api/session/{sid}/worktrees/{name:path}/enter", enter_worktree, methods=["POST"]),
-        Route("/api/session/{sid}/worktrees/exit", exit_worktree, methods=["POST"]),
-        Route("/api/permission/{sid}", resolve_permission, methods=["POST"]),
-        Route("/api/askuser/{sid}", resolve_askuser, methods=["POST"]),
-        Route("/api/compact/{sid}", manual_compact, methods=["POST"]),
-        Route("/api/session/{sid}", session_info, methods=["GET"]),
-        Route("/api/session/{sid}", close_session, methods=["DELETE"]),
-        Route("/api/fs/{sid}", list_files, methods=["GET"]),
-        WebSocketRoute("/api/stream/{sid}", stream_events),
+    routes: list[BaseRoute] = [
+        Route(spec.path, spec.endpoint, methods=list(spec.methods))
+        for spec in HTTP_ROUTES
     ]
+    routes.extend(
+        WebSocketRoute(spec.path, spec.endpoint)
+        for spec in WEBSOCKET_ROUTES
+    )
+    return routes
