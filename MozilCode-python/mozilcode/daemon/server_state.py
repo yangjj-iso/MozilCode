@@ -211,6 +211,16 @@ class DaemonServer:
     def _session_not_found(self) -> DaemonActionResult:
         return DaemonActionResult({"error": "session not found"}, status_code=404)
 
+    def _bad_request(self, message: str) -> DaemonActionResult:
+        return DaemonActionResult({"error": message}, status_code=400)
+
+    def _status_payload(self, sid: str, **payload: object) -> dict:
+        return {**payload, "status": self.status(sid)}
+
+    def _set_agent_work_dir(self, sid: str, agent: Agent, work_dir: str) -> None:
+        agent.work_dir = work_dir
+        self.update_session_work_dir(sid, work_dir)
+
     async def _require_deps(
         self,
         sid: str,
@@ -429,7 +439,7 @@ class DaemonServer:
         name = name.strip()
         base_branch = (base_branch or "HEAD").strip()
         if not name:
-            return DaemonActionResult({"error": "name is required"}, status_code=400)
+            return self._bad_request("name is required")
 
         agent, deps, error = await self._require_agent_and_deps(sid)
         if error is not None:
@@ -439,16 +449,15 @@ class DaemonServer:
         try:
             worktree = await deps.worktree_manager.create(name, base_branch)
             session = await deps.worktree_manager.enter(name)
-            agent.work_dir = session.worktree_path
-            self.update_session_work_dir(sid, session.worktree_path)
+            self._set_agent_work_dir(sid, agent, session.worktree_path)
         except Exception as e:
-            return DaemonActionResult({"error": str(e)}, status_code=400)
+            return self._bad_request(str(e))
 
         return DaemonActionResult(
-            {
-                "worktree": worktree_to_dict(worktree, name),
-                "status": self.status(sid),
-            }
+            self._status_payload(
+                sid,
+                worktree=worktree_to_dict(worktree, name),
+            )
         )
 
     async def enter_worktree(self, sid: str, name: str) -> DaemonActionResult:
@@ -459,12 +468,11 @@ class DaemonServer:
 
         try:
             session = await deps.worktree_manager.enter(name)
-            agent.work_dir = session.worktree_path
-            self.update_session_work_dir(sid, session.worktree_path)
+            self._set_agent_work_dir(sid, agent, session.worktree_path)
         except Exception as e:
-            return DaemonActionResult({"error": str(e)}, status_code=400)
+            return self._bad_request(str(e))
 
-        return DaemonActionResult({"entered": True, "status": self.status(sid)})
+        return DaemonActionResult(self._status_payload(sid, entered=True))
 
     async def exit_worktree(
         self,
@@ -481,7 +489,7 @@ class DaemonServer:
         manager = deps.worktree_manager
         session = manager.get_current_session()
         if session is None:
-            return DaemonActionResult({"error": "not in a worktree"}, status_code=400)
+            return self._bad_request("not in a worktree")
 
         try:
             await manager.exit(
@@ -489,12 +497,11 @@ class DaemonServer:
                 action="remove" if remove else "keep",
                 discard_changes=discard,
             )
-            agent.work_dir = session.original_cwd
-            self.update_session_work_dir(sid, session.original_cwd)
+            self._set_agent_work_dir(sid, agent, session.original_cwd)
         except Exception as e:
-            return DaemonActionResult({"error": str(e)}, status_code=400)
+            return self._bad_request(str(e))
 
-        return DaemonActionResult({"exited": True, "status": self.status(sid)})
+        return DaemonActionResult(self._status_payload(sid, exited=True))
 
     async def list_background_tasks(self, sid: str) -> DaemonActionResult:
         deps, error = await self._require_deps(sid)

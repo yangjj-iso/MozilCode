@@ -132,6 +132,18 @@ async def test_create_worktree_enters_and_updates_session_work_dir(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_create_worktree_requires_name(tmp_path):
+    server, sid, _agent, _manager = _server_with_worktrees(tmp_path)
+
+    result = await server.create_worktree(sid, " ")
+
+    assert result == DaemonActionResult(
+        {"error": "name is required"},
+        status_code=400,
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_worktrees_marks_current_worktree(tmp_path):
     server, sid, _agent, _manager = _server_with_worktrees(tmp_path)
     await server.create_worktree(sid, "feature", "HEAD")
@@ -153,6 +165,18 @@ async def test_enter_worktree_updates_agent_and_status(tmp_path):
     assert result.payload["entered"] is True
     assert result.payload["status"]["work_dir"].endswith("/.mozilcode/worktrees/feature")
     assert agent.work_dir.endswith("/.mozilcode/worktrees/feature")
+
+
+@pytest.mark.asyncio
+async def test_enter_worktree_returns_manager_error(tmp_path):
+    server, sid, _agent, _manager = _server_with_worktrees(tmp_path)
+
+    result = await server.enter_worktree(sid, "missing")
+
+    assert result == DaemonActionResult(
+        {"error": "worktree not found: missing"},
+        status_code=400,
+    )
 
 
 @pytest.mark.asyncio
