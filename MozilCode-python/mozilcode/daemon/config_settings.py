@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import yaml
 
 from mozilcode.config import AppConfig, load_config
-from mozilcode.daemon.gui_settings import coerce_bool
+from mozilcode.daemon.settings import coerce_bool
 from mozilcode.validator import ConfigError, validate_config_structure, validate_memory
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
@@ -58,7 +58,7 @@ def public_config(config: AppConfig | None, error: str = "") -> dict:
     }
 
 
-def provider_from_gui_entry(
+def provider_from_settings_entry(
     entry: dict,
     current_by_name: dict[str, Any],
     fallback: Any | None = None,
@@ -96,7 +96,7 @@ def provider_from_gui_entry(
     }
 
 
-def providers_from_gui_payload(
+def providers_from_settings_payload(
     body: dict,
     current: AppConfig | None = None,
 ) -> list[dict]:
@@ -105,12 +105,12 @@ def providers_from_gui_payload(
     fallback = current_providers[0] if current_providers else None
     raw_providers = body.get("providers")
     if raw_providers is None:
-        providers = [provider_from_gui_entry(body, current_by_name, fallback)]
+        providers = [provider_from_settings_entry(body, current_by_name, fallback)]
     else:
         if not isinstance(raw_providers, list):
             raise ConfigError("'providers' must be a list")
         providers = [
-            provider_from_gui_entry(entry, current_by_name)
+            provider_from_settings_entry(entry, current_by_name)
             for entry in raw_providers
         ]
 
@@ -152,8 +152,8 @@ def default_config_raw() -> dict:
     }
 
 
-def config_from_gui_payload(body: dict, current: AppConfig | None = None) -> dict:
-    providers = providers_from_gui_payload(body, current)
+def config_from_settings_payload(body: dict, current: AppConfig | None = None) -> dict:
+    providers = providers_from_settings_payload(body, current)
     raw = app_config_to_raw(current) if current is not None else default_config_raw()
     raw["providers"] = providers
     raw["permission_mode"] = str(

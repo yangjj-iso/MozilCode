@@ -9,14 +9,14 @@ from mozilcode.config import (
     load_config,
 )
 from mozilcode.daemon import config_settings
-from mozilcode.daemon.config_settings import config_from_gui_payload
-from mozilcode.daemon.gui_settings import normalize_gui_settings
-from mozilcode.daemon.gui_settings import public_qqbot_status
-from mozilcode.daemon.gui_settings import public_telegrambot_status
-from mozilcode.daemon.gui_settings import qqbot_settings_from_payload
-from mozilcode.daemon.gui_settings import resolve_qqbot_config
-from mozilcode.daemon.gui_settings import resolve_telegrambot_config
-from mozilcode.daemon.gui_settings import telegrambot_settings_from_payload
+from mozilcode.daemon.config_settings import config_from_settings_payload
+from mozilcode.daemon.settings import normalize_daemon_settings
+from mozilcode.daemon.settings import public_qqbot_status
+from mozilcode.daemon.settings import public_telegrambot_status
+from mozilcode.daemon.settings import qqbot_settings_from_payload
+from mozilcode.daemon.settings import resolve_qqbot_config
+from mozilcode.daemon.settings import resolve_telegrambot_config
+from mozilcode.daemon.settings import telegrambot_settings_from_payload
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.permissions.modes import PermissionMode
@@ -52,19 +52,19 @@ class _FakeDeps:
         self.provider = provider
 
 
-def test_normalize_gui_settings_returns_independent_defaults():
-    first = normalize_gui_settings({})
+def test_normalize_daemon_settings_returns_independent_defaults():
+    first = normalize_daemon_settings({})
     first["mcp_servers"].append({"name": "local"})
     first["qqbot"]["enabled"] = True
 
-    second = normalize_gui_settings({})
+    second = normalize_daemon_settings({})
 
     assert second["mcp_servers"] == []
     assert second["qqbot"] == {}
 
 
-def test_gui_config_normalizes_local_openai_base_url_to_v1():
-    raw = config_from_gui_payload({
+def test_settings_config_normalizes_local_openai_base_url_to_v1():
+    raw = config_from_settings_payload({
         "protocol": "openai",
         "name": "openai",
         "base_url": "http://127.0.0.1:8080",
@@ -75,7 +75,7 @@ def test_gui_config_normalizes_local_openai_base_url_to_v1():
     assert raw["providers"][0]["base_url"] == "http://127.0.0.1:8080/v1"
 
 
-def test_gui_config_preserves_existing_api_key_when_submitted_blank():
+def test_settings_config_preserves_existing_api_key_when_submitted_blank():
     current = AppConfig(providers=[
         ProviderConfig(
             name="openai",
@@ -86,7 +86,7 @@ def test_gui_config_preserves_existing_api_key_when_submitted_blank():
         )
     ])
 
-    raw = config_from_gui_payload({
+    raw = config_from_settings_payload({
         "protocol": "openai",
         "name": "openai",
         "base_url": "http://127.0.0.1:8080/v1",
@@ -97,7 +97,7 @@ def test_gui_config_preserves_existing_api_key_when_submitted_blank():
     assert raw["providers"][0]["api_key"] == "existing-key"
 
 
-def test_gui_config_accepts_multiple_providers_and_preserves_secrets_by_name():
+def test_settings_config_accepts_multiple_providers_and_preserves_secrets_by_name():
     current = AppConfig(providers=[
         ProviderConfig(
             name="openai",
@@ -115,7 +115,7 @@ def test_gui_config_accepts_multiple_providers_and_preserves_secrets_by_name():
         ),
     ])
 
-    raw = config_from_gui_payload({
+    raw = config_from_settings_payload({
         "providers": [
             {
                 "name": "anthropic",
@@ -140,7 +140,7 @@ def test_gui_config_accepts_multiple_providers_and_preserves_secrets_by_name():
     assert raw["providers"][1]["base_url"] == "http://127.0.0.1:8080/v1"
 
 
-def test_gui_config_preserves_existing_api_key_when_provider_is_renamed():
+def test_settings_config_preserves_existing_api_key_when_provider_is_renamed():
     current = AppConfig(providers=[
         ProviderConfig(
             name="openai",
@@ -151,7 +151,7 @@ def test_gui_config_preserves_existing_api_key_when_provider_is_renamed():
         ),
     ])
 
-    raw = config_from_gui_payload({
+    raw = config_from_settings_payload({
         "providers": [
             {
                 "previous_name": "openai",
@@ -168,9 +168,9 @@ def test_gui_config_preserves_existing_api_key_when_provider_is_renamed():
     assert raw["providers"][0]["api_key"] == "openai-key"
 
 
-def test_gui_config_rejects_duplicate_provider_names():
+def test_settings_config_rejects_duplicate_provider_names():
     with pytest.raises(ConfigError, match="Duplicate provider names"):
-        config_from_gui_payload({
+        config_from_settings_payload({
             "providers": [
                 {
                     "name": "openai",
@@ -313,6 +313,21 @@ def test_memory_settings_endpoint_returns_provider_metadata(tmp_path):
     ]
 
 
+def test_root_route_is_not_a_frontend_shell(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 404
+
+
 def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monkeypatch):
     monkeypatch.setattr(config_settings, "USER_CONFIG_FILE", tmp_path / "config.yaml")
     provider = ProviderConfig(
@@ -388,7 +403,7 @@ def test_create_session_rejects_malformed_json(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_gui_command_acceptance_stays_separate_from_plan_mode(tmp_path):
+async def test_command_acceptance_stays_separate_from_plan_mode(tmp_path):
     provider = ProviderConfig(
         name="openai",
         protocol="openai",

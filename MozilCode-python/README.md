@@ -16,7 +16,7 @@ Run the CLI:
 uv run mozilcode
 ```
 
-Run the daemon used by the desktop GUI:
+Run the local daemon:
 
 ```powershell
 uv run mozilcode-daemon
@@ -31,7 +31,7 @@ The daemon also exposes a non-streaming A2A bridge:
 - Agent card: `GET http://127.0.0.1:7800/.well-known/agent-card.json`
 - JSON-RPC: `POST http://127.0.0.1:7800/a2a/rpc`
 
-Official bot integrations are configured in the GUI under `个人中心 -> QQ Bot` or `个人中心 -> Telegram Bot`. Secrets are stored locally in `~/.mozilcode/gui_settings.json` and are not returned by status APIs.
+Official bot integrations can be configured through environment variables or the local daemon settings APIs. Secrets are stored locally in `~/.mozilcode/daemon_settings.json` and are not returned by status APIs.
 
 Official QQ Bot Gateway:
 

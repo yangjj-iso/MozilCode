@@ -10,11 +10,12 @@ from mozilcode.a2a.telegram_official import TelegramBotConfig
 
 log = logging.getLogger(__name__)
 
-GUI_SETTINGS_FILE = Path.home() / ".mozilcode" / "gui_settings.json"
+DAEMON_SETTINGS_FILE = Path.home() / ".mozilcode" / "daemon_settings.json"
 QQBOT_PROVIDER = "official"
 TELEGRAMBOT_PROVIDER = "telegram-official"
 
-def default_gui_settings() -> dict:
+
+def default_daemon_settings() -> dict:
     return {
         "mcp_servers": [],
         "disabled_skills": [],
@@ -23,18 +24,18 @@ def default_gui_settings() -> dict:
     }
 
 
-def load_gui_settings() -> dict:
+def load_daemon_settings() -> dict:
     try:
-        data = json.loads(GUI_SETTINGS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(DAEMON_SETTINGS_FILE.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return normalize_gui_settings(data)
+            return normalize_daemon_settings(data)
     except Exception:
         pass
-    return normalize_gui_settings({})
+    return normalize_daemon_settings({})
 
 
-def normalize_gui_settings(data: dict | None) -> dict:
-    normalized = default_gui_settings()
+def normalize_daemon_settings(data: dict | None) -> dict:
+    normalized = default_daemon_settings()
     if isinstance(data, dict):
         normalized.update(data)
     normalized.setdefault("mcp_servers", [])
@@ -44,15 +45,15 @@ def normalize_gui_settings(data: dict | None) -> dict:
     return normalized
 
 
-def save_gui_settings(data: dict) -> None:
+def save_daemon_settings(data: dict) -> None:
     try:
-        GUI_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        GUI_SETTINGS_FILE.write_text(
-            json.dumps(normalize_gui_settings(data), ensure_ascii=False, indent=2),
+        DAEMON_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DAEMON_SETTINGS_FILE.write_text(
+            json.dumps(normalize_daemon_settings(data), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     except Exception as e:
-        log.warning("Failed to save gui settings: %s", e)
+        log.warning("Failed to save daemon settings: %s", e)
 
 
 def coerce_bool(value: Any, default: bool = False) -> bool:
@@ -122,7 +123,7 @@ def qqbot_settings_from_payload(body: dict, current: dict | None = None) -> dict
 
 
 def resolve_qqbot_config(settings: dict | None = None) -> tuple[bool, OfficialQQConfig, dict]:
-    data = settings if isinstance(settings, dict) else load_gui_settings()
+    data = settings if isinstance(settings, dict) else load_daemon_settings()
     raw = data.get("qqbot") if isinstance(data, dict) else {}
     raw = raw if isinstance(raw, dict) else {}
     saved = bool(raw)
@@ -164,7 +165,7 @@ def public_qqbot_status(app: Any | None = None, settings: dict | None = None) ->
         "allowed_groups": id_list_text(cfg.allowed_groups),
         "intents": cfg.intents,
         "shard": [cfg.shard_id, cfg.shard_count],
-        "config_path": str(GUI_SETTINGS_FILE),
+        "config_path": str(DAEMON_SETTINGS_FILE),
         **status,
     }
 
@@ -191,7 +192,7 @@ def telegrambot_settings_from_payload(body: dict, current: dict | None = None) -
 
 
 def resolve_telegrambot_config(settings: dict | None = None) -> tuple[bool, TelegramBotConfig, dict]:
-    data = settings if isinstance(settings, dict) else load_gui_settings()
+    data = settings if isinstance(settings, dict) else load_daemon_settings()
     raw = data.get("telegrambot") if isinstance(data, dict) else {}
     raw = raw if isinstance(raw, dict) else {}
     saved = bool(raw)
@@ -227,6 +228,6 @@ def public_telegrambot_status(app: Any | None = None, settings: dict | None = No
         "command_prefix": cfg.command_prefix,
         "allowed_users": id_list_text(cfg.allowed_users),
         "allowed_chats": id_list_text(cfg.allowed_chats),
-        "config_path": str(GUI_SETTINGS_FILE),
+        "config_path": str(DAEMON_SETTINGS_FILE),
         **status,
     }

@@ -1,11 +1,11 @@
 """MozilCode local daemon: exposes the headless Agent over HTTP + WebSocket.
 
 This package wraps mozilcode-core (which is already headless) in a local
-server that GUI clients, mobile clients, or other tools can connect to.
+server that CLI helpers, A2A adapters, mobile clients, or other tools can connect to.
 
 Architecture:
 
-    Client (GUI/TUI/Mobile)
+    Client (CLI/A2A/Mobile)
         │  HTTP POST /api/task        → start a task
         │  WS   /api/stream/{task_id} → stream events
         │  HTTP POST /api/permission  → resolve permission request

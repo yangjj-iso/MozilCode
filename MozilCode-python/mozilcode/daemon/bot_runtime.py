@@ -6,14 +6,14 @@ from typing import Any
 from mozilcode.a2a.bridge import A2ABridge
 from mozilcode.a2a.qq_official import create_official_qq_gateway
 from mozilcode.a2a.telegram_official import create_telegram_bot_runner
-from mozilcode.daemon.gui_settings import (
-    load_gui_settings,
+from mozilcode.daemon.settings import (
+    load_daemon_settings,
     public_qqbot_status,
     public_telegrambot_status,
     qqbot_settings_from_payload,
     resolve_qqbot_config,
     resolve_telegrambot_config,
-    save_gui_settings,
+    save_daemon_settings,
     telegrambot_settings_from_payload,
 )
 
@@ -77,13 +77,13 @@ async def save_qqbot_settings(app: Any, bridge: A2ABridge, body: dict) -> dict:
     if not isinstance(body, dict):
         raise ValueError("JSON object is required")
 
-    data = load_gui_settings()
+    data = load_daemon_settings()
     data["qqbot"] = qqbot_settings_from_payload(body, data.get("qqbot"))
     enabled, cfg, _settings = resolve_qqbot_config(data)
     if enabled and not cfg.is_configured():
         raise ValueError("启用 QQ Bot 需要 AppID 和 AppSecret")
 
-    save_gui_settings(data)
+    save_daemon_settings(data)
     await apply_qq_official_gateway(app, bridge, restart=True)
     return {"ok": True, **public_qqbot_status(app)}
 
@@ -124,12 +124,12 @@ async def save_telegrambot_settings(app: Any, bridge: A2ABridge, body: dict) -> 
     if not isinstance(body, dict):
         raise ValueError("JSON object is required")
 
-    data = load_gui_settings()
+    data = load_daemon_settings()
     data["telegrambot"] = telegrambot_settings_from_payload(body, data.get("telegrambot"))
     enabled, cfg, _settings = resolve_telegrambot_config(data)
     if enabled and not cfg.is_configured():
         raise ValueError("启用 Telegram Bot 需要 Bot Token")
 
-    save_gui_settings(data)
+    save_daemon_settings(data)
     await apply_telegram_bot_runner(app, bridge, restart=True)
     return {"ok": True, **public_telegrambot_status(app)}

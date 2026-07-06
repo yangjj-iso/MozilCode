@@ -60,14 +60,14 @@ from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
 
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.gui_settings import (
-    load_gui_settings as _load_gui_settings,
-    save_gui_settings as _save_gui_settings,
+from mozilcode.daemon.settings import (
+    load_daemon_settings as _load_daemon_settings,
+    save_daemon_settings as _save_daemon_settings,
 )
 from mozilcode.daemon.config_settings import (
     USER_CONFIG_FILE as _USER_CONFIG_FILE,
     app_config_to_raw as _app_config_to_raw,
-    config_from_gui_payload as _config_from_gui_payload,
+    config_from_settings_payload as _config_from_settings_payload,
     memory_settings_from_payload as _memory_settings_from_payload,
     public_config as _public_config,
     public_memory_settings as _public_memory_settings,
@@ -91,6 +91,12 @@ from mozilcode.daemon.bot_runtime import (
     start_configured_bots as _start_configured_bots,
     stop_configured_bots as _stop_configured_bots,
     telegrambot_status as _telegrambot_status,
+)
+from mozilcode.daemon.workspace_payloads import (
+    WorkspacePathError,
+    list_workspace_directory as _list_workspace_directory,
+    task_to_dict as _task_to_dict,
+    worktree_to_dict as _worktree_to_dict,
 )
 from mozilcode.a2a.bridge import A2ABridge, A2AError
 
@@ -498,7 +504,7 @@ class DaemonServer:
         return status
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
-        """Return the GUI-facing command acceptance state, excluding plan mode."""
+        """Return the command acceptance state, excluding plan mode."""
         if agent is not None:
             if agent.permission_mode == PermissionMode.PLAN:
                 pre_plan = self._pre_plan_modes.get(sid)
@@ -671,7 +677,7 @@ async def save_config(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     try:
         body = await request.json()
-        raw = _config_from_gui_payload(body or {}, server.config)
+        raw = _config_from_settings_payload(body or {}, server.config)
         server.config = _write_user_config(raw)
         await server.invalidate_idle_agents()
     except (ConfigError, ValueError, TypeError) as e:
@@ -755,22 +761,6 @@ async def cancel_active_task(request: Request) -> JSONResponse:
     return JSONResponse({"cancelled": cancelled})
 
 
-def _task_to_dict(task: Any) -> dict:
-    elapsed = (task.end_time or time.monotonic()) - task.start_time
-    return {
-        "id": task.id,
-        "name": task.name,
-        "task": task.task,
-        "status": task.status,
-        "result": task.result,
-        "elapsed": elapsed,
-        "input_tokens": task.progress.input_tokens,
-        "output_tokens": task.progress.output_tokens,
-        "tool_call_count": task.progress.tool_call_count,
-        "last_activity": task.progress.last_activity,
-    }
-
-
 async def list_background_tasks(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     sid = request.path_params["sid"]
@@ -791,18 +781,6 @@ async def cancel_background_task(request: Request) -> JSONResponse:
     if deps is None:
         return JSONResponse({"error": "session not found"}, status_code=404)
     return JSONResponse({"cancelled": deps.task_manager.cancel(task_id)})
-
-
-def _worktree_to_dict(wt: Any, current_name: str | None = None) -> dict:
-    return {
-        "name": wt.name,
-        "path": wt.path,
-        "branch": wt.branch,
-        "based_on": wt.based_on,
-        "head_commit": wt.head_commit,
-        "created": wt.created.isoformat() if getattr(wt, "created", None) else "",
-        "current": wt.name == current_name,
-    }
 
 
 async def list_worktrees(request: Request) -> JSONResponse:
@@ -910,20 +888,11 @@ async def list_files(request: Request) -> JSONResponse:
         return JSONResponse({"error": "session not found"}, status_code=404)
     root = Path(meta.get("work_dir") or server.work_dir).resolve()
     rel = request.query_params.get("path", "") or ""
-    target = (root / rel).resolve()
     try:
-        target.relative_to(root)
-    except ValueError:
-        return JSONResponse({"error": "path outside workspace"}, status_code=400)
-    if not target.is_dir():
-        return JSONResponse({"error": "not a directory"}, status_code=400)
-    entries = []
-    try:
-        for p in sorted(target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-            entries.append({"name": p.name, "is_dir": p.is_dir()})
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    return JSONResponse({"root": str(root), "entries": entries})
+        payload = _list_workspace_directory(root, rel)
+    except WorkspacePathError as e:
+        return JSONResponse({"error": str(e)}, status_code=e.status_code)
+    return JSONResponse(payload)
 
 
 async def start_task(request: Request) -> JSONResponse:
@@ -1109,15 +1078,15 @@ async def stream_events(websocket: WebSocket) -> None:
 
 
 async def mcp_list(request: Request) -> JSONResponse:
-    return JSONResponse({"servers": _list_mcp_servers(_load_gui_settings())})
+    return JSONResponse({"servers": _list_mcp_servers(_load_daemon_settings())})
 
 
 async def mcp_add(request: Request) -> JSONResponse:
     try:
         body = await request.json()
-        data = _load_gui_settings()
+        data = _load_daemon_settings()
         servers = _upsert_mcp_server(data, body or {})
-        _save_gui_settings(data)
+        _save_daemon_settings(data)
     except (json.JSONDecodeError, ValueError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     return JSONResponse({"ok": True, "servers": servers})
@@ -1125,17 +1094,17 @@ async def mcp_add(request: Request) -> JSONResponse:
 
 async def mcp_delete(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    data = _load_gui_settings()
+    data = _load_daemon_settings()
     _delete_mcp_server(data, name)
-    _save_gui_settings(data)
+    _save_daemon_settings(data)
     return JSONResponse({"ok": True})
 
 
 async def mcp_toggle(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    data = _load_gui_settings()
+    data = _load_daemon_settings()
     _toggle_mcp_server(data, name)
-    _save_gui_settings(data)
+    _save_daemon_settings(data)
     return JSONResponse({"ok": True})
 
 
@@ -1169,7 +1138,7 @@ async def memory_settings_save(request: Request) -> JSONResponse:
 async def skills_list(request: Request) -> JSONResponse:
     server: DaemonServer = request.app.state.server
     try:
-        out = _list_skills(server.work_dir, _load_gui_settings())
+        out = _list_skills(server.work_dir, _load_daemon_settings())
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
     return JSONResponse({"skills": out})
@@ -1177,9 +1146,9 @@ async def skills_list(request: Request) -> JSONResponse:
 
 async def skill_toggle(request: Request) -> JSONResponse:
     name = request.path_params["name"]
-    data = _load_gui_settings()
+    data = _load_daemon_settings()
     _toggle_skill(data, name)
-    _save_gui_settings(data)
+    _save_daemon_settings(data)
     return JSONResponse({"ok": True})
 
 
@@ -1288,16 +1257,6 @@ async def telegrambot_settings_save(request: Request) -> JSONResponse:
     return JSONResponse(status)
 
 
-async def serve_gui(request: Request) -> JSONResponse:
-    """Serve the embedded GUI HTML at /."""
-    from pathlib import Path
-    gui_path = Path(__file__).parent.parent / "gui" / "index.html"
-    if not gui_path.exists():
-        return JSONResponse({"error": "GUI not found"}, status_code=404)
-    from starlette.responses import HTMLResponse
-    return HTMLResponse(gui_path.read_text(encoding="utf-8"))
-
-
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -1317,7 +1276,6 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
             await _stop_configured_bots(app)
 
     routes = [
-        Route("/", serve_gui, methods=["GET"]),
         Route("/.well-known/agent-card.json", a2a_agent_card, methods=["GET"]),
         Route("/a2a/agent-card.json", a2a_agent_card, methods=["GET"]),
         Route("/a2a/rpc", a2a_rpc, methods=["POST"]),
@@ -1368,7 +1326,7 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
     app.state.server = server
     app.state.a2a_bridge = a2a_bridge
 
-    # CORS: allow Tauri (tauri://localhost) and browser access
+    # CORS: allow local clients and browser-based API tools.
     from starlette.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,

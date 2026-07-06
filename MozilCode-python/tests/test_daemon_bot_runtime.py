@@ -109,8 +109,8 @@ async def test_save_qqbot_settings_saves_then_restarts_gateway(monkeypatch):
     saved_settings = []
     restarts = []
 
-    monkeypatch.setattr(bot_runtime, "load_gui_settings", lambda: {"qqbot": {}})
-    monkeypatch.setattr(bot_runtime, "save_gui_settings", saved_settings.append)
+    monkeypatch.setattr(bot_runtime, "load_daemon_settings", lambda: {"qqbot": {}})
+    monkeypatch.setattr(bot_runtime, "save_daemon_settings", saved_settings.append)
     monkeypatch.setattr(
         bot_runtime,
         "resolve_qqbot_config",
