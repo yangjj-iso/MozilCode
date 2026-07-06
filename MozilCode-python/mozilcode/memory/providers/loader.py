@@ -1,33 +1,24 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 from dataclasses import replace
 from typing import Any
 
 from mozilcode.config import MemoryConfig, MemoryProviderConfig
 from mozilcode.memory.auto_memory import MemoryManager
 from mozilcode.memory.providers.base import MemoryProvider
+from mozilcode.memory.providers.contract import (
+    MemoryProviderLoadError,
+    normalized_loaded_provider_name,
+    provider_constructor_kwargs,
+    validate_provider_contract,
+)
 from mozilcode.memory.providers.hub import MemoryHub
-
-
-class MemoryProviderLoadError(Exception):
-    pass
 
 
 BUILTIN_MEMORY_PROVIDERS = {
     "builtin.markdown": "mozilcode.memory.providers.markdown:MarkdownMemoryProvider",
 }
-
-_REQUIRED_PROVIDER_METHODS = (
-    "initialize",
-    "load_context",
-    "observe",
-    "search",
-    "write",
-    "clear",
-    "shutdown",
-)
 
 
 def build_memory_hub(
@@ -64,7 +55,7 @@ def build_memory_hub(
             project_root,
             legacy_manager=legacy_manager,
         )
-        loaded_name = _normalized_loaded_provider_name(provider)
+        loaded_name = normalized_loaded_provider_name(provider)
         if loaded_name in seen_loaded_names:
             raise MemoryProviderLoadError(
                 f"Duplicate loaded memory provider name: {loaded_name}"
@@ -134,7 +125,7 @@ def _load_class_provider(
             f"Memory provider class '{class_name}' not found in module '{module_name}'"
         ) from e
     try:
-        kwargs = _provider_constructor_kwargs(
+        kwargs = provider_constructor_kwargs(
             cls,
             project_root,
             config,
@@ -145,89 +136,5 @@ def _load_class_provider(
         raise MemoryProviderLoadError(
             f"Failed to construct memory provider {target}: {e}"
         ) from e
-    _validate_provider_contract(provider, target)
+    validate_provider_contract(provider, target)
     return provider
-
-
-def _validate_provider_contract(provider: Any, target: str) -> None:
-    for attr in ("name", "kind", "version"):
-        value = getattr(provider, attr, None)
-        if not isinstance(value, str) or not value.strip():
-            raise MemoryProviderLoadError(
-                f"Memory provider {target} must define non-empty string '{attr}'"
-            )
-
-    missing_methods = [
-        method_name
-        for method_name in _REQUIRED_PROVIDER_METHODS
-        if not callable(getattr(provider, method_name, None))
-    ]
-    if missing_methods:
-        raise MemoryProviderLoadError(
-            f"Memory provider {target} does not implement required method(s): "
-            f"{', '.join(missing_methods)}"
-        )
-
-
-def _normalized_loaded_provider_name(provider: MemoryProvider) -> str:
-    name = provider.name.strip()
-    if name != provider.name:
-        provider.name = name
-    return name
-
-
-def _provider_constructor_kwargs(
-    cls: type,
-    project_root: str,
-    config: dict[str, Any],
-    legacy_manager: MemoryManager | None,
-) -> dict[str, Any]:
-    available = {"project_root": project_root, "config": config}
-    if legacy_manager is not None:
-        available["manager"] = legacy_manager
-
-    try:
-        signature = inspect.signature(cls)
-    except (TypeError, ValueError) as e:
-        raise MemoryProviderLoadError(
-            f"Cannot inspect memory provider constructor for {cls!r}: {e}"
-        ) from e
-
-    params = list(signature.parameters.values())
-    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params):
-        return available
-
-    supported_kinds = {
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        inspect.Parameter.KEYWORD_ONLY,
-    }
-    unsupported_required = [
-        param.name
-        for param in params
-        if param.kind not in supported_kinds
-        and param.default is inspect.Parameter.empty
-    ]
-    if unsupported_required:
-        raise MemoryProviderLoadError(
-            f"Unsupported memory provider constructor for {cls!r}; "
-            f"required parameter(s) cannot be injected by name: "
-            f"{', '.join(unsupported_required)}"
-        )
-    accepted = {
-        param.name
-        for param in params
-        if param.kind in supported_kinds and param.name in available
-    }
-    missing = [
-        param.name
-        for param in params
-        if param.kind in supported_kinds
-        and param.default is inspect.Parameter.empty
-        and param.name not in accepted
-    ]
-    if missing:
-        raise MemoryProviderLoadError(
-            f"Unsupported memory provider constructor for {cls!r}; "
-            f"unrecognized required parameter(s): {', '.join(missing)}"
-        )
-    return {name: available[name] for name in accepted}

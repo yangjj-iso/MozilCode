@@ -40,6 +40,7 @@ memory:
 ## 核心组件
 
 - `mozilcode/memory/providers/base.py`：定义 `MemoryProvider` 协议、`MemoryScope`、`MemoryEvent`、`MemoryItem`。
+- `mozilcode/memory/providers/contract.py`：校验 provider 元数据/方法合约，并按名称注入构造函数参数。
 - `mozilcode/memory/providers/hub.py`：聚合多个 provider，并隔离单个 provider 的异常和超时。
 - `mozilcode/memory/providers/markdown.py`：内置 Markdown provider，兼容原来的 `MemoryManager`。
 - `mozilcode/memory/providers/loader.py`：从配置创建 `MemoryHub`，支持声明式内置 provider registry 和 Python provider。
