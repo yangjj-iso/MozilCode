@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from mozilcode.config import ConfigError, load_config
-from mozilcode.validator import REMOVED_CONFIG_SECTIONS
+from mozilcode.removed_capabilities import (
+    REMOVED_CONFIG_SECTIONS,
+    find_removed_config_sections,
+)
+from mozilcode.validator import (
+    REMOVED_CONFIG_SECTIONS as VALIDATOR_REMOVED_CONFIG_SECTIONS,
+)
 
 
 def _write_config(path: Path, extra: str = "", provider_name: str = "test") -> None:
@@ -181,6 +187,16 @@ def test_explicit_config_file_still_requires_providers(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="Config must contain a 'providers' list"):
         load_config(config_path)
+
+
+def test_removed_config_sections_are_reported_in_stable_order() -> None:
+    assert find_removed_config_sections(
+        {"providers": [], "gui": {}, "cloud": {}, "memory": {}}
+    ) == ("cloud", "gui")
+
+
+def test_validator_keeps_removed_config_sections_export() -> None:
+    assert VALIDATOR_REMOVED_CONFIG_SECTIONS is REMOVED_CONFIG_SECTIONS
 
 
 @pytest.mark.parametrize("section", sorted(REMOVED_CONFIG_SECTIONS))

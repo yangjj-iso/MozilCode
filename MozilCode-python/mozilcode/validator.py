@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from mozilcode.removed_capabilities import (
+    REMOVED_CONFIG_SECTIONS,
+    find_removed_config_sections,
+)
+
 VALID_PROTOCOLS = {"anthropic", "openai", "openai-compat"}
 
 VALID_PERMISSION_MODES = {
@@ -16,21 +21,6 @@ VALID_PERMISSION_MODES = {
 VALID_TEAMMATE_MODES = {"", "in-process"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
-
-REMOVED_CONFIG_SECTIONS = {
-    "accounts",
-    "auth",
-    "bot_adapters",
-    "bots",
-    "cloud",
-    "frontend",
-    "gui",
-    "hosted_models",
-    "login",
-    "official_models",
-    "qqbot",
-    "telegrambot",
-}
 
 # 内置的"模型名子串 -> context window（最大输入 token 数）"映射表，
 # 是 context window 回退链的第 3 层（见 ProviderConfig.get_context_window）。
@@ -142,7 +132,7 @@ def _integer_field(
 
 
 def reject_removed_config_sections(raw: dict) -> None:
-    removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
+    removed = find_removed_config_sections(raw)
     if not removed:
         return
     names = ", ".join(removed)
