@@ -15,7 +15,6 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -23,34 +22,19 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.routing import Route, WebSocketRoute
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 from mozilcode.config import load_config, AppConfig
 from mozilcode.validator import ConfigError
-from mozilcode.client import LLMError
 from mozilcode.context import compute_compact_threshold
 from mozilcode.conversation import ConversationManager
 from mozilcode.permissions import PermissionMode
 from mozilcode.hooks import HookEngine, load_hooks
-from mozilcode.agent import Agent, ErrorEvent, PermissionResponse
+from mozilcode.agent import Agent, PermissionResponse
 
 from mozilcode.daemon.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_store import SessionStore
-from mozilcode.daemon.config_settings import (
-    USER_CONFIG_FILE as _USER_CONFIG_FILE,
-    config_from_settings_payload as _config_from_settings_payload,
-    public_config as _public_config,
-    write_user_config as _write_user_config,
-)
-from mozilcode.daemon.workspace_payloads import (
-    WorkspacePathError,
-    list_workspace_directory as _list_workspace_directory,
-    task_to_dict as _task_to_dict,
-    worktree_to_dict as _worktree_to_dict,
-)
 from mozilcode.daemon.a2a_routes import (
     a2a_agent_card,
     a2a_message_send,
@@ -69,6 +53,29 @@ from mozilcode.daemon.management_routes import (
     skill_delete,
     skill_toggle,
     skills_list,
+)
+from mozilcode.daemon.session_routes import (
+    cancel_active_task,
+    cancel_background_task,
+    close_session,
+    config_status,
+    create_session,
+    create_worktree,
+    enter_worktree,
+    exit_worktree,
+    health,
+    list_background_tasks,
+    list_files,
+    list_sessions,
+    list_worktrees,
+    manual_compact,
+    resolve_askuser,
+    resolve_permission,
+    save_config,
+    session_info,
+    session_status,
+    set_session_mode,
+    start_task,
 )
 from mozilcode.daemon.stream_routes import stream_events
 from mozilcode.a2a.bridge import A2ABridge
@@ -202,6 +209,24 @@ class DaemonServer:
         meta = self._session_meta.get(sid, {})
         return {"id": sid, "work_dir": meta.get("work_dir", self.work_dir), "title": meta.get("title", "")}
 
+    def has_session(self, sid: str) -> bool:
+        return sid in self._event_logs
+
+    def list_session_infos(self) -> list[dict]:
+        sids = list(self._event_logs.keys())
+        sids.sort(key=lambda s: self._session_meta.get(s, {}).get("created_at", 0), reverse=True)
+        return [self.session_info(s) for s in sids]
+
+    def session_work_dir(self, sid: str) -> str | None:
+        meta = self._session_meta.get(sid)
+        if meta is None:
+            return None
+        return meta.get("work_dir") or self.work_dir
+
+    def update_session_work_dir(self, sid: str, work_dir: str) -> None:
+        self._session_meta.setdefault(sid, {})["work_dir"] = work_dir
+        self._persist_meta(sid)
+
     def get_agent(self, sid: str) -> Agent | None:
         entry = self._agents.get(sid)
         return entry[0] if entry else None
@@ -222,6 +247,12 @@ class DaemonServer:
         log_list = self._event_logs.get(sid)
         if log_list is not None:
             log_list.append(event)
+
+    def emit_event(self, sid: str, event: dict | None) -> None:
+        self._emit(sid, event)
+
+    def persist_events(self, sid: str) -> None:
+        self._persist_events(sid)
 
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
@@ -472,337 +503,6 @@ class DaemonServer:
         # Remove the on-disk record so a deleted conversation stays deleted.
         self.session_store.delete_session(sid)
         log.info("Session %s closed", sid)
-
-
-# ---------------------------------------------------------------------------
-# HTTP / WS handlers
-# ---------------------------------------------------------------------------
-
-async def health(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    return JSONResponse(
-        {
-            "status": "ok",
-            "service": "mozilcode-daemon",
-            "work_dir": server.work_dir,
-            "configured": server.config is not None,
-            "config_path": str(_USER_CONFIG_FILE),
-        }
-    )
-
-
-async def config_status(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    return JSONResponse(_public_config(server.config))
-
-
-async def save_config(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    try:
-        body = await request.json()
-        raw = _config_from_settings_payload(body or {}, server.config)
-        server.config = _write_user_config(raw)
-        await server.invalidate_idle_agents()
-    except (ConfigError, ValueError, TypeError) as e:
-        return JSONResponse(_public_config(server.config, str(e)), status_code=400)
-    except Exception as e:
-        log.exception("Failed to save config")
-        return JSONResponse(_public_config(server.config, str(e)), status_code=500)
-    return JSONResponse(_public_config(server.config))
-
-
-async def create_session(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-    if body is not None and not isinstance(body, dict):
-        return JSONResponse({"error": "JSON object is required"}, status_code=400)
-    session_id = body.get("session_id") if body else None
-    work_dir = body.get("work_dir") if body else None
-    try:
-        sid = await server.init_session(session_id, work_dir)
-    except ValueError as e:
-        return JSONResponse({"error": str(e), "configured": server.config is not None}, status_code=400)
-    return JSONResponse({"session_id": sid, **server.session_info(sid)})
-
-
-async def list_sessions(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    # Include disk-loaded (not-yet-reactivated) sessions, newest first.
-    sids = list(server._event_logs.keys())
-    sids.sort(key=lambda s: server._session_meta.get(s, {}).get("created_at", 0), reverse=True)
-    return JSONResponse({"sessions": [server.session_info(s) for s in sids]})
-
-
-async def session_info(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    if sid not in server._event_logs:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    return JSONResponse(server.session_info(sid))
-
-
-async def session_status(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    try:
-        ok = await server.ensure_agent(sid)
-    except LLMError as e:
-        status = server.status(sid)
-        status["agent_ready"] = False
-        status["error"] = str(e)
-        return JSONResponse(status)
-    if not ok:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    status = server.status(sid)
-    status["agent_ready"] = True
-    return JSONResponse(status)
-
-
-async def set_session_mode(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    body = await request.json()
-    mode = (body.get("mode") or "").strip()
-    if not mode:
-        return JSONResponse({"error": "mode is required"}, status_code=400)
-    try:
-        status = await server.set_permission_mode(sid, mode)
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse(status)
-
-
-async def cancel_active_task(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    if sid not in server._event_logs:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    cancelled = server.cancel_active_task(sid)
-    return JSONResponse({"cancelled": cancelled})
-
-
-async def list_background_tasks(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    tasks = deps.task_manager.list_tasks() if deps else []
-    return JSONResponse({"tasks": [_task_to_dict(t) for t in tasks]})
-
-
-async def cancel_background_task(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    task_id = request.path_params["task_id"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    if deps is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    return JSONResponse({"cancelled": deps.task_manager.cancel(task_id)})
-
-
-async def list_worktrees(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    if deps is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    manager = deps.worktree_manager
-    session = manager.get_current_session()
-    current_name = session.worktree_name if session else None
-    return JSONResponse({
-        "current": current_name,
-        "worktrees": [_worktree_to_dict(wt, current_name) for wt in manager.list_worktrees()],
-    })
-
-
-async def create_worktree(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    body = await request.json()
-    name = (body.get("name") or "").strip()
-    base_branch = (body.get("base_branch") or "HEAD").strip()
-    if not name:
-        return JSONResponse({"error": "name is required"}, status_code=400)
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    agent = server.get_agent(sid)
-    if deps is None or agent is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    try:
-        wt = await deps.worktree_manager.create(name, base_branch)
-        session = await deps.worktree_manager.enter(name)
-        agent.work_dir = session.worktree_path
-        server._session_meta.setdefault(sid, {})["work_dir"] = session.worktree_path
-        server._persist_meta(sid)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"worktree": _worktree_to_dict(wt, name), "status": server.status(sid)})
-
-
-async def enter_worktree(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    name = request.path_params["name"]
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    agent = server.get_agent(sid)
-    if deps is None or agent is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    try:
-        session = await deps.worktree_manager.enter(name)
-        agent.work_dir = session.worktree_path
-        server._session_meta.setdefault(sid, {})["work_dir"] = session.worktree_path
-        server._persist_meta(sid)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"entered": True, "status": server.status(sid)})
-
-
-async def exit_worktree(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    body = await request.json()
-    remove = bool(body.get("remove", False))
-    discard = bool(body.get("discard", False))
-    if not await server.ensure_agent(sid):
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    deps = server.get_deps(sid)
-    agent = server.get_agent(sid)
-    if deps is None or agent is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    manager = deps.worktree_manager
-    session = manager.get_current_session()
-    if session is None:
-        return JSONResponse({"error": "not in a worktree"}, status_code=400)
-    try:
-        await manager.exit(
-            session.worktree_name,
-            action="remove" if remove else "keep",
-            discard_changes=discard,
-        )
-        agent.work_dir = session.original_cwd
-        server._session_meta.setdefault(sid, {})["work_dir"] = session.original_cwd
-        server._persist_meta(sid)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse({"exited": True, "status": server.status(sid)})
-
-
-async def list_files(request: Request) -> JSONResponse:
-    """List a directory inside a session's workspace (for the file-tree panel).
-
-    Query param ``path`` is relative to the session's work_dir; the resolved
-    target must stay within the workspace (no arbitrary filesystem browsing).
-    """
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    meta = server._session_meta.get(sid)
-    if meta is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    root = Path(meta.get("work_dir") or server.work_dir).resolve()
-    rel = request.query_params.get("path", "") or ""
-    try:
-        payload = _list_workspace_directory(root, rel)
-    except WorkspacePathError as e:
-        return JSONResponse({"error": str(e)}, status_code=e.status_code)
-    return JSONResponse(payload)
-
-
-async def start_task(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    body = await request.json()
-    sid = body.get("session_id")
-    prompt = body.get("prompt", "")
-    if not sid or not prompt:
-        return JSONResponse(
-            {"error": "session_id and prompt are required"}, status_code=400
-        )
-    try:
-        task_id = await server.start_task(sid, prompt)
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=404)
-    return JSONResponse({"task_id": task_id, "session_id": sid})
-
-
-async def resolve_permission(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    body = await request.json()
-    request_id = body.get("request_id", "")
-    response = body.get("response", "deny")
-    ok = await server.resolve_permission(sid, request_id, response)
-    if not ok:
-        return JSONResponse({"error": "request not found"}, status_code=404)
-    return JSONResponse({"resolved": True})
-
-
-async def resolve_askuser(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    body = await request.json()
-    request_id = body.get("request_id", "")
-    answers = body.get("answers", {})
-    ok = await server.resolve_askuser(sid, request_id, answers)
-    if not ok:
-        return JSONResponse({"error": "request not found"}, status_code=404)
-    return JSONResponse({"resolved": True})
-
-
-async def manual_compact(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    await server.ensure_agent(sid)
-    agent = server.get_agent(sid)
-    conv = server.get_conversation(sid)
-    if agent is None or conv is None:
-        return JSONResponse({"error": "session not found"}, status_code=404)
-    before_tokens = conv.current_tokens()
-    server._emit(sid, {
-        "type": "CompactStarted",
-        "data": {
-            "current_tokens": before_tokens,
-            "threshold": max(0, compute_compact_threshold(agent.context_window, manual=True)),
-            "context_window": agent.context_window,
-            "message": "正在压缩上下文",
-        },
-    })
-    result = await agent.manual_compact(conv)
-    event = serialize_event(result)
-    server._emit(sid, event)
-    if not isinstance(result, ErrorEvent):
-        server._emit(sid, {
-            "type": "UsageEvent",
-            "data": {
-                "input_tokens": agent.total_input_tokens,
-                "output_tokens": agent.total_output_tokens,
-                "context_tokens": conv.current_tokens(),
-            },
-        })
-    server._persist_events(sid)
-    if isinstance(result, ErrorEvent):
-        return JSONResponse({"error": result.message}, status_code=400)
-    return JSONResponse({
-        "type": type(result).__name__,
-        "data": event.get("data", {}),
-        "status": server.status(sid),
-    })
-
-
-async def close_session(request: Request) -> JSONResponse:
-    server: DaemonServer = request.app.state.server
-    sid = request.path_params["sid"]
-    await server.close_session(sid)
-    return JSONResponse({"closed": True})
 
 
 # ---------------------------------------------------------------------------
