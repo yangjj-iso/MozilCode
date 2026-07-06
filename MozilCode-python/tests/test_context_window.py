@@ -233,6 +233,23 @@ class TestValidator:
         )
         assert cleaned[0]["name"] == "p"
 
+    def test_provider_string_fields_are_trimmed(self):
+        cleaned = validate_providers(
+            [
+                {
+                    "name": "p",
+                    "protocol": " anthropic ",
+                    "base_url": " https://example.test ",
+                    "model": " claude-sonnet-4-6 ",
+                    "api_key": " secret ",
+                }
+            ]
+        )
+        assert cleaned[0]["protocol"] == "anthropic"
+        assert cleaned[0]["base_url"] == "https://example.test"
+        assert cleaned[0]["model"] == "claude-sonnet-4-6"
+        assert cleaned[0]["api_key"] == "secret"
+
     def test_duplicate_provider_names_are_rejected(self):
         with pytest.raises(ConfigError, match="duplicate name"):
             validate_providers(
@@ -266,3 +283,44 @@ class TestValidator:
                     }
                 ]
             )
+
+    @pytest.mark.parametrize(
+        "field, bad, message",
+        [
+            ("protocol", 1, "protocol must be a string"),
+            ("base_url", ["https://example.test"], "base_url must be a string"),
+            ("model", 123, "model must be a string"),
+            ("api_key", {"env": "TOKEN"}, "api_key must be a string"),
+        ],
+    )
+    def test_provider_string_fields_reject_non_strings(self, field, bad, message):
+        provider = {
+            "name": "p",
+            "protocol": "anthropic",
+            "base_url": "https://example.test",
+            "model": "claude-sonnet-4-6",
+        }
+        provider[field] = bad
+
+        with pytest.raises(ConfigError, match=message):
+            validate_providers([provider])
+
+    @pytest.mark.parametrize(
+        "field, message",
+        [
+            ("protocol", "protocol must not be empty"),
+            ("base_url", "base_url must not be empty"),
+            ("model", "model must not be empty"),
+        ],
+    )
+    def test_required_provider_string_fields_reject_empty_values(self, field, message):
+        provider = {
+            "name": "p",
+            "protocol": "anthropic",
+            "base_url": "https://example.test",
+            "model": "claude-sonnet-4-6",
+        }
+        provider[field] = "  "
+
+        with pytest.raises(ConfigError, match=message):
+            validate_providers([provider])

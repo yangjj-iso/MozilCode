@@ -81,6 +81,23 @@ def _remember_unique_name(
     seen_names.add(name)
 
 
+def _required_string_field(entry: dict, field_name: str, item_label: str) -> str:
+    value = entry[field_name]
+    if not isinstance(value, str):
+        raise ConfigError(f"{item_label}: {field_name} must be a string")
+    value = value.strip()
+    if not value:
+        raise ConfigError(f"{item_label}: {field_name} must not be empty")
+    return value
+
+
+def _optional_string_field(entry: dict, field_name: str, item_label: str) -> str:
+    value = entry.get(field_name, "")
+    if not isinstance(value, str):
+        raise ConfigError(f"{item_label}: {field_name} must be a string")
+    return value.strip()
+
+
 def reject_removed_config_sections(raw: dict) -> None:
     removed = sorted(k for k in raw if k in REMOVED_CONFIG_SECTIONS)
     if not removed:
@@ -111,12 +128,16 @@ def validate_providers(raw_providers: list) -> list[dict]:
         name = _required_name(entry["name"], f"Provider #{i + 1}")
         _remember_unique_name(name, seen_names, item_label="Provider")
 
-        protocol = entry["protocol"]
+        item_label = f"Provider #{i + 1}"
+        protocol = _required_string_field(entry, "protocol", item_label)
         if protocol not in VALID_PROTOCOLS:
             raise ConfigError(
                 f"Provider #{i + 1}: invalid protocol '{protocol}', "
                 f"must be one of: {', '.join(sorted(VALID_PROTOCOLS))}"
             )
+        base_url = _required_string_field(entry, "base_url", item_label)
+        model = _required_string_field(entry, "model", item_label)
+        api_key = _optional_string_field(entry, "api_key", item_label)
 
         # 默认为 0（"未设置"）而非硬编码的 window 值：0 会让
         # ProviderConfig.get_context_window() 走四层回退链解析
@@ -142,9 +163,9 @@ def validate_providers(raw_providers: list) -> list[dict]:
             {
                 "name": name,
                 "protocol": protocol,
-                "base_url": entry["base_url"],
-                "model": entry["model"],
-                "api_key": entry.get("api_key", ""),
+                "base_url": base_url,
+                "model": model,
+                "api_key": api_key,
                 "thinking": thinking,
                 "context_window": context_window,
                 "max_output_tokens": max_output_tokens,
