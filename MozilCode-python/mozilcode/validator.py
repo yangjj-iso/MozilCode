@@ -221,6 +221,7 @@ def validate_memory(raw_memory: object) -> dict:
         raise ConfigError("'memory.providers' must be a list")
 
     providers: list[dict] = []
+    seen_names: set[str] = set()
     for i, entry in enumerate(raw_providers):
         if not isinstance(entry, dict):
             raise ConfigError(f"Memory provider #{i + 1}: must be a mapping")
@@ -228,6 +229,9 @@ def validate_memory(raw_memory: object) -> dict:
         provider_type = str(entry.get("type") or "").strip()
         if not name:
             raise ConfigError(f"Memory provider #{i + 1}: missing 'name'")
+        if name in seen_names:
+            raise ConfigError(f"Memory provider '{name}': duplicate name")
+        seen_names.add(name)
         if not provider_type:
             raise ConfigError(f"Memory provider '{name}': missing 'type'")
         provider_enabled = entry.get("enabled", True)

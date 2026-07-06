@@ -879,6 +879,28 @@ class TestMemoryProviders:
         with pytest.raises(Exception, match="Unsupported memory provider type"):
             build_memory_hub(cfg, str(tmp_path))
 
+    def test_duplicate_memory_provider_names_are_rejected(self, tmp_path: Path) -> None:
+        cfg = MemoryConfig(
+            providers=[
+                MemoryProviderConfig(name="dup", type="builtin.markdown"),
+                MemoryProviderConfig(name="dup", type="builtin.markdown"),
+            ]
+        )
+
+        with pytest.raises(Exception, match="Duplicate memory provider name"):
+            build_memory_hub(cfg, str(tmp_path))
+
+    def test_programmatic_memory_provider_names_are_trimmed_without_mutation(
+        self, tmp_path: Path
+    ) -> None:
+        provider = MemoryProviderConfig(name=" markdown ", type="builtin.markdown")
+
+        hub = build_memory_hub(MemoryConfig(providers=[provider]), str(tmp_path))
+
+        assert hub is not None
+        assert hub.status()["providers"][0]["name"] == "markdown"
+        assert provider.name == " markdown "
+
     def test_validate_memory_defaults_and_python_provider(self) -> None:
         defaults = validate_memory(None)
         assert defaults["enabled"] is True
@@ -903,6 +925,15 @@ class TestMemoryProviders:
     def test_validate_memory_rejects_bad_config_shape(self) -> None:
         with pytest.raises(ConfigError):
             validate_memory({"providers": [{"name": "bad", "type": "python", "config": []}]})
+
+    def test_validate_memory_rejects_duplicate_provider_names(self) -> None:
+        with pytest.raises(ConfigError, match="duplicate name"):
+            validate_memory({
+                "providers": [
+                    {"name": "dup", "type": "builtin.markdown"},
+                    {"name": "dup", "type": "python", "module": "x", "class": "Y"},
+                ],
+            })
 
 
 class TestMemoryConfig:

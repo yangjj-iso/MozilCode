@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import replace
 from typing import Any
 
 from mozilcode.config import MemoryConfig, MemoryProviderConfig
@@ -33,10 +34,26 @@ def build_memory_hub(
         else [MemoryProviderConfig(name="markdown", type="builtin.markdown", enabled=True)]
     )
     providers: list[MemoryProvider] = []
+    seen_names: set[str] = set()
     for provider_config in provider_configs:
         if not provider_config.enabled:
             continue
-        providers.append(_load_provider(provider_config, project_root, legacy_manager=legacy_manager))
+        name = provider_config.name.strip()
+        if not name:
+            raise MemoryProviderLoadError("Memory provider name is required")
+        if name in seen_names:
+            raise MemoryProviderLoadError(
+                f"Duplicate memory provider name: {name}"
+            )
+        seen_names.add(name)
+        provider_config = replace(provider_config, name=name)
+        providers.append(
+            _load_provider(
+                provider_config,
+                project_root,
+                legacy_manager=legacy_manager,
+            )
+        )
     return MemoryHub(providers=providers) if providers else None
 
 
