@@ -101,6 +101,7 @@ def test_a2a_message_send_rejects_non_object_metadata(tmp_path):
         model="gpt-local",
     )
     app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    session_count = len(app.state.server.list_session_infos())
 
     with TestClient(app) as client:
         response = client.post(
@@ -116,6 +117,34 @@ def test_a2a_message_send_rejects_non_object_metadata(tmp_path):
         "error": "metadata must be an object",
         "code": -32602,
     }
+    assert len(app.state.server.list_session_infos()) == session_count
+
+
+def test_a2a_message_send_rejects_non_object_configuration(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+    session_count = len(app.state.server.list_session_infos())
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/a2a/message:send",
+            json={
+                "message": {"parts": [{"kind": "text", "text": "hello"}]},
+                "configuration": "bad",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "configuration must be an object",
+        "code": -32602,
+    }
+    assert len(app.state.server.list_session_infos()) == session_count
 
 
 def test_route_registry_keeps_local_daemon_surface_only():

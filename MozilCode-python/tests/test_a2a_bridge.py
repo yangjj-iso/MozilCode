@@ -192,3 +192,23 @@ async def test_a2a_json_rpc_rejects_non_object_metadata():
     assert response["error"]["code"] == -32602
     assert response["error"]["message"] == "metadata must be an object"
     assert bridge._server.sessions == []
+
+
+@pytest.mark.asyncio
+async def test_a2a_json_rpc_rejects_non_object_configuration():
+    bridge = A2ABridge(_FakeDaemon(), default_wait_timeout=1)
+
+    response = await bridge.handle_json_rpc({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "message/send",
+        "params": {
+            "message": {"parts": [{"kind": "text", "text": "hello"}]},
+            "configuration": "bad",
+        },
+    })
+
+    assert response["id"] == 8
+    assert response["error"]["code"] == -32602
+    assert response["error"]["message"] == "configuration must be an object"
+    assert bridge._server.sessions == []

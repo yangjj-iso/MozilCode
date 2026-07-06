@@ -229,9 +229,10 @@ class A2ABridge:
         raise A2AError(f"Unsupported A2A method: {method}", -32601)
 
     async def send_message(self, params: dict[str, Any]) -> dict[str, Any]:
+        config = _configuration_from_params(params)
         task = await self.start_task_from_message(params, source="a2a")
-        if _should_wait(params):
-            timeout = _float_from_config(params, "timeout", self._default_wait_timeout)
+        if _should_wait(config):
+            timeout = _float_from_config(config, "timeout", self._default_wait_timeout)
             await self.wait_for_task(task.id, timeout=timeout)
         else:
             self._refresh_task_from_log(task)
@@ -485,10 +486,16 @@ def _metadata_from_params(params: dict[str, Any]) -> dict[str, Any]:
     return dict(metadata)
 
 
-def _should_wait(params: dict[str, Any]) -> bool:
-    config = params.get("configuration") or {}
+def _configuration_from_params(params: dict[str, Any]) -> dict[str, Any]:
+    config = params.get("configuration")
+    if config is None:
+        return {}
     if not isinstance(config, dict):
-        config = {}
+        raise A2AError("configuration must be an object", -32602)
+    return config
+
+
+def _should_wait(config: dict[str, Any]) -> bool:
     if "returnImmediately" in config:
         return not bool(config.get("returnImmediately"))
     if "blocking" in config:
@@ -498,10 +505,7 @@ def _should_wait(params: dict[str, Any]) -> bool:
     return False
 
 
-def _float_from_config(params: dict[str, Any], key: str, default: float) -> float:
-    config = params.get("configuration") or {}
-    if not isinstance(config, dict):
-        return default
+def _float_from_config(config: dict[str, Any], key: str, default: float) -> float:
     value = config.get(key, default)
     try:
         return float(value)
