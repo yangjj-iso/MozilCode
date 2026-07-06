@@ -14,18 +14,20 @@ _DANGEROUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-_SAFE_COMMANDS = frozenset({
-    "ls", "dir", "pwd", "echo", "cat", "head", "tail", "wc",
-    "find", "which", "whereis", "whoami", "hostname", "uname",
-    "date", "cal", "uptime", "df", "du", "free", "env", "printenv",
+_SAFE_EXACT_COMMANDS = frozenset({
+    "pwd", "whoami", "hostname", "date", "cal", "uptime", "env", "printenv",
+    "true", "false", "go version", "node -v", "npm -v", "python --version",
+    "cargo --version", "rustc --version", "java -version", "java --version",
+})
+
+_SAFE_PREFIX_COMMANDS = frozenset({
+    "ls", "dir", "echo", "cat", "head", "tail", "wc",
+    "which", "whereis", "uname", "df", "du", "free",
     "file", "stat", "readlink", "realpath", "basename", "dirname",
-    "sort", "uniq", "tr", "cut", "awk", "sed", "grep", "egrep", "fgrep",
-    "diff", "comm", "tee", "xargs", "true", "false", "test",
+    "uniq", "tr", "cut", "grep", "egrep", "fgrep", "diff", "comm", "test",
     "git status", "git log", "git diff", "git show", "git branch",
     "git tag", "git remote", "git rev-parse", "git ls-files",
-    "git blame", "git stash list", "go version", "go env",
-    "node -v", "npm -v", "npx", "python --version", "pip list",
-    "cargo --version", "rustc --version", "java -version", "java --version",
+    "git blame", "git stash list", "pip list",
 })
 
 
@@ -33,10 +35,12 @@ def is_safe_command(command: str) -> bool:
     trimmed = command.strip()
     if not trimmed:
         return False
-    for ch in ("|", ";", "&&", ">", "$(", "`"):
+    for ch in ("|", ";", "&&", "||", ">", "<", "$(", "`", "\n", "\r"):
         if ch in trimmed:
             return False
-    for safe in _SAFE_COMMANDS:
+    if trimmed in _SAFE_EXACT_COMMANDS:
+        return True
+    for safe in _SAFE_PREFIX_COMMANDS:
         if trimmed == safe or trimmed.startswith(safe + " "):
             return True
     return False

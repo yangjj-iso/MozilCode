@@ -35,6 +35,7 @@ from mozilcode.permissions import (
     mode_decide,
     parse_rule,
 )
+from mozilcode.permissions.dangerous import is_safe_command
 from mozilcode.tools import create_default_registry
 from mozilcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
 
@@ -98,6 +99,25 @@ class TestDangerousCommandDetector:
     def test_safe_ls(self) -> None:
         hit, _ = self.detector.detect("ls -la")
         assert not hit
+
+    def test_read_only_commands_are_safe(self) -> None:
+        assert is_safe_command("ls -la")
+        assert is_safe_command("git status --short")
+        assert is_safe_command("python --version")
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "npx cowsay hello",
+            "env rm -rf /",
+            "xargs rm -rf /",
+            "tee output.txt",
+            "find . -delete",
+            "cat < /etc/passwd",
+        ],
+    )
+    def test_command_wrappers_are_not_safe_by_default(self, command: str) -> None:
+        assert not is_safe_command(command)
 
 # ===========================================================================
 # 第二层：PathSandbox（路径沙箱）
@@ -320,6 +340,12 @@ class TestPermissionChecker:
         from mozilcode.tools.bash import Bash
         tool = Bash()
         d = self.checker.check(tool, {"command": "npm test"})
+        assert d.effect == "ask"
+
+    def test_npx_does_not_bypass_permission_prompt(self) -> None:
+        from mozilcode.tools.bash import Bash
+        tool = Bash()
+        d = self.checker.check(tool, {"command": "npx some-package"})
         assert d.effect == "ask"
 
     def test_plan_mode_asks_for_write(self) -> None:
