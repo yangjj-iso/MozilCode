@@ -17,6 +17,10 @@ from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.context import compute_compact_threshold
+from mozilcode.daemon.active_tasks import (
+    ACTIVE_TASK_RUNNING_ERROR,
+    ActiveTaskRegistry,
+)
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
@@ -45,8 +49,6 @@ from mozilcode.permissions import PermissionMode
 
 log = logging.getLogger(__name__)
 
-ACTIVE_TASK_RUNNING_ERROR = "task already running"
-
 
 @dataclass(frozen=True)
 class DaemonSessionRuntime:
@@ -72,8 +74,9 @@ class DaemonServer:
         self.session_mgr = SessionManager()
         self._agents: dict[str, DaemonSessionRuntime] = {}
         self._event_logs: dict[str, list[dict | None]] = {}
-        self._tasks: dict[str, asyncio.Task] = {}
-        self._active_task_ids: dict[str, str] = {}
+        self._active_tasks = ActiveTaskRegistry()
+        self._tasks = self._active_tasks.tasks
+        self._active_task_ids = self._active_tasks.task_ids
         self._pre_plan_modes: dict[str, PermissionMode] = {}
         self._session_meta: dict[str, dict] = {}
         self._persisted_count: dict[str, int] = {}
@@ -272,12 +275,7 @@ class DaemonServer:
 
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
-        current_task = self._tasks.get(sid)
-        if current_task is not None:
-            if not current_task.done():
-                raise ValueError(ACTIVE_TASK_RUNNING_ERROR)
-            self._tasks.pop(sid, None)
-            self._active_task_ids.pop(sid, None)
+        self._active_tasks.ensure_available(sid)
 
         await self.ensure_agent(sid)
         agent = self.get_agent(sid)
@@ -292,8 +290,7 @@ class DaemonServer:
             self._run_agent_task(sid, task_id, prompt, agent, conv),
             name=f"agent-{sid}-{task_id}",
         )
-        self._tasks[sid] = task
-        self._active_task_ids[sid] = task_id
+        self._active_tasks.register(sid, task_id, task)
         return task_id
 
     async def _run_agent_task(
@@ -319,11 +316,7 @@ class DaemonServer:
             log.exception("Agent task %s failed", task_id)
             self._emit(sid, task_error_event(task_id, str(e)))
         finally:
-            current = self._tasks.get(sid)
-            task = asyncio.current_task()
-            if current is task:
-                self._tasks.pop(sid, None)
-                self._active_task_ids.pop(sid, None)
+            self._active_tasks.clear_if_current(sid, asyncio.current_task())
             self._persist_events(sid)
 
     async def _record_agent_task_event(
@@ -566,8 +559,6 @@ class DaemonServer:
         deps = self.get_deps(sid)
         conv = self.get_conversation(sid)
         meta = self._session_meta.get(sid, {})
-        task = self._tasks.get(sid)
-        running = bool(task and not task.done())
         provider = deps.provider if deps is not None else (self.config.providers[0] if self.config and self.config.providers else None)
         return build_session_status(
             sid=sid,
@@ -582,16 +573,12 @@ class DaemonServer:
                 else "default"
             ),
             command_mode=self._command_acceptance_mode(sid, agent),
-            active_task_id=self._active_task_ids.get(sid, ""),
-            active_task_running=running,
+            active_task_id=self._active_tasks.task_id(sid),
+            active_task_running=self._active_tasks.is_running(sid),
         )
 
     def cancel_active_task(self, sid: str) -> bool:
-        task = self._tasks.get(sid)
-        if task is None or task.done():
-            return False
-        task.cancel()
-        return True
+        return self._active_tasks.cancel(sid)
 
     async def resolve_permission(
         self, sid: str, request_id: str, response: str
@@ -644,7 +631,7 @@ class DaemonServer:
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""
         validate_session_id(sid)
-        task = self._tasks.pop(sid, None)
+        task = self._active_tasks.pop_task(sid)
         if task and not task.done():
             task.cancel()
             try:
@@ -663,7 +650,6 @@ class DaemonServer:
             await hub.shutdown()
         self._session_meta.pop(sid, None)
         self._persisted_count.pop(sid, None)
-        self._active_task_ids.pop(sid, None)
         self._pre_plan_modes.pop(sid, None)
         self._pending_prompts.pop(sid, None)
         self.session_store.delete_session(sid)
