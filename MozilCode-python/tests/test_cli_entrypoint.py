@@ -26,6 +26,29 @@ def test_main_without_prompt_requires_headless_prompt(
     assert "A prompt is required for headless CLI execution" in err
 
 
+def test_drain_cli_notifications_uses_shared_task_format() -> None:
+    task = SimpleNamespace(
+        id="task-1",
+        name="worker",
+        status="completed",
+        result="done",
+        start_time=10.0,
+        end_time=12.0,
+        progress=SimpleNamespace(input_tokens=3, output_tokens=5),
+    )
+    task_manager = SimpleNamespace(poll_completed=lambda: [task])
+    team_manager = SimpleNamespace(drain_lead_mailbox=lambda: ["mailbox-note"])
+
+    notes = cli._drain_cli_notifications(task_manager, team_manager)
+
+    assert len(notes) == 2
+    assert "Task ID: task-1" in notes[0]
+    assert "Agent: worker" in notes[0]
+    assert "Tokens: input=3, output=5" in notes[0]
+    assert "<task_id>" not in notes[0]
+    assert notes[1] == "mailbox-note"
+
+
 @pytest.mark.asyncio
 async def test_run_prompt_uses_shared_agent_factory(
     monkeypatch: pytest.MonkeyPatch,

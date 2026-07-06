@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 
+from mozilcode.agents.notification import format_task_notification
 from mozilcode.config import ConfigError, load_config
 from mozilcode.hooks import HookConfigError, HookEngine, load_hooks
 from mozilcode.permissions import PermissionMode
@@ -81,17 +82,6 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
     task_manager = deps.task_manager
     team_manager = deps.team_manager
 
-    def drain_notifications() -> list[str]:
-        notes: list[str] = []
-        for t in task_manager.poll_completed():
-            notes.append(
-                f"<task-notification>\n<task_id>{t.id}</task_id>\n"
-                f"<status>{t.status}</status>\n<result>{t.result}</result>\n"
-                f"</task-notification>"
-            )
-        notes.extend(team_manager.drain_lead_mailbox())
-        return notes
-
     conv = ConversationManager()
     last_result = await agent.run_to_completion(prompt, conv)
     print(last_result, flush=True)
@@ -101,7 +91,6 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             await agent.memory_hub.shutdown()
         return
 
-    import sys
     for i in range(90):
         await asyncio.sleep(2)
         running = task_manager.running_task_states()
@@ -113,7 +102,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
             file=sys.stderr,
             flush=True,
         )
-        notes = drain_notifications()
+        notes = _drain_cli_notifications(task_manager, team_manager)
         if not notes:
             if not task_manager.has_running_tasks():
                 print(f"[poll {i}] no running tasks, breaking", file=sys.stderr, flush=True)
@@ -128,6 +117,15 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None
 
     if agent.memory_hub:
         await agent.memory_hub.shutdown()
+
+
+def _drain_cli_notifications(task_manager, team_manager) -> list[str]:
+    notes = [
+        format_task_notification(task)
+        for task in task_manager.poll_completed()
+    ]
+    notes.extend(team_manager.drain_lead_mailbox())
+    return notes
 
 
 if __name__ == "__main__":
