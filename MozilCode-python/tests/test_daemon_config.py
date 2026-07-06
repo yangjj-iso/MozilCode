@@ -328,6 +328,43 @@ def test_root_route_is_not_a_frontend_shell(tmp_path):
     assert response.status_code == 404
 
 
+def test_a2a_agent_card_route_is_available(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/a2a/agent-card.json")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "MozilCode"
+    assert data["metadata"]["model"] == "gpt-local"
+
+
+def test_bot_status_routes_are_available(tmp_path):
+    provider = ProviderConfig(
+        name="openai",
+        protocol="openai",
+        base_url="http://127.0.0.1:8080/v1",
+        model="gpt-local",
+    )
+    app = create_app(AppConfig(providers=[provider]), str(tmp_path))
+
+    with TestClient(app) as client:
+        qq = client.get("/api/settings/qqbot")
+        telegram = client.get("/api/settings/telegrambot")
+
+    assert qq.status_code == 200
+    assert qq.json()["provider"] == "official"
+    assert telegram.status_code == 200
+    assert telegram.json()["provider"] == "telegram-official"
+
+
 def test_memory_settings_save_updates_config_and_preserves_secret(tmp_path, monkeypatch):
     monkeypatch.setattr(config_settings, "USER_CONFIG_FILE", tmp_path / "config.yaml")
     provider = ProviderConfig(

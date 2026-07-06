@@ -85,12 +85,8 @@ from mozilcode.daemon.extension_settings import (
 )
 from mozilcode.daemon.bot_runtime import (
     init_bot_state as _init_bot_state,
-    qqbot_status as _qqbot_status,
-    save_qqbot_settings as _save_qqbot_settings,
-    save_telegrambot_settings as _save_telegrambot_settings,
     start_configured_bots as _start_configured_bots,
     stop_configured_bots as _stop_configured_bots,
-    telegrambot_status as _telegrambot_status,
 )
 from mozilcode.daemon.workspace_payloads import (
     WorkspacePathError,
@@ -98,7 +94,20 @@ from mozilcode.daemon.workspace_payloads import (
     task_to_dict as _task_to_dict,
     worktree_to_dict as _worktree_to_dict,
 )
-from mozilcode.a2a.bridge import A2ABridge, A2AError
+from mozilcode.daemon.a2a_routes import (
+    a2a_agent_card,
+    a2a_message_send,
+    a2a_rpc,
+    a2a_task_cancel,
+    a2a_task_get,
+    qq_official_status,
+    qqbot_settings_get,
+    qqbot_settings_save,
+    telegrambot_settings_get,
+    telegrambot_settings_save,
+    telegrambot_status_get,
+)
+from mozilcode.a2a.bridge import A2ABridge
 
 log = logging.getLogger(__name__)
 
@@ -1174,89 +1183,6 @@ async def skill_delete(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-def _public_base_url(request: Request) -> str:
-    return str(request.base_url).rstrip("/")
-
-
-async def a2a_agent_card(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    return JSONResponse(bridge.agent_card(_public_base_url(request)))
-
-
-async def a2a_rpc(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    try:
-        payload = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
-            status_code=400,
-        )
-    return JSONResponse(await bridge.handle_json_rpc(payload))
-
-
-async def a2a_message_send(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    try:
-        body = await request.json()
-        result = await bridge.send_message(body or {})
-    except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
-    return JSONResponse(result)
-
-
-async def a2a_task_get(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    try:
-        task = bridge.get_task(request.path_params["task_id"])
-    except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
-    return JSONResponse(bridge.task_to_a2a(task))
-
-
-async def a2a_task_cancel(request: Request) -> JSONResponse:
-    bridge: A2ABridge = request.app.state.a2a_bridge
-    try:
-        task = await bridge.cancel_task(request.path_params["task_id"])
-    except A2AError as e:
-        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
-    return JSONResponse(bridge.task_to_a2a(task))
-
-
-async def qq_official_status(request: Request) -> JSONResponse:
-    return JSONResponse(_qqbot_status(request.app))
-
-
-async def qqbot_settings_get(request: Request) -> JSONResponse:
-    return JSONResponse(_qqbot_status(request.app))
-
-
-async def qqbot_settings_save(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-        status = await _save_qqbot_settings(request.app, request.app.state.a2a_bridge, body)
-    except (json.JSONDecodeError, ValueError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse(status)
-
-
-async def telegrambot_status(request: Request) -> JSONResponse:
-    return JSONResponse(_telegrambot_status(request.app))
-
-
-async def telegrambot_settings_get(request: Request) -> JSONResponse:
-    return JSONResponse(_telegrambot_status(request.app))
-
-
-async def telegrambot_settings_save(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-        status = await _save_telegrambot_settings(request.app, request.app.state.a2a_bridge, body)
-    except (json.JSONDecodeError, ValueError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
-    return JSONResponse(status)
-
-
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -1283,7 +1209,7 @@ def create_app(config: AppConfig | None, work_dir: str, hook_engine: HookEngine 
         Route("/a2a/tasks/{task_id}", a2a_task_get, methods=["GET"]),
         Route("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, methods=["POST"]),
         Route("/api/qq/official/status", qq_official_status, methods=["GET"]),
-        Route("/api/telegram/status", telegrambot_status, methods=["GET"]),
+        Route("/api/telegram/status", telegrambot_status_get, methods=["GET"]),
         Route("/api/settings/qqbot", qqbot_settings_get, methods=["GET"]),
         Route("/api/settings/qqbot", qqbot_settings_save, methods=["POST"]),
         Route("/api/settings/telegrambot", telegrambot_settings_get, methods=["GET"]),
