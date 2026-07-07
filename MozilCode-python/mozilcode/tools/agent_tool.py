@@ -5,11 +5,16 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from mozilcode.agents.model_selection import (
+    create_subagent_client,
+    resolve_subagent_model_override,
+)
 from mozilcode.tools import rebase_file_tools
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
     from mozilcode.agent import Agent
+    from mozilcode.agents.parser import AgentDef
     from mozilcode.agents.loader import AgentLoader
     from mozilcode.agents.task_manager import TaskManager
     from mozilcode.agents.trace import TraceManager
@@ -503,14 +508,12 @@ class AgentTool(Tool):
         params: AgentToolParams,
         definition: AgentDef,
     ) -> LLMClient:
-        from mozilcode.agents.parser import AgentDef
-
-        model_override = params.model or (
-            definition.model if definition.model != "inherit" else None
+        model_override = resolve_subagent_model_override(
+            params.model,
+            definition.model,
         )
-
         if model_override and model_override != "inherit":
-            client = self._create_client_for_model(model_override)
+            client = create_subagent_client(self._provider_config, model_override)
             if client is not None:
                 return client
 
@@ -638,31 +641,3 @@ class AgentTool(Tool):
             )
 
         return ToolResult(output=result_text or "(sub-agent returned no output)")
-
-
-    def _create_client_for_model(self, model_alias: str) -> LLMClient | None:
-        if self._provider_config is None:
-            return None
-
-        from mozilcode.client import create_client
-        from mozilcode.config import ProviderConfig
-
-        model_map = {
-            "haiku": "claude-haiku-4-5-20251001",
-            "sonnet": "claude-sonnet-4-6-20250514",
-            "opus": "claude-opus-4-6-20250514",
-        }
-        model_id = model_map.get(model_alias, model_alias)
-
-        config = ProviderConfig(
-            name=f"sub-{model_alias}",
-            protocol=self._provider_config.protocol,
-            base_url=self._provider_config.base_url,
-            model=model_id,
-            api_key=self._provider_config.api_key,
-            context_window=self._provider_config.context_window,
-        )
-        try:
-            return create_client(config)
-        except Exception:
-            return None
