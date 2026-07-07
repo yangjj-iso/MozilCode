@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
-from pathlib import Path
 
 from mozilcode.agent import Agent
 from mozilcode.agent_events import PermissionResponse
@@ -25,7 +23,7 @@ from mozilcode.daemon.session_status import (
     command_acceptance_mode,
 )
 from mozilcode.daemon.session_records import SessionRecords
-from mozilcode.daemon.session_store import SessionStore, validate_session_id
+from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.responses import (
     DaemonActionResult,
     session_not_found_result,
@@ -34,9 +32,12 @@ from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
 from mozilcode.daemon.permission_mode_actions import set_session_permission_mode
 from mozilcode.daemon.session_close_actions import close_daemon_session
+from mozilcode.daemon.session_lifecycle_actions import (
+    ensure_session_runtime,
+    init_daemon_session,
+)
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
-    create_daemon_session_runtime,
 )
 from mozilcode.daemon.worktree_session_actions import (
     create_session_worktree,
@@ -95,59 +96,41 @@ class DaemonServer:
     def _set_session_title_from_prompt(self, sid: str, prompt: str) -> None:
         self._records.set_title_from_prompt(sid, prompt)
 
-    async def _create_session_runtime(
-        self,
-        sid: str,
-        work_dir: str,
-    ) -> DaemonSessionRuntime:
-        if self.config is None:
-            raise ValueError("model provider is not configured")
-        mode = PermissionMode(self.config.permission_mode)
-        runtime = await create_daemon_session_runtime(
-            sid=sid,
-            config=self.config,
-            work_dir=work_dir,
-            permission_mode=mode,
-            hook_engine=self.hook_engine,
-            session_mgr=self.session_mgr,
-            agent_factory=create_agent_from_config,
-        )
-        self._agents[sid] = runtime
-        return runtime
-
     async def init_session(
         self, session_id: str | None = None, work_dir: str | None = None
     ) -> str:
         """Create a new Agent session in the given workspace. Returns session_id."""
-        if self.config is None:
-            raise ValueError("model provider is not configured")
-        sid = validate_session_id(session_id or uuid.uuid4().hex[:12])
-        if self.has_session(sid):
-            raise ValueError(f"session already exists: {sid}")
-        wd = work_dir or self.work_dir
-        if not Path(wd).is_dir():
-            raise ValueError(f"workspace not found: {wd}")
-        await self._create_session_runtime(sid, wd)
-        self._records.create(sid, wd)
-        log.info("Session %s initialized (work_dir=%s)", sid, wd)
+        sid = await init_daemon_session(
+            session_id=session_id,
+            work_dir=work_dir,
+            config=self.config,
+            default_work_dir=self.work_dir,
+            hook_engine=self.hook_engine,
+            session_mgr=self.session_mgr,
+            runtimes=self._agents,
+            records=self._records,
+            agent_factory=create_agent_from_config,
+        )
+        log.info("Session %s initialized (work_dir=%s)", sid, self.session_work_dir(sid))
         return sid
 
     async def ensure_agent(self, sid: str) -> bool:
         """Make sure an Agent exists for a session, creating one lazily."""
-        if sid in self._agents:
-            return True
-        if self.config is None:
-            return False
-        meta = self._session_meta.get(sid)
-        if meta is None:
-            return False
-        wd = meta.get("work_dir") or self.work_dir
-        if not Path(wd).is_dir():
-            wd = self.work_dir
-        await self._create_session_runtime(sid, wd)
-        self._records.ensure_event_log(sid)
-        log.info("Session %s reactivated (work_dir=%s)", sid, wd)
-        return True
+        existed = sid in self._agents
+        ok = await ensure_session_runtime(
+            sid=sid,
+            config=self.config,
+            default_work_dir=self.work_dir,
+            hook_engine=self.hook_engine,
+            session_mgr=self.session_mgr,
+            runtimes=self._agents,
+            session_meta=self._session_meta,
+            records=self._records,
+            agent_factory=create_agent_from_config,
+        )
+        if ok and not existed:
+            log.info("Session %s reactivated (work_dir=%s)", sid, self.session_work_dir(sid))
+        return ok
 
     def session_info(self, sid: str) -> dict:
         return self._records.info(sid)
