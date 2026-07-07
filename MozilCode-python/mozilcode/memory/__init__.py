@@ -25,8 +25,10 @@ from mozilcode.memory.session import (
     Session,
     SessionManager,
     SessionMeta,
-    SessionRecord,
     generate_session_summary,
+)
+from mozilcode.memory.session_records import (
+    SessionRecord,
     make_compact_boundary,
     parse_compact_boundary,
     validate_message_chain,
