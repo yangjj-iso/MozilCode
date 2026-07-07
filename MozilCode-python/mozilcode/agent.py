@@ -51,6 +51,12 @@ from mozilcode.agent_notifications import (
 )
 from mozilcode.agent_noninteractive_tools import execute_noninteractive_tool_call
 from mozilcode.agent_recovery import record_tool_recovery_snapshot
+from mozilcode.agent_response_history import (
+    add_final_response,
+    add_tool_call_response,
+    response_thinking_blocks,
+    snapshot_file_history,
+)
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
     ToolBatch,
@@ -76,8 +82,7 @@ from mozilcode.context import (
     reconstruct_replacement_state,
     should_auto_compact,
 )
-from mozilcode.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
-from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
+from mozilcode.conversation import ConversationManager, ToolResultBlock
 from mozilcode.memory.auto_memory import MemoryManager
 from mozilcode.memory.providers import (
     MEMORY_EVENT_TURN_COMPLETED,
@@ -409,10 +414,7 @@ class Agent:
                 context_tokens=context_tokens,
             )
 
-            conv_thinking = [
-                ConvThinkingBlock(thinking=tb.thinking, signature=tb.signature)
-                for tb in response.thinking_blocks
-            ]
+            conv_thinking = response_thinking_blocks(response)
 
             if response.stop_reason == "max_tokens":
                 if not max_tokens_escalated:
@@ -445,8 +447,10 @@ class Agent:
                 output_recoveries = 0
 
             if not response.tool_calls:
-                conversation.add_assistant_message(
-                    response.text, thinking_blocks=conv_thinking
+                add_final_response(
+                    conversation,
+                    response,
+                    thinking_blocks=conv_thinking,
                 )
                 if self.memory_hub:
                     asyncio.ensure_future(
@@ -465,31 +469,18 @@ class Agent:
                     await self.hook_engine.run_hooks("session_end", ctx)
                     for he in self._drain_hook_events():
                         yield he
-                if self.file_history is not None:
-                    summary = response.text[:60] + "..." if len(response.text) > 60 else response.text
-                    self.file_history.make_snapshot(len(conversation.history), summary)
+                snapshot_file_history(
+                    self.file_history,
+                    conversation,
+                    response.text,
+                )
                 yield LoopComplete(total_turns=iteration)
                 break
 
-            tool_uses = [
-                ToolUseBlock(
-                    tool_use_id=tc.tool_id,
-                    tool_name=tc.tool_name,
-                    arguments=tc.arguments,
-                )
-                for tc in response.tool_calls
-            ]
-            conversation.add_assistant_message(
-                response.text, tool_uses, thinking_blocks=conv_thinking
-            )
-            # 在 assistant 回复加入历史后锚定实际用量：基线（input + cache + output）
-            # 覆盖到当前位置，因此下一轮迭代顶部的 auto-compact 检查只需对
-            # 接下来追加的 tool results 做字符估算。
-            conversation.record_usage_anchor(
-                response.input_tokens,
-                response.output_tokens,
-                response.cache_read,
-                response.cache_creation,
+            add_tool_call_response(
+                conversation,
+                response,
+                thinking_blocks=conv_thinking,
             )
 
             tool_results: list[ToolResultBlock] = []
@@ -1012,29 +1003,23 @@ class Agent:
             )
 
             if not response.tool_calls:
-                conversation.add_assistant_message(response.text)
+                add_final_response(
+                    conversation,
+                    response,
+                    thinking_blocks=[],
+                )
                 await self._observe_memories(conversation, MEMORY_EVENT_TURN_COMPLETED)
-                if self.file_history is not None:
-                    summary = response.text[:60] + "..." if len(response.text) > 60 else response.text
-                    self.file_history.make_snapshot(len(conversation.history), summary)
+                snapshot_file_history(
+                    self.file_history,
+                    conversation,
+                    response.text,
+                )
                 break
 
-            tool_uses = [
-                ToolUseBlock(
-                    tool_use_id=tc.tool_id,
-                    tool_name=tc.tool_name,
-                    arguments=tc.arguments,
-                )
-                for tc in response.tool_calls
-            ]
-            conversation.add_assistant_message(response.text, tool_uses)
-            # assistant 回复已在历史中，锚定实际用量；下一轮迭代只需对
-            # 下方追加的 tool results 做字符估算。
-            conversation.record_usage_anchor(
-                response.input_tokens,
-                response.output_tokens,
-                response.cache_read,
-                response.cache_creation,
+            add_tool_call_response(
+                conversation,
+                response,
+                thinking_blocks=[],
             )
 
             tool_results: list[ToolResultBlock] = []
