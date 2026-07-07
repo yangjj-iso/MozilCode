@@ -6,12 +6,11 @@ from typing import Any, Protocol
 
 from mozilcode.agent_events import HookEvent
 from mozilcode.agent_helpers import infer_tool_file_path
+from mozilcode.agent_hook_events import BuildHookContext, DrainHookEvents
 from mozilcode.hooks import HookContext, ToolRejectedError
 from mozilcode.tools.base import ToolCallComplete
 
 
-BuildHookContext = Callable[..., HookContext]
-DrainHookEvents = Callable[[], list[HookEvent]]
 InferFilePath = Callable[[dict[str, Any]], str]
 
 

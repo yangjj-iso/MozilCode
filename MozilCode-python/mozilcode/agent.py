@@ -40,6 +40,10 @@ from mozilcode.agent_helpers import (
     infer_tool_file_path,
     latest_user_query,
 )
+from mozilcode.agent_hook_events import (
+    drain_hook_events as drain_hook_engine_events,
+    run_lifecycle_hook,
+)
 from mozilcode.agent_llm_preparation import (
     inject_deferred_tool_reminder,
     prepare_api_conversation,
@@ -100,8 +104,7 @@ from mozilcode.permissions import (
     PermissionMode,
 )
 from mozilcode.plan_paths import create_plan_path
-from mozilcode.hooks import HookContext, HookEngine, ToolRejectedError
-from mozilcode.hooks.engine import HookNotification
+from mozilcode.hooks import HookContext, HookEngine
 from mozilcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mozilcode.tools import ToolRegistry
 from mozilcode.tools.base import (
@@ -236,17 +239,20 @@ class Agent:
         return infer_tool_file_path(args)
 
     def _drain_hook_events(self) -> list[HookEvent]:
-        if not self.hook_engine:
-            return []
-        return [
-            HookEvent(
-                hook_id=n.hook_id,
-                event=n.event,
-                output=n.output,
-                success=n.success,
-            )
-            for n in self.hook_engine.drain_notifications()
-        ]
+        return drain_hook_engine_events(self.hook_engine)
+
+    async def _run_lifecycle_hook(
+        self,
+        event: str,
+        **context_kwargs: Any,
+    ) -> list[HookEvent]:
+        return await run_lifecycle_hook(
+            hook_engine=self.hook_engine,
+            build_hook_context=self._build_hook_context,
+            drain_events=self._drain_hook_events,
+            event=event,
+            context_kwargs=context_kwargs or None,
+        )
 
     async def _load_memory_context(self, query: str = "") -> str:
         self.memory_bridge.memory_hub = self.memory_hub
@@ -272,11 +278,8 @@ class Agent:
             memory_content=memory_content,
         )
 
-        if self.hook_engine:
-            ctx = self._build_hook_context("session_start")
-            await self.hook_engine.run_hooks("session_start", ctx)
-            for he in self._drain_hook_events():
-                yield he
+        for he in await self._run_lifecycle_hook("session_start"):
+            yield he
 
         iteration = 0
         consecutive_unknown = 0
@@ -292,11 +295,8 @@ class Agent:
                 )
                 break
 
-            if self.hook_engine:
-                ctx = self._build_hook_context("turn_start")
-                await self.hook_engine.run_hooks("turn_start", ctx)
-                for he in self._drain_hook_events():
-                    yield he
+            for he in await self._run_lifecycle_hook("turn_start"):
+                yield he
 
             self._inject_external_notifications(conversation)
 
@@ -345,11 +345,8 @@ class Agent:
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
 
-            if self.hook_engine:
-                ctx = self._build_hook_context("pre_send")
-                await self.hook_engine.run_hooks("pre_send", ctx)
-                for he in self._drain_hook_events():
-                    yield he
+            for he in await self._run_lifecycle_hook("pre_send"):
+                yield he
 
             hook_prompts = (
                 self.hook_engine.get_prompt_messages() if self.hook_engine else None
@@ -399,11 +396,11 @@ class Agent:
 
             response = collector.response
 
-            if self.hook_engine:
-                ctx = self._build_hook_context("post_receive", message=response.text)
-                await self.hook_engine.run_hooks("post_receive", ctx)
-                for he in self._drain_hook_events():
-                    yield he
+            for he in await self._run_lifecycle_hook(
+                "post_receive",
+                message=response.text,
+            ):
+                yield he
 
             self.total_input_tokens += response.input_tokens
             self.total_output_tokens += response.output_tokens
@@ -467,13 +464,10 @@ class Agent:
                     and self.memory_hub
                 ):
                     asyncio.ensure_future(self._extract_memories(conversation))
-                if self.hook_engine:
-                    ctx = self._build_hook_context("turn_end")
-                    await self.hook_engine.run_hooks("turn_end", ctx)
-                    ctx = self._build_hook_context("session_end")
-                    await self.hook_engine.run_hooks("session_end", ctx)
-                    for he in self._drain_hook_events():
-                        yield he
+                for he in await self._run_lifecycle_hook("turn_end"):
+                    yield he
+                for he in await self._run_lifecycle_hook("session_end"):
+                    yield he
                 snapshot_file_history(
                     self.file_history,
                     conversation,
@@ -534,16 +528,15 @@ class Agent:
                     if approved:
                         for br in await self._execute_batch_parallel(approved):
                             exec_results[br.tool_id] = br
-                        if self.hook_engine:
-                            for tc in approved:
-                                for he in await run_post_tool_hook(
-                                    hook_engine=self.hook_engine,
-                                    build_hook_context=self._build_hook_context,
-                                    infer_file_path=self._infer_file_path,
-                                    drain_hook_events=self._drain_hook_events,
-                                    tool_call=tc,
-                                ):
-                                    yield he
+                        for tc in approved:
+                            for he in await run_post_tool_hook(
+                                hook_engine=self.hook_engine,
+                                build_hook_context=self._build_hook_context,
+                                infer_file_path=self._infer_file_path,
+                                drain_hook_events=self._drain_hook_events,
+                                tool_call=tc,
+                            ):
+                                yield he
 
                     # 并发批次内均为已知且已启用的工具，重置连续 unknown 计数
                     # （与串行路径中非 unknown 结果的处理保持一致）。
@@ -626,11 +619,8 @@ class Agent:
                 yield LoopComplete(total_turns=iteration)
                 break
 
-            if self.hook_engine:
-                ctx = self._build_hook_context("turn_end")
-                await self.hook_engine.run_hooks("turn_end", ctx)
-                for he in self._drain_hook_events():
-                    yield he
+            for he in await self._run_lifecycle_hook("turn_end"):
+                yield he
             yield TurnComplete(turn=iteration)
 
 
