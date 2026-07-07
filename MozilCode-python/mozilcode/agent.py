@@ -45,6 +45,7 @@ from mozilcode.agent_notifications import (
     consume_team_mailbox,
     inject_external_notifications,
 )
+from mozilcode.agent_noninteractive_tools import execute_noninteractive_tool_call
 from mozilcode.agent_recovery import record_tool_recovery_snapshot
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
@@ -1074,60 +1075,12 @@ class Agent:
     async def _execute_tool_noninteractive(
         self, tc: ToolCallComplete
     ) -> ToolResult:
-        tool = self.registry.get(tc.tool_name)
-
-        if tool is None:
-            return ToolResult(
-                output=f"Error: unknown tool '{tc.tool_name}'", is_error=True
-            )
-
-        if not self.registry.is_enabled(tc.tool_name):
-            return ToolResult(
-                output=f"Error: tool '{tc.tool_name}' is disabled",
-                is_error=True,
-            )
-
-        if self.hook_engine:
-            file_path = self._infer_file_path(tc.arguments)
-            hook_ctx = self._build_hook_context(
-                "pre_tool_use",
-                tool_name=tc.tool_name,
-                tool_args=tc.arguments,
-                file_path=file_path,
-            )
-            rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
-            if rejection is not None:
-                return ToolResult(
-                    output=f"Hook rejected: {rejection.reason}",
-                    is_error=True,
-                )
-
-        if self.permission_checker:
-            decision = self.permission_checker.check(tool, tc.arguments)
-            if decision.effect == "deny":
-                return ToolResult(
-                    output=f"Permission denied: {decision.reason}",
-                    is_error=True,
-                )
-            if decision.effect == "ask":
-                if self.permission_mode == PermissionMode.DONT_ASK:
-                    pass  # 自动批准
-                else:
-                    return ToolResult(
-                        output="Permission denied: non-interactive agent cannot prompt user",
-                        is_error=True,
-                    )
-
-        result = await execute_validated_tool(tool, tc.arguments)
-
-        if self.hook_engine:
-            file_path = self._infer_file_path(tc.arguments)
-            hook_ctx = self._build_hook_context(
-                "post_tool_use",
-                tool_name=tc.tool_name,
-                tool_args=tc.arguments,
-                file_path=file_path,
-            )
-            await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
-
-        return result
+        return await execute_noninteractive_tool_call(
+            registry=self.registry,
+            permission_checker=self.permission_checker,
+            permission_mode=self.permission_mode,
+            hook_engine=self.hook_engine,
+            build_hook_context=self._build_hook_context,
+            infer_file_path=self._infer_file_path,
+            tool_call=tc,
+        )
