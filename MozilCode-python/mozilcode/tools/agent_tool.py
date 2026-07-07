@@ -9,6 +9,11 @@ from mozilcode.agents.model_selection import (
     create_subagent_client,
     resolve_subagent_model_override,
 )
+from mozilcode.agents.defaults import (
+    fork_agent_def,
+    teammate_agent_def,
+    worktree_agent_def,
+)
 from mozilcode.tools import rebase_file_tools
 from mozilcode.tools.base import Tool, ToolResult
 
@@ -155,16 +160,7 @@ class AgentTool(Tool):
             except ForkError as e:
                 return ToolResult(output=str(e), is_error=True)
 
-            definition = AgentDef(
-                agent_type="fork",
-                when_to_use="Forked from parent agent",
-                system_prompt="",
-                disallowed_tools=[],
-                model="inherit",
-                max_turns=self._parent_agent.max_iterations,
-                permission_mode="dontAsk",
-                source="builtin",
-            )
+            definition = fork_agent_def(self._parent_agent.max_iterations)
 
         # 选择 LLM 客户端
         client = self._select_llm(p, definition)
@@ -330,16 +326,7 @@ class AgentTool(Tool):
                 except ForkError as e:
                     return ToolResult(output=str(e), is_error=True)
 
-            definition = AgentDef(
-                agent_type="teammate",
-                when_to_use="Team member",
-                system_prompt="",
-                disallowed_tools=[],
-                model="inherit",
-                max_turns=self._parent_agent.max_iterations,
-                permission_mode="dontAsk",
-                source="builtin",
-            )
+            definition = teammate_agent_def(self._parent_agent.max_iterations)
 
         # 2. 创建 worktree
         wt_name = f"team-{p.team_name}/{teammate_name}"
@@ -553,16 +540,7 @@ class AgentTool(Tool):
                     is_error=True,
                 )
         else:
-            definition = AgentDef(
-                agent_type="worktree-agent",
-                when_to_use="Isolated worktree agent",
-                system_prompt="",
-                disallowed_tools=[],
-                model="inherit",
-                max_turns=self._parent_agent.max_iterations,
-                permission_mode="dontAsk",
-                source="builtin",
-            )
+            definition = worktree_agent_def(self._parent_agent.max_iterations)
 
         wt_name = generate_worktree_name()
         try:
