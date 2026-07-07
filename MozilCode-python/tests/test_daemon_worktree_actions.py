@@ -10,6 +10,12 @@ from mozilcode.daemon.server import create_app
 from mozilcode.daemon.responses import DaemonActionResult
 from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
+from mozilcode.daemon.worktree_actions import (
+    create_and_enter_worktree,
+    exit_worktree as exit_worktree_action,
+    list_worktrees_payload,
+    normalize_create_worktree_request,
+)
 from mozilcode.permissions import PermissionMode
 from mozilcode.worktree.models import Worktree, WorktreeSession
 
@@ -115,6 +121,64 @@ def _server_with_worktrees(tmp_path) -> tuple[DaemonServer, str, _Agent, _Worktr
     server._session_meta[sid] = {"work_dir": str(tmp_path), "title": "worktrees"}
     server._persisted_count[sid] = 0
     return server, sid, agent, manager
+
+
+def test_normalize_create_worktree_request_trims_name_and_defaults_branch() -> None:
+    assert normalize_create_worktree_request(" feature ", "   ") == (
+        "feature",
+        "HEAD",
+    )
+
+
+def test_normalize_create_worktree_request_requires_name() -> None:
+    with pytest.raises(ValueError, match="name is required"):
+        normalize_create_worktree_request(" ", "main")
+
+
+@pytest.mark.asyncio
+async def test_create_and_enter_worktree_action_returns_work_dir(tmp_path):
+    manager = _WorktreeManager(str(tmp_path))
+
+    entry = await create_and_enter_worktree(manager, "feature", "main")
+
+    assert entry.worktree is manager.active["feature"]
+    assert entry.work_dir.endswith("/.mozilcode/worktrees/feature")
+    assert manager.created_with == ("feature", "main")
+
+
+@pytest.mark.asyncio
+async def test_exit_worktree_action_returns_original_work_dir(tmp_path):
+    manager = _WorktreeManager(str(tmp_path))
+    await create_and_enter_worktree(manager, "feature", "HEAD")
+
+    entry = await exit_worktree_action(manager, remove=True, discard=True)
+
+    assert entry.work_dir == str(tmp_path)
+    assert manager.exited_with == ("feature", "remove", True)
+
+
+def test_list_worktrees_payload_marks_current(tmp_path) -> None:
+    manager = _WorktreeManager(str(tmp_path))
+    manager.active["feature"] = Worktree(
+        name="feature",
+        path=f"{tmp_path}/.mozilcode/worktrees/feature",
+        branch="worktree-feature",
+        based_on="HEAD",
+        head_commit="abc123",
+    )
+    manager.current_session = WorktreeSession(
+        original_cwd=str(tmp_path),
+        worktree_path=manager.active["feature"].path,
+        worktree_name="feature",
+        original_branch="main",
+        original_head_commit="abc123",
+    )
+
+    payload = list_worktrees_payload(manager)
+
+    assert payload["current"] == "feature"
+    assert payload["worktrees"][0]["name"] == "feature"
+    assert payload["worktrees"][0]["current"] is True
 
 
 @pytest.mark.asyncio
