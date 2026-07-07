@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from pathlib import Path
@@ -34,6 +33,7 @@ from mozilcode.daemon.responses import (
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
 from mozilcode.daemon.permission_mode_actions import set_session_permission_mode
+from mozilcode.daemon.session_close_actions import close_daemon_session
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
     create_daemon_session_runtime,
@@ -413,21 +413,13 @@ class DaemonServer:
 
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""
-        validate_session_id(sid)
-        task = self._active_tasks.pop_task(sid)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        await self.session_mgr.close_session(sid)
-        entry = self._agents.pop(sid, None)
-        hub = getattr(entry.agent, "memory_hub", None) if entry is not None else None
-        if hub is not None:
-            await hub.shutdown()
-        self._records.close(sid)
-        self._pre_plan_modes.pop(sid, None)
-        self._pending_prompts.discard_session(sid)
+        await close_daemon_session(
+            sid,
+            active_tasks=self._active_tasks,
+            session_mgr=self.session_mgr,
+            runtimes=self._agents,
+            records=self._records,
+            pre_plan_modes=self._pre_plan_modes,
+            pending_prompts=self._pending_prompts,
+        )
         log.info("Session %s closed", sid)
