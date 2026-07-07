@@ -34,6 +34,7 @@ from mozilcode.agent_helpers import (
     infer_tool_file_path,
     latest_user_query,
 )
+from mozilcode.agent_memory import AgentMemoryBridge
 from mozilcode.agent_recovery import record_tool_recovery_snapshot
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
@@ -64,11 +65,8 @@ from mozilcode.conversation import ConversationManager, ToolResultBlock, ToolUse
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mozilcode.memory.auto_memory import MemoryManager
 from mozilcode.memory.providers import (
-    MEMORY_EVENT_TURN_COMMITTED,
     MEMORY_EVENT_TURN_COMPLETED,
-    MemoryEvent,
     MemoryHub,
-    MemoryScope,
     MarkdownMemoryProvider,
 )
 from mozilcode.permissions import (
@@ -146,9 +144,14 @@ class Agent:
             self.memory_hub = MemoryHub(
                 providers=[MarkdownMemoryProvider(work_dir, manager=self.memory_manager)]
             )
+        self.memory_bridge = AgentMemoryBridge(
+            memory_hub=self.memory_hub,
+            client=self.client,
+            protocol=self.protocol,
+            project_root=self.work_dir,
+        )
         self.hook_engine = hook_engine
         self._loop_count = 0
-        self._extracting = False
         self.session_id: str = ""
         self.active_skills: dict[str, str] = {}
         self._skill_catalog: str = ""
@@ -221,15 +224,11 @@ class Agent:
         ]
 
     async def _load_memory_context(self, query: str = "") -> str:
-        if not self.memory_hub:
-            return ""
-        scope = MemoryScope(
+        self.memory_bridge.memory_hub = self.memory_hub
+        return await self.memory_bridge.load_context(
             query=query,
             session_id=self.session_id,
-            project_root=self.work_dir,
-            source="agent",
         )
-        return await self.memory_hub.load_context(query, scope)
 
     @staticmethod
     def _latest_user_query(conversation: ConversationManager) -> str:
@@ -918,38 +917,27 @@ class Agent:
     async def _extract_memories(
         self, conversation: ConversationManager
     ) -> None:
-        if self._extracting or not self.memory_hub:
-            return
-        self._extracting = True
-        try:
-            await self._observe_memories(conversation, MEMORY_EVENT_TURN_COMMITTED)
-        except Exception as e:
-            log.debug("Memory extraction failed: %s", e)
-        finally:
-            self._extracting = False
+        self.memory_bridge.memory_hub = self.memory_hub
+        await self.memory_bridge.extract_memories(
+            conversation,
+            session_id=self.session_id,
+            agent_id=self.agent_id,
+            query=self._latest_user_query(conversation),
+        )
 
     async def _observe_memories(
         self,
         conversation: ConversationManager,
         event_type: str,
     ) -> None:
-        if not self.memory_hub:
-            return
-        try:
-            await self.memory_hub.observe(
-                MemoryEvent(
-                    type=event_type,
-                    source="agent",
-                    session_id=self.session_id,
-                    query=self._latest_user_query(conversation),
-                    conversation=conversation,
-                    client=self.client,
-                    protocol=self.protocol,
-                    metadata={"agent_id": self.agent_id},
-                )
-            )
-        except Exception as e:
-            log.debug("Memory observe failed for %s: %s", event_type, e)
+        self.memory_bridge.memory_hub = self.memory_hub
+        await self.memory_bridge.observe(
+            conversation,
+            event_type,
+            session_id=self.session_id,
+            agent_id=self.agent_id,
+            query=self._latest_user_query(conversation),
+        )
 
     async def manual_compact(
         self, conversation: ConversationManager
