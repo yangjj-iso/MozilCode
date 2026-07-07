@@ -67,6 +67,11 @@ from mozilcode.agent_tool_execution import (
     partition_tool_calls,
 )
 from mozilcode.agent_tool_authorization import authorize_tool_call
+from mozilcode.agent_tool_results import (
+    hook_rejected_result,
+    tool_result_block,
+    tool_result_event,
+)
 from mozilcode.client import LLMClient
 from mozilcode.context import (
     CompactCircuitBreaker,
@@ -78,7 +83,6 @@ from mozilcode.context import (
     create_replacement_state,
     ensure_session_dir,
     load_replacement_records,
-    prepare_tool_result_content,
     reconstruct_replacement_state,
     should_auto_compact,
 )
@@ -507,9 +511,8 @@ class Agent:
                             for he in self._drain_hook_events():
                                 yield he
                             if rejection is not None:
-                                pre_failed[tc.tool_id] = ToolResult(
-                                    output=f"Hook rejected: {rejection.reason}",
-                                    is_error=True,
+                                pre_failed[tc.tool_id] = hook_rejected_result(
+                                    rejection.reason
                                 )
                                 continue
 
@@ -556,23 +559,10 @@ class Agent:
                             br = exec_results[tc.tool_id]
                             result = br.result
                             elapsed = br.elapsed
-                        content = prepare_tool_result_content(
-                            tc.tool_id, result.output, self.session_dir
-                        )
                         tool_results.append(
-                            ToolResultBlock(
-                                tool_use_id=tc.tool_id,
-                                content=content,
-                                is_error=result.is_error,
-                            )
+                            tool_result_block(tc, result, self.session_dir)
                         )
-                        yield ToolResultEvent(
-                            tool_id=tc.tool_id,
-                            tool_name=tc.tool_name,
-                            output=result.output,
-                            is_error=result.is_error,
-                            elapsed=elapsed,
-                        )
+                        yield tool_result_event(tc, result, elapsed)
                 else:
                     for tc in batch.calls:
                         result: ToolResult | None = None
@@ -591,27 +581,11 @@ class Agent:
                             for he in self._drain_hook_events():
                                 yield he
                             if rejection is not None:
-                                result = ToolResult(
-                                    output=f"Hook rejected: {rejection.reason}",
-                                    is_error=True,
-                                )
-                                content = prepare_tool_result_content(
-                                    tc.tool_id, result.output, self.session_dir
-                                )
+                                result = hook_rejected_result(rejection.reason)
                                 tool_results.append(
-                                    ToolResultBlock(
-                                        tool_use_id=tc.tool_id,
-                                        content=content,
-                                        is_error=True,
-                                    )
+                                    tool_result_block(tc, result, self.session_dir)
                                 )
-                                yield ToolResultEvent(
-                                    tool_id=tc.tool_id,
-                                    tool_name=tc.tool_name,
-                                    output=result.output,
-                                    is_error=True,
-                                    elapsed=0.0,
-                                )
+                                yield tool_result_event(tc, result, 0.0)
                                 continue
 
                         async for item in self._execute_tool(tc):
@@ -640,23 +614,10 @@ class Agent:
                             for he in self._drain_hook_events():
                                 yield he
 
-                        content = prepare_tool_result_content(
-                            tc.tool_id, result.output, self.session_dir
-                        )
                         tool_results.append(
-                            ToolResultBlock(
-                                tool_use_id=tc.tool_id,
-                                content=content,
-                                is_error=result.is_error,
-                            )
+                            tool_result_block(tc, result, self.session_dir)
                         )
-                        yield ToolResultEvent(
-                            tool_id=tc.tool_id,
-                            tool_name=tc.tool_name,
-                            output=result.output,
-                            is_error=result.is_error,
-                            elapsed=elapsed,
-                        )
+                        yield tool_result_event(tc, result, elapsed)
 
             if consecutive_unknown >= 3:
                 yield ErrorEvent(
@@ -1031,15 +992,8 @@ class Agent:
                         "args": tc.arguments,
                     })
                 result = await self._execute_tool_noninteractive(tc)
-                content = prepare_tool_result_content(
-                    tc.tool_id, result.output, self.session_dir
-                )
                 tool_results.append(
-                    ToolResultBlock(
-                        tool_use_id=tc.tool_id,
-                        content=content,
-                        is_error=result.is_error,
-                    )
+                    tool_result_block(tc, result, self.session_dir)
                 )
 
             conversation.add_tool_results_message(tool_results)
