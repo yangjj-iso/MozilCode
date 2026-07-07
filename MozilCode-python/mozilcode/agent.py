@@ -35,6 +35,10 @@ from mozilcode.agent_helpers import (
     latest_user_query,
 )
 from mozilcode.agent_memory import AgentMemoryBridge
+from mozilcode.agent_notifications import (
+    consume_team_mailbox,
+    inject_external_notifications,
+)
 from mozilcode.agent_recovery import record_tool_recovery_snapshot
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
@@ -270,10 +274,7 @@ class Agent:
                 for he in self._drain_hook_events():
                     yield he
 
-            self._consume_mailbox(conversation)
-            if self.notification_fn:
-                for note in self.notification_fn():
-                    conversation.add_system_reminder(note)
+            self._inject_external_notifications(conversation)
 
             # Layer 2: 接近 context window 上限时自动 compact（操作原始对话）
             current_tokens = conversation.current_tokens()
@@ -687,21 +688,21 @@ class Agent:
 
 
     def _consume_mailbox(self, conversation: ConversationManager) -> None:
-        if not self.team_name or not self._team_manager:
-            return
-        try:
-            mailbox = self._team_manager.get_mailbox(self.team_name)
-            if mailbox is None:
-                return
-            messages = mailbox.consume(self.agent_id)
-            for msg in messages:
-                prefix = f"[Message from {msg.from_agent}]"
-                if msg.message_type != "text":
-                    prefix = f"[{msg.message_type} from {msg.from_agent}]"
-                content = f"{prefix} {msg.content}"
-                conversation.add_user_message(content)
-        except Exception as e:
-            log.debug("Mailbox consumption failed: %s", e)
+        consume_team_mailbox(
+            conversation,
+            team_name=self.team_name,
+            team_manager=self._team_manager,
+            agent_id=self.agent_id,
+        )
+
+    def _inject_external_notifications(self, conversation: ConversationManager) -> None:
+        inject_external_notifications(
+            conversation,
+            team_name=self.team_name,
+            team_manager=self._team_manager,
+            agent_id=self.agent_id,
+            notification_fn=self.notification_fn,
+        )
 
     def _build_permission_description(self, tc: ToolCallComplete) -> str:
         return build_permission_description(tc)
@@ -1032,10 +1033,7 @@ class Agent:
                 ctx = self._build_hook_context("turn_start")
                 await self.hook_engine.run_hooks("turn_start", ctx)
 
-            self._consume_mailbox(conversation)
-            if self.notification_fn:
-                for note in self.notification_fn():
-                    conversation.add_system_reminder(note)
+            self._inject_external_notifications(conversation)
 
             compact_result = await auto_compact(
                 conversation,
