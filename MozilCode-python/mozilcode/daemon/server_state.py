@@ -14,6 +14,10 @@ from mozilcode.daemon.active_tasks import (
     ActiveTaskRegistry,
 )
 from mozilcode.daemon.agent_task_runner import AgentTaskRunner
+from mozilcode.daemon.background_task_actions import (
+    cancel_session_background_task,
+    list_session_background_tasks,
+)
 from mozilcode.daemon.compact_actions import run_manual_compact
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
@@ -32,7 +36,6 @@ from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
     create_daemon_session_runtime,
 )
-from mozilcode.daemon.workspace_payloads import task_to_dict
 from mozilcode.daemon.worktree_session_actions import (
     create_session_worktree,
     enter_session_worktree,
@@ -348,29 +351,18 @@ class DaemonServer:
         )
 
     async def list_background_tasks(self, sid: str) -> DaemonActionResult:
-        deps, error = await self._require_deps(sid)
-        if error is not None:
-            return error
-        assert deps is not None
-        return DaemonActionResult(
-            {
-                "tasks": [
-                    task_to_dict(task)
-                    for task in deps.task_manager.list_tasks()
-                ]
-            }
-        )
+        return await list_session_background_tasks(sid, self._require_deps)
 
     async def cancel_background_task(
         self,
         sid: str,
         task_id: str,
     ) -> DaemonActionResult:
-        deps, error = await self._require_deps(sid)
-        if error is not None:
-            return error
-        assert deps is not None
-        return DaemonActionResult({"cancelled": deps.task_manager.cancel(task_id)})
+        return await cancel_session_background_task(
+            sid,
+            task_id,
+            self._require_deps,
+        )
 
     def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
         configured_mode = (
