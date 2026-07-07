@@ -5,22 +5,16 @@ import logging
 from pathlib import Path
 
 from mozilcode.agent import Agent
-from mozilcode.agent_events import (
-    CompactStarted,
-    ErrorEvent,
-    PermissionResponse,
-    UsageEvent,
-)
+from mozilcode.agent_events import PermissionResponse
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
-from mozilcode.context import compute_compact_threshold
 from mozilcode.daemon.active_tasks import (
     ACTIVE_TASK_RUNNING_ERROR,
     ActiveTaskRegistry,
 )
 from mozilcode.daemon.agent_task_runner import AgentTaskRunner
-from mozilcode.daemon.serialize import serialize_event
+from mozilcode.daemon.compact_actions import run_manual_compact
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
     build_session_status,
@@ -298,58 +292,18 @@ class DaemonServer:
         return status
 
     async def manual_compact(self, sid: str) -> DaemonActionResult:
-        """Run manual context compaction and persist the resulting event stream."""
         agent, conv, error = await self._require_agent_and_conversation(sid)
         if error is not None:
             return error
         assert agent is not None and conv is not None
 
-        before_tokens = conv.current_tokens()
-        self._emit(
-            sid,
-            serialize_event(
-                CompactStarted(
-                    current_tokens=before_tokens,
-                    threshold=max(
-                        0,
-                        compute_compact_threshold(
-                            agent.context_window,
-                            manual=True,
-                        ),
-                    ),
-                    context_window=agent.context_window,
-                    message="正在压缩上下文",
-                )
-            ),
-        )
-
-        result = await agent.manual_compact(conv)
-        event = serialize_event(result)
-        self._emit(sid, event)
-        if not isinstance(result, ErrorEvent):
-            self._emit(
-                sid,
-                serialize_event(
-                    UsageEvent(
-                        input_tokens=agent.total_input_tokens,
-                        output_tokens=agent.total_output_tokens,
-                        context_tokens=conv.current_tokens(),
-                    )
-                ),
-            )
-        self._persist_events(sid)
-
-        if isinstance(result, ErrorEvent):
-            return DaemonActionResult(
-                {"error": result.message},
-                status_code=400,
-            )
-        return DaemonActionResult(
-            {
-                "type": type(result).__name__,
-                "data": event.get("data", {}),
-                "status": self.status(sid),
-            }
+        return await run_manual_compact(
+            sid=sid,
+            agent=agent,
+            conversation=conv,
+            emit_event=self._emit,
+            persist_events=self._persist_events,
+            status_provider=self.status,
         )
 
     async def list_worktrees(self, sid: str) -> DaemonActionResult:
