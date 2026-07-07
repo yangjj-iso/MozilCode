@@ -67,6 +67,7 @@ from mozilcode.agent_tool_execution import (
     partition_tool_calls,
 )
 from mozilcode.agent_tool_authorization import authorize_tool_call
+from mozilcode.agent_tool_hooks import run_post_tool_hook, run_pre_tool_hook
 from mozilcode.agent_tool_results import (
     hook_rejected_result,
     tool_result_block,
@@ -499,22 +500,20 @@ class Agent:
                     approved: list[ToolCallComplete] = []
                     pre_failed: dict[str, ToolResult] = {}
                     for tc in batch.calls:
-                        if self.hook_engine:
-                            file_path = self._infer_file_path(tc.arguments)
-                            hook_ctx = self._build_hook_context(
-                                "pre_tool_use",
-                                tool_name=tc.tool_name,
-                                tool_args=tc.arguments,
-                                file_path=file_path,
+                        hook_result = await run_pre_tool_hook(
+                            hook_engine=self.hook_engine,
+                            build_hook_context=self._build_hook_context,
+                            infer_file_path=self._infer_file_path,
+                            drain_hook_events=self._drain_hook_events,
+                            tool_call=tc,
+                        )
+                        for he in hook_result.events:
+                            yield he
+                        if hook_result.rejection is not None:
+                            pre_failed[tc.tool_id] = hook_rejected_result(
+                                hook_result.rejection.reason
                             )
-                            rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
-                            for he in self._drain_hook_events():
-                                yield he
-                            if rejection is not None:
-                                pre_failed[tc.tool_id] = hook_rejected_result(
-                                    rejection.reason
-                                )
-                                continue
+                            continue
 
                         auth: _AuthResult | None = None
                         async for item in self._authorize_tool(tc):
@@ -537,15 +536,13 @@ class Agent:
                             exec_results[br.tool_id] = br
                         if self.hook_engine:
                             for tc in approved:
-                                file_path = self._infer_file_path(tc.arguments)
-                                hook_ctx = self._build_hook_context(
-                                    "post_tool_use",
-                                    tool_name=tc.tool_name,
-                                    tool_args=tc.arguments,
-                                    file_path=file_path,
-                                )
-                                await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
-                                for he in self._drain_hook_events():
+                                for he in await run_post_tool_hook(
+                                    hook_engine=self.hook_engine,
+                                    build_hook_context=self._build_hook_context,
+                                    infer_file_path=self._infer_file_path,
+                                    drain_hook_events=self._drain_hook_events,
+                                    tool_call=tc,
+                                ):
                                     yield he
 
                     # 并发批次内均为已知且已启用的工具，重置连续 unknown 计数
@@ -569,24 +566,22 @@ class Agent:
                         elapsed = 0.0
                         is_unknown = False
 
-                        if self.hook_engine:
-                            file_path = self._infer_file_path(tc.arguments)
-                            hook_ctx = self._build_hook_context(
-                                "pre_tool_use",
-                                tool_name=tc.tool_name,
-                                tool_args=tc.arguments,
-                                file_path=file_path,
+                        hook_result = await run_pre_tool_hook(
+                            hook_engine=self.hook_engine,
+                            build_hook_context=self._build_hook_context,
+                            infer_file_path=self._infer_file_path,
+                            drain_hook_events=self._drain_hook_events,
+                            tool_call=tc,
+                        )
+                        for he in hook_result.events:
+                            yield he
+                        if hook_result.rejection is not None:
+                            result = hook_rejected_result(hook_result.rejection.reason)
+                            tool_results.append(
+                                tool_result_block(tc, result, self.session_dir)
                             )
-                            rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
-                            for he in self._drain_hook_events():
-                                yield he
-                            if rejection is not None:
-                                result = hook_rejected_result(rejection.reason)
-                                tool_results.append(
-                                    tool_result_block(tc, result, self.session_dir)
-                                )
-                                yield tool_result_event(tc, result, 0.0)
-                                continue
+                            yield tool_result_event(tc, result, 0.0)
+                            continue
 
                         async for item in self._execute_tool(tc):
                             if isinstance(item, (PermissionRequest, AskUserRequest)):
@@ -602,17 +597,14 @@ class Agent:
                         else:
                             consecutive_unknown = 0
 
-                        if self.hook_engine:
-                            file_path = self._infer_file_path(tc.arguments)
-                            hook_ctx = self._build_hook_context(
-                                "post_tool_use",
-                                tool_name=tc.tool_name,
-                                tool_args=tc.arguments,
-                                file_path=file_path,
-                            )
-                            await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
-                            for he in self._drain_hook_events():
-                                yield he
+                        for he in await run_post_tool_hook(
+                            hook_engine=self.hook_engine,
+                            build_hook_context=self._build_hook_context,
+                            infer_file_path=self._infer_file_path,
+                            drain_hook_events=self._drain_hook_events,
+                            tool_call=tc,
+                        ):
+                            yield he
 
                         tool_results.append(
                             tool_result_block(tc, result, self.session_dir)
