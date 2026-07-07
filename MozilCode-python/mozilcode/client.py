@@ -16,6 +16,9 @@ from mozilcode.anthropic_request import (
 from mozilcode.anthropic_streaming import AnthropicStreamState
 from mozilcode.client_error_mapping import provider_error_mapper
 from mozilcode.config import ProviderConfig
+from mozilcode.context_window_resolver import (
+    resolve_context_window as _resolve_context_window,
+)
 from mozilcode.conversation import ConversationManager
 from mozilcode.serialization import (
     build_anthropic_messages,
@@ -346,24 +349,4 @@ async def resolve_context_window(config: ProviderConfig) -> None:
     get_context_window() 降级到内置映射表 / 默认值。在启动时调用是安全的——
     阻塞时间不会超过拉取自身的超时，也不会导致崩溃。
     """
-    # 配置中显式指定的 window 在 get_context_window() 中优先级最高，
-    # 上次调用已缓存的值也不需要重新拉取——直接跳过网络请求。
-    if config.context_window > 0 or config._fetched_context_window > 0:
-        return
-    if config.protocol != "anthropic":
-        return
-
-    try:
-        client = create_client(config)
-    except Exception:
-        return
-    fetch = getattr(client, "fetch_model_context_window", None)
-    if fetch is None:
-        return
-
-    try:
-        window = await fetch()
-    except Exception:
-        window = None
-    if window:
-        config.set_fetched_context_window(window)
+    await _resolve_context_window(config, create_client)

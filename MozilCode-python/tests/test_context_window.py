@@ -14,6 +14,9 @@ import pytest
 
 from mozilcode.client import resolve_context_window
 from mozilcode.config import ProviderConfig
+from mozilcode.context_window_resolver import (
+    resolve_context_window as resolve_context_window_with_factory,
+)
 from mozilcode.model_context import (
     DEFAULT_CONTEXT_WINDOW,
     MODEL_CONTEXT_WINDOWS,
@@ -123,6 +126,16 @@ class TestDefaults:
 # ---------------------------------------------------------------------------
 
 class TestAutoFetch:
+    @pytest.mark.asyncio
+    async def test_resolver_accepts_explicit_client_factory(self):
+        p = _provider(model="claude-sonnet-4-6")
+        fake = AsyncMock()
+        fake.fetch_model_context_window = AsyncMock(return_value=444_000)
+
+        await resolve_context_window_with_factory(p, lambda _config: fake)
+
+        assert p.get_context_window() == 444_000
+
     @pytest.mark.asyncio
     async def test_fetch_success_is_cached_and_used(self):
         p = _provider(model="claude-sonnet-4-6")
