@@ -1500,7 +1500,7 @@ class Agent:
         return result
 
     def _maybe_persist_or_truncate(self, tool_use_id: str, text: str) -> str:
-        from mozilcode.context.manager import (
+        from mozilcode.context.tool_results import (
             SINGLE_RESULT_CHAR_LIMIT,
             make_persisted_preview,
             persist_tool_result,

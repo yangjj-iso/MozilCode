@@ -7,26 +7,28 @@ from pathlib import Path
 import pytest
 
 from mozilcode.context.manager import (
-    AGGREGATE_CHAR_LIMIT,
     KEEP_MAX_TOKENS,
     KEEP_RECENT_TOKENS,
     MIN_KEEP_MESSAGES,
-    PERSISTED_TAG,
-    SINGLE_RESULT_CHAR_LIMIT,
     CompactCircuitBreaker,
     _align_keep_start_to_tool_pair,
     _compute_keep_start_index,
-    apply_tool_result_budget,
     auto_compact,
     build_compact_messages,
-    cleanup_tool_results,
     compute_compact_threshold,
     create_replacement_state,
-    ensure_session_dir,
     extract_summary,
+    should_auto_compact,
+)
+from mozilcode.context.tool_results import (
+    AGGREGATE_CHAR_LIMIT,
+    PERSISTED_TAG,
+    SINGLE_RESULT_CHAR_LIMIT,
+    apply_tool_result_budget,
+    cleanup_tool_results,
+    ensure_session_dir,
     make_persisted_preview,
     persist_tool_result,
-    should_auto_compact,
 )
 from mozilcode.conversation import (
     _CHARS_PER_TOKEN,

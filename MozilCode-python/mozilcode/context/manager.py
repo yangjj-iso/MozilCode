@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -9,7 +7,6 @@ from typing import Any, Mapping
 from mozilcode.conversation import (
     ConversationManager,
     Message,
-    ToolResultBlock,
     estimate_tokens,
 )
 from mozilcode.context.recovery import (
@@ -33,19 +30,26 @@ from mozilcode.context.replacement import (
     load_replacement_records,
     reconstruct_replacement_state,
 )
+from mozilcode.context.tool_results import (
+    AGGREGATE_CHAR_LIMIT,
+    KEEP_RECENT_TURNS,
+    OLD_RESULT_SNIP_CHARS,
+    PERSISTED_TAG,
+    PREVIEW_CHARS,
+    SESSION_SUBDIR,
+    SINGLE_RESULT_CHAR_LIMIT,
+    SNIPPED_TAG,
+    apply_tool_result_budget,
+    cleanup_tool_results,
+    ensure_session_dir,
+    make_persisted_preview,
+    persist_tool_result,
+)
 from mozilcode.serialization import build_messages
 
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------
-
-SINGLE_RESULT_CHAR_LIMIT = 50_000
-AGGREGATE_CHAR_LIMIT = 200_000
-PREVIEW_CHARS = 2_000
-
-KEEP_RECENT_TURNS = 10
-OLD_RESULT_SNIP_CHARS = 2_000
-SNIPPED_TAG = "<snipped>"
 
 SUMMARY_OUTPUT_RESERVE = 20_000
 AUTO_COMPACT_SAFETY_MARGIN = 13_000
@@ -62,11 +66,6 @@ KEEP_MAX_TOKENS = 40_000
 # 前缀 token 数低于此阈值时不值得做摘要——摘要往返的开销比回收的空间还大，
 # 退化为不压缩、保留原始历史（避免「压了个寂寞」）。
 MIN_SUMMARIZE_PREFIX_TOKENS = 2_000
-
-PERSISTED_TAG = "<persisted-output>"
-
-SESSION_SUBDIR = ".mozilcode/session/tool-results"
-
 
 # ---------------------------------------------------------------------------
 # 事件
@@ -93,226 +92,6 @@ class CompactEvent:
     # 摘要成功时填充，调用方可据此持久化 compact_boundary 记录。
     # 未产出摘要时为 None。
     boundary: CompactBoundary | None = None
-
-
-# ---------------------------------------------------------------------------
-# Session 目录管理
-# ---------------------------------------------------------------------------
-
-def ensure_session_dir(work_dir: str) -> Path:
-    session_dir = Path(work_dir) / SESSION_SUBDIR
-    session_dir.mkdir(parents=True, exist_ok=True)
-    return session_dir
-
-
-def cleanup_tool_results(session_dir: Path) -> None:
-    if session_dir.exists():
-        shutil.rmtree(session_dir)
-        session_dir.mkdir(parents=True, exist_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Layer 1：大型工具结果落盘
-# ---------------------------------------------------------------------------
-
-def persist_tool_result(tool_use_id: str, content: str, session_dir: Path) -> Path:
-    file_path = session_dir / f"{tool_use_id}.txt"
-    try:
-        fd = os.open(str(file_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-    except FileExistsError:
-        pass
-    return file_path
-
-
-def make_persisted_preview(content: str, file_path: Path) -> str:
-    size_kb = len(content.encode("utf-8")) // 1024
-    preview = content[:PREVIEW_CHARS]
-    return (
-        f"{PERSISTED_TAG}\n"
-        f"输出太大（{size_kb}KB），完整内容已保存到：\n"
-        f"{file_path}\n"
-        f"\n"
-        f"预览（前 2KB）：\n"
-        f"{preview}\n"
-        f"</persisted-output>"
-    )
-
-
-def _count_turns(messages: list[Message]) -> int:
-    count = 0
-    for m in messages:
-        if m.role == "assistant" and not m.tool_uses:
-            count += 1
-    return count
-
-
-def _copy_message_with_results(
-    msg: Message, new_tool_results: list[ToolResultBlock]
-) -> Message:
-    return Message(
-        role=msg.role,
-        content=msg.content,
-        tool_uses=list(msg.tool_uses),
-        tool_results=new_tool_results,
-        thinking_blocks=list(msg.thinking_blocks),
-    )
-
-
-def _snip_stale_messages(
-    history: list[Message],
-) -> list[Message]:
-    total_turns = _count_turns(history)
-    if total_turns <= KEEP_RECENT_TURNS:
-        return history
-
-    out: list[Message] = []
-    turns_seen = 0
-    old_boundary = total_turns - KEEP_RECENT_TURNS
-
-    for msg in history:
-        if msg.role == "assistant" and not msg.tool_uses:
-            turns_seen += 1
-        if turns_seen > old_boundary or not msg.tool_results:
-            out.append(msg)
-            continue
-
-        new_results: list[ToolResultBlock] = []
-        changed = False
-        for tr in msg.tool_results:
-            if (
-                tr.content.startswith(SNIPPED_TAG)
-                or tr.content.startswith(PERSISTED_TAG)
-                or len(tr.content) <= OLD_RESULT_SNIP_CHARS
-            ):
-                new_results.append(tr)
-                continue
-            preview = tr.content[:200]
-            orig_len = len(tr.content)
-            new_content = (
-                f"{SNIPPED_TAG}\n"
-                f"(旧结果已裁剪，原始长度 {orig_len} 字符)\n"
-                f"{preview}\n"
-                f"… (snipped)"
-            )
-            new_results.append(ToolResultBlock(
-                tool_use_id=tr.tool_use_id,
-                content=new_content,
-                is_error=tr.is_error,
-            ))
-            changed = True
-
-        out.append(_copy_message_with_results(msg, new_results) if changed else msg)
-
-    return out
-
-
-def apply_tool_result_budget(
-    conversation: ConversationManager,
-    session_dir: Path,
-    state: ContentReplacementState,
-) -> tuple[ConversationManager, list[ContentReplacementRecord]]:
-    """
-    Design B: 不 mutate 原 conversation。
-
-    返回一个新的 ConversationManager，其中 tool_result.content 已根据 state.replacements
-    应用了决策，并对本轮 fresh 候选执行了 Pass 1（单条超限）+ Pass 2（聚合超限）。
-    Pass 3（陈旧裁剪）在新 history 上跑，仍然 stateless（边界 drift 是已知 trade-off）。
-
-    state 会被 mutate：本轮新决定的 id 进入 seen_ids，新决定替换的 id 进入 replacements。
-    """
-    new_records: list[ContentReplacementRecord] = []
-    new_history: list[Message] = []
-
-    for msg in conversation.history:
-        if not msg.tool_results:
-            new_history.append(msg)
-            continue
-
-        decisions: dict[str, str] = {}
-        fresh: list[ToolResultBlock] = []
-
-        for tr in msg.tool_results:
-            if tr.tool_use_id in state.replacements:
-                decisions[tr.tool_use_id] = state.replacements[tr.tool_use_id]
-            elif tr.tool_use_id in state.seen_ids:
-                decisions[tr.tool_use_id] = tr.content
-            elif tr.content.startswith(PERSISTED_TAG):
-                # 已被外部（如某些工具本身）打上 persisted-output 标签 —— 视为已知决策
-                state.seen_ids.add(tr.tool_use_id)
-                state.replacements[tr.tool_use_id] = tr.content
-                decisions[tr.tool_use_id] = tr.content
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=tr.content,
-                ))
-            else:
-                fresh.append(tr)
-
-        # Pass 1：单条超限
-        persisted_p1: set[str] = set()
-        for tr in fresh:
-            if len(tr.content) > SINGLE_RESULT_CHAR_LIMIT:
-                fp = persist_tool_result(tr.tool_use_id, tr.content, session_dir)
-                preview = make_persisted_preview(tr.content, fp)
-                decisions[tr.tool_use_id] = preview
-                state.replacements[tr.tool_use_id] = preview
-                state.seen_ids.add(tr.tool_use_id)
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=preview,
-                ))
-                persisted_p1.add(tr.tool_use_id)
-
-        # Pass 2：聚合超限
-        remaining = [tr for tr in fresh if tr.tool_use_id not in persisted_p1]
-        total = sum(len(c) for c in decisions.values()) + sum(
-            len(tr.content) for tr in remaining
-        )
-        if total > AGGREGATE_CHAR_LIMIT:
-            ranked = sorted(remaining, key=lambda tr: len(tr.content), reverse=True)
-            for tr in ranked:
-                if total <= AGGREGATE_CHAR_LIMIT:
-                    break
-                fp = persist_tool_result(tr.tool_use_id, tr.content, session_dir)
-                preview = make_persisted_preview(tr.content, fp)
-                old_len = len(tr.content)
-                decisions[tr.tool_use_id] = preview
-                state.replacements[tr.tool_use_id] = preview
-                state.seen_ids.add(tr.tool_use_id)
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=preview,
-                ))
-                total -= old_len - len(preview)
-
-        # 剩余未替换的 fresh 标记为"已见但未替换"
-        for tr in fresh:
-            if tr.tool_use_id not in state.replacements:
-                state.seen_ids.add(tr.tool_use_id)
-                decisions[tr.tool_use_id] = tr.content
-
-        # 生成新的 tool_results，保持原始顺序
-        new_tool_results = [
-            ToolResultBlock(
-                tool_use_id=tr.tool_use_id,
-                content=decisions[tr.tool_use_id],
-                is_error=tr.is_error,
-            )
-            for tr in msg.tool_results
-        ]
-        new_history.append(_copy_message_with_results(msg, new_tool_results))
-
-    # Pass 3：在新 history 上裁剪过期结果（无状态；边界漂移是已知 trade-off）
-    new_history = _snip_stale_messages(new_history)
-
-    new_conv = ConversationManager()
-    new_conv.history = new_history
-    new_conv.env_injected = conversation.env_injected
-    new_conv.ltm_injected = conversation.ltm_injected
-    new_conv.last_input_tokens = conversation.last_input_tokens
-    new_conv.baseline_tokens = conversation.baseline_tokens
-    new_conv.anchor_count = conversation.anchor_count
-
-    return new_conv, new_records
 
 
 # ---------------------------------------------------------------------------

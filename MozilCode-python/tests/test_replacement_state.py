@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mozilcode.context.manager import (
+from mozilcode.context.tool_results import (
     AGGREGATE_CHAR_LIMIT,
     PERSISTED_TAG,
     SINGLE_RESULT_CHAR_LIMIT,

@@ -3,12 +3,9 @@ from mozilcode.context.manager import (
     CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
-    apply_tool_result_budget,
     auto_compact,
     build_compact_messages,
-    cleanup_tool_results,
     compute_compact_threshold,
-    ensure_session_dir,
     should_auto_compact,
 )
 from mozilcode.context.recovery import (
@@ -26,6 +23,11 @@ from mozilcode.context.replacement import (
     create_replacement_state,
     load_replacement_records,
     reconstruct_replacement_state,
+)
+from mozilcode.context.tool_results import (
+    apply_tool_result_budget,
+    cleanup_tool_results,
+    ensure_session_dir,
 )
 
 
