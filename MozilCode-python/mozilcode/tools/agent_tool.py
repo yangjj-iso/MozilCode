@@ -15,6 +15,10 @@ from mozilcode.agents.defaults import (
     worktree_agent_def,
 )
 from mozilcode.tools import rebase_file_tools
+from mozilcode.tools.agent_tool_support import (
+    create_subagent_permission_checker,
+    unique_agent_name,
+)
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
@@ -46,13 +50,6 @@ class AgentToolParams(BaseModel):
             "runs as a one-shot sub-agent that blocks and returns inline."
         ),
     )
-
-
-PERMISSION_MODE_MAP = {
-    "default": "DEFAULT",
-    "acceptEdits": "ACCEPT_EDITS",
-    "dontAsk": "DONT_ASK",
-}
 
 
 TEAMMATE_ADDENDUM = (
@@ -121,13 +118,6 @@ class AgentTool(Tool):
         from mozilcode.agents.tool_filter import resolve_agent_tools
         from mozilcode.agent import Agent as AgentClass
         from mozilcode.conversation import ConversationManager
-        from mozilcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
 
         definition: AgentDef | None = None
         conversation: ConversationManager
@@ -181,17 +171,9 @@ class AgentTool(Tool):
         )
 
         # 为子 agent 创建权限检查器
-        pm_str = definition.permission_mode
-        pm_enum = getattr(
-            PermissionMode,
-            PERMISSION_MODE_MAP.get(pm_str, "DEFAULT"),
-            PermissionMode.DEFAULT,
-        )
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(self._parent_agent.work_dir),
-            rule_engine=RuleEngine(),
-            mode=pm_enum,
+        checker = create_subagent_permission_checker(
+            self._parent_agent.work_dir,
+            definition.permission_mode,
         )
 
         # 创建子 agent
@@ -278,13 +260,6 @@ class AgentTool(Tool):
         from mozilcode.agents.tool_filter import build_teammate_tools
         from mozilcode.agent import Agent as AgentClass
         from mozilcode.conversation import ConversationManager
-        from mozilcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
         from mozilcode.teams.models import BackendType, TeammateInfo
         from mozilcode.teams.registry import AgentNameRegistry
 
@@ -294,12 +269,7 @@ class AgentTool(Tool):
 
         base_name = p.name or p.subagent_type or "worker"
         existing_names = {m.name for m in team.members}
-        teammate_name = base_name
-        if teammate_name in existing_names:
-            counter = 2
-            while f"{base_name}-{counter}" in existing_names:
-                counter += 1
-            teammate_name = f"{base_name}-{counter}"
+        teammate_name = unique_agent_name(base_name, existing_names)
 
         # 1. 加载 agent 定义
         definition: AgentDef
@@ -375,11 +345,9 @@ class AgentTool(Tool):
         # 6. 创建子 agent 并附加队友专属指令
         instructions = (definition.system_prompt or "") + TEAMMATE_ADDENDUM
 
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(wt.path),
-            rule_engine=RuleEngine(),
-            mode=PermissionMode.DONT_ASK,
+        checker = create_subagent_permission_checker(
+            wt.path,
+            "dontAsk",
         )
 
         sub_agent = AgentClass(
@@ -518,13 +486,6 @@ class AgentTool(Tool):
         from mozilcode.agents.tool_filter import resolve_agent_tools
         from mozilcode.agent import Agent as AgentClass
         from mozilcode.conversation import ConversationManager
-        from mozilcode.permissions import (
-            DangerousCommandDetector,
-            PathSandbox,
-            PermissionChecker,
-            PermissionMode,
-            RuleEngine,
-        )
         from mozilcode.worktree.integration import (
             build_worktree_notice,
             generate_worktree_name,
@@ -562,17 +523,9 @@ class AgentTool(Tool):
         )
         filtered_registry = rebase_file_tools(filtered_registry, wt.path)
 
-        pm_str = definition.permission_mode
-        pm_enum = getattr(
-            PermissionMode,
-            PERMISSION_MODE_MAP.get(pm_str, "DEFAULT"),
-            PermissionMode.DEFAULT,
-        )
-        checker = PermissionChecker(
-            detector=DangerousCommandDetector(),
-            sandbox=PathSandbox(wt.path),
-            rule_engine=RuleEngine(),
-            mode=pm_enum,
+        checker = create_subagent_permission_checker(
+            wt.path,
+            definition.permission_mode,
         )
 
         sub_agent = AgentClass(
