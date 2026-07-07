@@ -14,6 +14,7 @@ from mozilcode.anthropic_request import (
     supports_adaptive_thinking as _supports_adaptive_thinking,
 )
 from mozilcode.anthropic_streaming import AnthropicStreamState
+from mozilcode.client_error_mapping import provider_error_mapper
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.serialization import (
@@ -111,6 +112,7 @@ class AnthropicClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import anthropic as _anthropic
 
+        error_mapper = provider_error_mapper(_anthropic)
         kwargs = build_anthropic_request_kwargs(
             model=self.model,
             max_output_tokens=self.max_output_tokens,
@@ -156,14 +158,8 @@ class AnthropicClient(LLMClient):
                     ) or 0,
                 )
 
-        except _anthropic.AuthenticationError as e:
-            raise AuthenticationError(f"Invalid API key: {e}") from e
-        except _anthropic.RateLimitError as e:
-            raise _rate_limit_error(e) from e
-        except _anthropic.APIConnectionError as e:
-            raise NetworkError(f"Network error: {e}") from e
-        except _anthropic.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+        except error_mapper.handled_errors as e:
+            raise error_mapper.to_llm_error(e) from e
 
 
 class OpenAIClient(LLMClient):
@@ -190,6 +186,7 @@ class OpenAIClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
+        error_mapper = provider_error_mapper(_openai)
         kwargs = build_openai_response_request_kwargs(
             model=self.model,
             input_messages=build_openai_input(conversation.get_messages()),
@@ -238,14 +235,8 @@ class OpenAIClient(LLMClient):
                     usage = getattr(resp, "usage", None) if resp else None
                     yield _stream_end_from_openai_response_usage(usage)
 
-        except _openai.AuthenticationError as e:
-            raise AuthenticationError(f"Invalid API key: {e}") from e
-        except _openai.RateLimitError as e:
-            raise _rate_limit_error(e) from e
-        except _openai.APIConnectionError as e:
-            raise NetworkError(f"Network error: {e}") from e
-        except _openai.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+        except error_mapper.handled_errors as e:
+            raise error_mapper.to_llm_error(e) from e
 
 
 class OpenAICompatClient(LLMClient):
@@ -280,6 +271,7 @@ class OpenAICompatClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
+        error_mapper = provider_error_mapper(_openai)
         messages = build_chat_completion_messages(conversation.get_messages())
         kwargs = build_chat_completion_request_kwargs(
             model=self.model,
@@ -329,14 +321,8 @@ class OpenAICompatClient(LLMClient):
                         for tool_complete in chat_tool_call.complete():
                             yield tool_complete
 
-        except _openai.AuthenticationError as e:
-            raise AuthenticationError(f"Invalid API key: {e}") from e
-        except _openai.RateLimitError as e:
-            raise _rate_limit_error(e) from e
-        except _openai.APIConnectionError as e:
-            raise NetworkError(f"Network error: {e}") from e
-        except _openai.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+        except error_mapper.handled_errors as e:
+            raise error_mapper.to_llm_error(e) from e
 
 
 def create_client(config: ProviderConfig) -> LLMClient:
