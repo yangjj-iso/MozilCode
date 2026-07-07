@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
@@ -14,6 +13,7 @@ from mozilcode.anthropic_request import (
     mark_last_user_tail_for_cache as _mark_last_user_tail_for_cache,
     supports_adaptive_thinking as _supports_adaptive_thinking,
 )
+from mozilcode.anthropic_streaming import AnthropicStreamState
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.serialization import (
@@ -51,9 +51,6 @@ from mozilcode.tools.base import (
     TextDelta,
     ThinkingComplete,
     ThinkingDelta,
-    ToolCallComplete,
-    ToolCallDelta,
-    ToolCallStart,
 )
 
 
@@ -124,62 +121,27 @@ class AnthropicClient(LLMClient):
             thinking=self.thinking,
         )
 
-        current_tool_name = ""
-        current_tool_id = ""
-        json_accum = ""
-        in_thinking = False
-        thinking_accum = ""
-        thinking_signature = ""
+        anthropic_state = AnthropicStreamState()
 
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 async for event in stream:
                     if event.type == "content_block_start":
-                        block = event.content_block
-                        if block.type == "thinking":
-                            in_thinking = True
-                            thinking_accum = ""
-                            thinking_signature = ""
-                        elif block.type == "tool_use":
-                            current_tool_name = block.name
-                            current_tool_id = block.id
-                            json_accum = ""
-                            yield ToolCallStart(
-                                tool_name=current_tool_name,
-                                tool_id=current_tool_id,
-                            )
+                        tool_start = anthropic_state.start_block(
+                            event.content_block
+                        )
+                        if tool_start is not None:
+                            yield tool_start
                     elif event.type == "content_block_delta":
                         delta = event.delta
                         if delta.type == "text_delta":
                             yield TextDelta(text=delta.text)
-                        elif delta.type == "thinking_delta":
-                            thinking_accum += delta.thinking
-                            yield ThinkingDelta(text=delta.thinking)
-                        elif delta.type == "signature_delta":
-                            thinking_signature = delta.signature
-                        elif delta.type == "input_json_delta":
-                            json_accum += delta.partial_json
-                            yield ToolCallDelta(text=delta.partial_json)
+                        else:
+                            for stream_event in anthropic_state.add_delta(delta):
+                                yield stream_event
                     elif event.type == "content_block_stop":
-                        if in_thinking:
-                            yield ThinkingComplete(
-                                thinking=thinking_accum,
-                                signature=thinking_signature,
-                            )
-                            in_thinking = False
-                        if current_tool_name:
-                            try:
-                                args = json.loads(json_accum) if json_accum else {}
-                            except json.JSONDecodeError:
-                                args = {}
-                            yield ToolCallComplete(
-                                tool_id=current_tool_id,
-                                tool_name=current_tool_name,
-                                arguments=args,
-                            )
-                            current_tool_name = ""
-                            current_tool_id = ""
-                            json_accum = ""
+                        for stream_event in anthropic_state.stop_block():
+                            yield stream_event
                     elif event.type == "message_stop":
                         pass
 
