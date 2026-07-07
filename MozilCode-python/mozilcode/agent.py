@@ -40,6 +40,10 @@ from mozilcode.agent_helpers import (
     infer_tool_file_path,
     latest_user_query,
 )
+from mozilcode.agent_llm_preparation import (
+    inject_deferred_tool_reminder,
+    prepare_api_conversation,
+)
 from mozilcode.agent_memory import AgentMemoryBridge
 from mozilcode.agent_notifications import (
     consume_team_mailbox,
@@ -61,11 +65,8 @@ from mozilcode.client import LLMClient
 from mozilcode.context import (
     CompactCircuitBreaker,
     CompactEvent,
-    ContentReplacementRecord,
     ContentReplacementState,
     RecoveryState,
-    append_replacement_records,
-    apply_tool_result_budget,
     auto_compact,
     compute_compact_threshold,
     create_replacement_state,
@@ -365,25 +366,21 @@ class Agent:
                         f"Hook [{note.hook_id}] {note.event}: {note.output}"
                     )
 
-            deferred_names = self.registry.get_deferred_tool_names()
-            if deferred_names:
-                conversation.add_system_reminder(
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
-                    + "\n".join(deferred_names)
-                )
+            inject_deferred_tool_reminder(
+                conversation,
+                self.registry.get_deferred_tool_names(),
+            )
 
             tools = self.registry.get_all_schemas(self.protocol)
 
             # Layer 1: 在 LLM 调用前应用 tool-result budget，确保 api_conv 反映
             # 本轮迭代中所有已发生的写入（system reminders、hook 通知等）。
             # 原始 conversation 不会被修改；替换决策保存在 self.replacement_state 中。
-            api_conv, _new_records = apply_tool_result_budget(
-                conversation, self.session_dir, self.replacement_state
+            api_conv, _ = prepare_api_conversation(
+                conversation,
+                self.session_dir,
+                self.replacement_state,
             )
-            if _new_records:
-                append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
             llm_stream = self.client.stream(api_conv, system=system, tools=tools)
@@ -971,20 +968,16 @@ class Agent:
                     memory_content=memory_content,
                 )
 
-            deferred_names = self.registry.get_deferred_tool_names()
-            if deferred_names:
-                conversation.add_system_reminder(
-                    "The following deferred tools are available via ToolSearch. "
-                    "Their schemas are NOT loaded - use ToolSearch with "
-                    'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
-                    + "\n".join(deferred_names)
-                )
-
-            api_conv, _new_records = apply_tool_result_budget(
-                conversation, self.session_dir, self.replacement_state
+            inject_deferred_tool_reminder(
+                conversation,
+                self.registry.get_deferred_tool_names(),
             )
-            if _new_records:
-                append_replacement_records(self.session_dir, _new_records)
+
+            api_conv, _ = prepare_api_conversation(
+                conversation,
+                self.session_dir,
+                self.replacement_state,
+            )
 
             collector = StreamCollector()
             llm_stream = self.client.stream(api_conv, system=system, tools=tools)
