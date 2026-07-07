@@ -27,6 +27,12 @@ from mozilcode.agent_events import (
     TurnComplete,
     UsageEvent,
 )
+from mozilcode.agent_compaction import (
+    compact_noop_notification,
+    compact_success_notification,
+    inject_agent_context,
+    reinject_after_compact,
+)
 from mozilcode.agent_stream import LLMResponse, StreamCollector, ThinkingBlock
 from mozilcode.agent_helpers import (
     build_hook_context,
@@ -246,10 +252,13 @@ class Agent:
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )
-        conversation.inject_environment(env_context)
-
         memory_content = await self._load_memory_context(self._latest_user_query(conversation))
-        conversation.inject_long_term_memory(self.instructions_content, memory_content)
+        inject_agent_context(
+            conversation,
+            environment_context=env_context,
+            instructions_content=self.instructions_content,
+            memory_content=memory_content,
+        )
 
         if self.hook_engine:
             ctx = self._build_hook_context("session_start")
@@ -301,21 +310,14 @@ class Agent:
                 transcript_path=self._transcript_path,
             )
             if isinstance(compact_result, CompactEvent):
-                conversation.inject_environment(env_context)
                 mem = await self._load_memory_context()
-                conversation.inject_long_term_memory(
-                    self.instructions_content, mem
+                after_tokens = reinject_after_compact(
+                    conversation,
+                    environment_context=env_context,
+                    instructions_content=self.instructions_content,
+                    memory_content=mem,
                 )
-                after_tokens = conversation.current_tokens()
-                yield CompactNotification(
-                    before_tokens=compact_result.before_tokens,
-                    message=(
-                        f"上下文已压缩（{compact_result.before_tokens:,} → "
-                        f"{after_tokens:,} tokens）"
-                    ),
-                    after_tokens=after_tokens,
-                    boundary=compact_result.boundary,
-                )
+                yield compact_success_notification(compact_result, after_tokens)
                 yield UsageEvent(
                     input_tokens=self.total_input_tokens,
                     output_tokens=self.total_output_tokens,
@@ -886,43 +888,36 @@ class Agent:
                 self._skill_catalog,
                 self._agent_catalog,
             )
-            conversation.inject_environment(env_context)
             memory_content = await self._load_memory_context()
-            conversation.inject_long_term_memory(
-                self.instructions_content, memory_content
+            after_tokens = reinject_after_compact(
+                conversation,
+                environment_context=env_context,
+                instructions_content=self.instructions_content,
+                memory_content=memory_content,
             )
-            after_tokens = conversation.current_tokens()
-            return CompactNotification(
-                before_tokens=result.before_tokens,
-                message=(
-                    f"上下文已压缩（{result.before_tokens:,} → "
-                    f"{after_tokens:,} tokens）"
-                ),
-                after_tokens=after_tokens,
-                boundary=result.boundary,
-            )
+            return compact_success_notification(result, after_tokens)
         current_tokens = conversation.current_tokens()
-        return CompactNotification(
+        return compact_noop_notification(
             before_tokens=current_tokens,
-            message=result or "上下文暂未压缩（对话历史为空或未达到压缩条件）",
-            after_tokens=current_tokens,
+            message=result,
         )
 
     async def run_to_completion(
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
+        env_context = build_environment_context(
+            self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+        )
         if conversation is None:
             conversation = ConversationManager()
 
-            env_context = build_environment_context(
-                self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
-            )
-            conversation.inject_environment(env_context)
-
             memory_content = await self._load_memory_context(task)
-            conversation.inject_long_term_memory(
-                self.instructions_content, memory_content
+            inject_agent_context(
+                conversation,
+                environment_context=env_context,
+                instructions_content=self.instructions_content,
+                memory_content=memory_content,
             )
 
         if task:
@@ -967,7 +962,13 @@ class Agent:
                 transcript_path=self._transcript_path,
             )
             if isinstance(compact_result, CompactEvent):
-                conversation.inject_environment(env_context)
+                memory_content = await self._load_memory_context(task)
+                reinject_after_compact(
+                    conversation,
+                    environment_context=env_context,
+                    instructions_content=self.instructions_content,
+                    memory_content=memory_content,
+                )
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
