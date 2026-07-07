@@ -296,9 +296,10 @@ class _ToolExecResult:
 
 @dataclass
 class _AuthResult:
-    """并发执行前授权预检的结果。approved 为 False 时 error 给出对应的错误结果。"""
+    """Tool authorization result. If approved is False, error holds the result."""
     approved: bool
     error: ToolResult | None = None
+    is_unknown: bool = False
 
 
 class StreamingExecutor:
@@ -1027,6 +1028,7 @@ class Agent:
             yield _AuthResult(
                 False,
                 ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True),
+                is_unknown=True,
             )
             return
 
@@ -1080,68 +1082,31 @@ class Agent:
     async def _execute_tool(
         self, tc: ToolCallComplete
     ) -> AsyncIterator[tuple[ToolResult, float, bool]]:
-        tool = self.registry.get(tc.tool_name)
         start = time.monotonic()
-        is_unknown = False
+        auth: _AuthResult | None = None
+        async for item in self._authorize_tool(tc):
+            if isinstance(item, (PermissionRequest, AskUserRequest)):
+                yield item
+            else:
+                auth = item
+        if auth is None or not auth.approved:
+            result = (
+                auth.error
+                if auth is not None and auth.error is not None
+                else ToolResult(output="Permission denied", is_error=True)
+            )
+            elapsed = time.monotonic() - start
+            yield result, elapsed, auth.is_unknown if auth is not None else False
+            return
 
+        tool = self.registry.get(tc.tool_name)
         if tool is None:
             result = ToolResult(
                 output=f"Error: unknown tool '{tc.tool_name}'", is_error=True
             )
-            is_unknown = True
             elapsed = time.monotonic() - start
-            yield result, elapsed, is_unknown
+            yield result, elapsed, True
             return
-
-        if not self.registry.is_enabled(tc.tool_name):
-            result = ToolResult(
-                output=f"Error: tool '{tc.tool_name}' is disabled in current mode",
-                is_error=True,
-            )
-            elapsed = time.monotonic() - start
-            yield result, elapsed, is_unknown
-            return
-
-        # 权限检查
-        if self.permission_checker:
-            decision = self.permission_checker.check(tool, tc.arguments)
-
-            if decision.effect == "deny":
-                result = ToolResult(
-                    output=f"Permission denied: {decision.reason}",
-                    is_error=True,
-                )
-                elapsed = time.monotonic() - start
-                yield result, elapsed, is_unknown
-                return
-
-            if decision.effect == "ask":
-                loop = asyncio.get_running_loop()
-                future: asyncio.Future[PermissionResponse] = loop.create_future()
-                desc = self._build_permission_description(tc)
-                # 向调用方 yield 权限请求事件，由调用方处理
-                yield PermissionRequest(
-                    tool_name=tc.tool_name,
-                    description=desc,
-                    future=future,
-                )
-                response = await future
-
-                if response == PermissionResponse.DENY:
-                    result = ToolResult(
-                        output="Permission denied: 用户拒绝了此操作",
-                        is_error=True,
-                    )
-                    elapsed = time.monotonic() - start
-                    yield result, elapsed, is_unknown
-                    return
-
-                if response == PermissionResponse.ALLOW_ALWAYS:
-                    from mozilcode.permissions.rules import Rule, extract_content
-                    content = extract_content(tc.tool_name, tc.arguments)
-                    pattern = f"{content[:60]}*" if len(content) > 60 else f"{content}*"
-                    rule = Rule(tool_name=tc.tool_name, pattern=pattern, effect="allow")
-                    self.permission_checker.rule_engine.append_local_rule(rule)
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
@@ -1171,7 +1136,7 @@ class Agent:
                         is_error=True,
                     )
                     elapsed = time.monotonic() - start
-                    yield result, elapsed, is_unknown
+                    yield result, elapsed, False
                     return
 
                 lines = []
@@ -1194,7 +1159,7 @@ class Agent:
         self._snapshot_for_recovery(tc, result)
 
         elapsed = time.monotonic() - start
-        yield result, elapsed, is_unknown
+        yield result, elapsed, False
 
     def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult

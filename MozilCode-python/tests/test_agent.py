@@ -503,6 +503,25 @@ def test_partition_tool_calls():
     assert not batches[1].concurrent and len(batches[1].calls) == 1
     assert batches[2].concurrent and len(batches[2].calls) == 2
 
+
+@pytest.mark.asyncio
+async def test_authorize_tool_marks_unknown_tool_for_termination_counter():
+    agent = Agent(MockLLMClient([]), ToolRegistry(), "anthropic")
+
+    items = [
+        item
+        async for item in agent._authorize_tool(
+            ToolCallComplete("missing", "MissingTool", {})
+        )
+    ]
+
+    assert len(items) == 1
+    auth = items[0]
+    assert auth.approved is False
+    assert auth.is_unknown is True
+    assert auth.error is not None
+    assert "unknown tool" in auth.error.output
+
 def test_system_prompt_normal():
     sp = build_system_prompt()
     assert "MozilCode" in sp

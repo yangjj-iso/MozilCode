@@ -56,7 +56,8 @@ def _create_app(provider, tmp_path):
     )
 
 
-def test_root_route_is_not_an_application_shell(tmp_path):
+@pytest.mark.parametrize("path", sorted(REMOVED_APP_SHELL_PATHS))
+def test_removed_app_shell_paths_are_not_served(tmp_path, path):
     provider = ProviderConfig(
         name="openai",
         protocol="openai",
@@ -66,9 +67,9 @@ def test_root_route_is_not_an_application_shell(tmp_path):
     app = _create_app(provider, tmp_path)
 
     with TestClient(app) as client:
-        response = client.get("/")
+        response = client.get(path)
 
-    assert response.status_code == 404
+    assert response.status_code == 404, path
 
 
 def test_create_app_uses_injected_session_store(tmp_path):
