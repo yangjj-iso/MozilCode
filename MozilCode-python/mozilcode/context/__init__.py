@@ -5,15 +5,11 @@ from mozilcode.context.manager import (
     CompactEvent,
     ContentReplacementRecord,
     ContentReplacementState,
-    FileReadRecord,
     REPLACEMENT_RECORDS_FILENAME,
-    RecoveryState,
-    SkillInvocationRecord,
     append_replacement_records,
     apply_tool_result_budget,
     auto_compact,
     build_compact_messages,
-    build_recovery_attachment,
     cleanup_tool_results,
     clone_replacement_state,
     compute_compact_threshold,
@@ -22,6 +18,12 @@ from mozilcode.context.manager import (
     load_replacement_records,
     reconstruct_replacement_state,
     should_auto_compact,
+)
+from mozilcode.context.recovery import (
+    FileReadRecord,
+    RecoveryState,
+    SkillInvocationRecord,
+    build_recovery_attachment,
 )
 
 
