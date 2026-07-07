@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from pathlib import Path
 
 from mozilcode.agent import Agent
@@ -20,6 +19,7 @@ from mozilcode.daemon.active_tasks import (
     ACTIVE_TASK_RUNNING_ERROR,
     ActiveTaskRegistry,
 )
+from mozilcode.daemon.agent_task_runner import AgentTaskRunner
 from mozilcode.daemon.serialize import serialize_event
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
@@ -29,13 +29,6 @@ from mozilcode.daemon.session_status import (
 )
 from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
-from mozilcode.daemon.task_events import (
-    loop_complete_event,
-    serialize_task_event,
-    task_cancelled_event,
-    task_error_event,
-    user_message_event,
-)
 from mozilcode.daemon.responses import (
     DaemonActionResult,
     bad_request_result,
@@ -85,6 +78,14 @@ class DaemonServer:
         self._session_meta = self._records.session_meta
         self._persisted_count = self._records.persisted_count
         self._pending_prompts = PendingPromptRegistry()
+        self._agent_task_runner = AgentTaskRunner(
+            active_tasks=self._active_tasks,
+            session_mgr=self.session_mgr,
+            pending_prompts=self._pending_prompts,
+            emit_event=self._emit,
+            persist_events=self._persist_events,
+            set_title_from_prompt=self._set_session_title_from_prompt,
+        )
         self._records.load_persisted()
 
     def _persist_meta(self, sid: str) -> None:
@@ -253,74 +254,17 @@ class DaemonServer:
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
         self._active_tasks.ensure_available(sid)
-
         runtime = await self._ensure_runtime(sid)
         log_list = self.get_event_log(sid)
         if runtime is None or log_list is None:
             raise ValueError(f"Session {sid} not found")
 
-        self._set_session_title_from_prompt(sid, prompt)
-        task_id = uuid.uuid4().hex[:8]
-        task = asyncio.create_task(
-            self._run_agent_task(
-                sid,
-                task_id,
-                prompt,
-                runtime.agent,
-                runtime.conversation,
-            ),
-            name=f"agent-{sid}-{task_id}",
+        return self._agent_task_runner.start(
+            sid,
+            prompt,
+            runtime.agent,
+            runtime.conversation,
         )
-        self._active_tasks.register(sid, task_id, task)
-        return task_id
-
-    async def _run_agent_task(
-        self,
-        sid: str,
-        task_id: str,
-        prompt: str,
-        agent: Agent,
-        conv: ConversationManager,
-    ) -> None:
-        """Drive agent.run(), append serialized events to the session log."""
-        try:
-            conv.add_user_message(prompt)
-            self._emit(sid, user_message_event(task_id, prompt))
-            async for event in agent.run(conv):
-                await self._record_agent_task_event(sid, task_id, event)
-
-            self._emit(sid, loop_complete_event(task_id))
-        except asyncio.CancelledError:
-            self._emit(sid, task_cancelled_event(task_id))
-            self._emit(sid, loop_complete_event(task_id))
-        except Exception as e:
-            log.exception("Agent task %s failed", task_id)
-            self._emit(sid, task_error_event(task_id, str(e)))
-        finally:
-            self._active_tasks.clear_if_current(sid, asyncio.current_task())
-            self._persist_events(sid)
-
-    async def _record_agent_task_event(
-        self,
-        sid: str,
-        task_id: str,
-        event: object,
-    ) -> None:
-        task_event = serialize_task_event(event, task_id)
-        if task_event.future is not None:
-            session = await self.session_mgr.get_session(sid)
-            if session:
-                session.register_future(
-                    task_event.request_id,
-                    task_event.future,
-                )
-        if task_event.pending_request_id:
-            self._pending_prompts.record(
-                sid,
-                task_event.pending_request_id,
-                task_event.message,
-            )
-        self._emit(sid, task_event.message)
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
         """Switch a session's permission mode and return fresh status."""
