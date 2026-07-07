@@ -45,6 +45,7 @@ from mozilcode.permissions import (
     PermissionChecker,
     PermissionMode,
 )
+from mozilcode.plan_paths import create_plan_path
 from mozilcode.hooks import HookContext, HookEngine, ToolRejectedError
 from mozilcode.hooks.engine import HookNotification
 from mozilcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
@@ -410,19 +411,7 @@ class Agent:
     def _get_plan_path(self) -> Path:
         if self._plan_path_cache is not None:
             return self._plan_path_cache
-        import random
-        import datetime
-        _ADJECTIVES = ["bold", "bright", "calm", "cool", "deep", "fair", "fast", "fine",
-                       "glad", "keen", "kind", "lean", "mild", "neat", "pure", "safe",
-                       "slim", "soft", "tall", "warm", "wise", "grand", "swift", "vivid"]
-        _NOUNS = ["sketch", "draft", "spark", "bloom", "trail", "ridge", "creek", "grove",
-                  "cliff", "cove", "field", "forge", "frost", "haven", "pearl", "stone",
-                  "storm", "river", "tower", "delta", "flame", "orbit", "pulse", "shore"]
-        plans_dir = Path(self.work_dir) / ".mozilcode" / "plans"
-        plans_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%m%d-%H%M")
-        slug = f"{random.choice(_ADJECTIVES)}-{random.choice(_NOUNS)}-{ts}"
-        self._plan_path_cache = plans_dir / f"{slug}.md"
+        self._plan_path_cache = create_plan_path(self.work_dir)
         return self._plan_path_cache
 
     def set_permission_mode(self, mode: PermissionMode) -> None:
