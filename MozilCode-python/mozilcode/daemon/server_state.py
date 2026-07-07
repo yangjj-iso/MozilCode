@@ -27,12 +27,7 @@ from mozilcode.daemon.session_status import (
     command_acceptance_mode,
     resolve_mode_transition,
 )
-from mozilcode.daemon.session_meta import (
-    new_session_meta,
-    session_info_from_meta,
-    session_work_dir_from_meta,
-    sort_session_ids_by_created_at,
-)
+from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
 from mozilcode.daemon.task_events import (
     loop_complete_event,
@@ -80,45 +75,27 @@ class DaemonServer:
         self.hook_engine = hook_engine
         self.session_store = session_store or SessionStore()
         self.session_mgr = SessionManager()
+        self._records = SessionRecords(self.session_store, self.work_dir)
         self._agents: dict[str, DaemonSessionRuntime] = {}
-        self._event_logs: dict[str, list[dict | None]] = {}
+        self._event_logs = self._records.event_logs
         self._active_tasks = ActiveTaskRegistry()
         self._tasks = self._active_tasks.tasks
         self._active_task_ids = self._active_tasks.task_ids
         self._pre_plan_modes: dict[str, PermissionMode] = {}
-        self._session_meta: dict[str, dict] = {}
-        self._persisted_count: dict[str, int] = {}
+        self._session_meta = self._records.session_meta
+        self._persisted_count = self._records.persisted_count
         self._pending_prompts = PendingPromptRegistry()
-        self._load_persisted_sessions()
-
-    def _load_persisted_sessions(self) -> None:
-        """Load persisted sessions from disk; agents are created lazily."""
-        for session in self.session_store.load_sessions():
-            self._event_logs[session.sid] = session.events
-            self._session_meta[session.sid] = session.meta
-            self._persisted_count[session.sid] = len(session.events)
-        if self._session_meta:
-            log.info("Loaded %d persisted session(s)", len(self._session_meta))
+        self._records.load_persisted()
 
     def _persist_meta(self, sid: str) -> None:
-        self.session_store.persist_meta(sid, self._session_meta.get(sid, {}))
+        self._records.persist_meta(sid)
 
     def _persist_events(self, sid: str) -> None:
         """Append newly-produced events for a session to its events.jsonl."""
-        log_list = self._event_logs.get(sid)
-        if log_list is None:
-            return
-        self._persisted_count[sid] = self.session_store.persist_events(
-            sid,
-            log_list,
-            self._persisted_count.get(sid, 0),
-        )
+        self._records.persist_events(sid)
 
     def _set_session_title_from_prompt(self, sid: str, prompt: str) -> None:
-        meta = self._session_meta.get(sid)
-        if meta is not None and not meta.get("title"):
-            meta["title"] = prompt[:40]
-            self._persist_meta(sid)
+        self._records.set_title_from_prompt(sid, prompt)
 
     async def _create_session_runtime(
         self,
@@ -153,10 +130,7 @@ class DaemonServer:
         if not Path(wd).is_dir():
             raise ValueError(f"workspace not found: {wd}")
         await self._create_session_runtime(sid, wd)
-        self._event_logs[sid] = []
-        self._session_meta[sid] = new_session_meta(wd)
-        self._persisted_count[sid] = 0
-        self._persist_meta(sid)
+        self._records.create(sid, wd)
         log.info("Session %s initialized (work_dir=%s)", sid, wd)
         return sid
 
@@ -173,37 +147,24 @@ class DaemonServer:
         if not Path(wd).is_dir():
             wd = self.work_dir
         await self._create_session_runtime(sid, wd)
-        if sid not in self._event_logs:
-            self._event_logs[sid] = []
+        self._records.ensure_event_log(sid)
         log.info("Session %s reactivated (work_dir=%s)", sid, wd)
         return True
 
     def session_info(self, sid: str) -> dict:
-        return session_info_from_meta(
-            sid,
-            self._session_meta.get(sid),
-            self.work_dir,
-        )
+        return self._records.info(sid)
 
     def has_session(self, sid: str) -> bool:
-        return sid in self._event_logs
+        return self._records.has(sid)
 
     def list_session_infos(self) -> list[dict]:
-        sids = sort_session_ids_by_created_at(
-            self._event_logs.keys(),
-            self._session_meta,
-        )
-        return [self.session_info(s) for s in sids]
+        return self._records.list_infos()
 
     def session_work_dir(self, sid: str) -> str | None:
-        meta = self._session_meta.get(sid)
-        if meta is None:
-            return None
-        return session_work_dir_from_meta(meta, self.work_dir)
+        return self._records.work_dir(sid)
 
     def update_session_work_dir(self, sid: str, work_dir: str) -> None:
-        self._session_meta.setdefault(sid, {})["work_dir"] = work_dir
-        self._persist_meta(sid)
+        self._records.update_work_dir(sid, work_dir)
 
     def get_agent(self, sid: str) -> Agent | None:
         entry = self._agents.get(sid)
@@ -218,13 +179,11 @@ class DaemonServer:
         return entry.deps if entry else None
 
     def get_event_log(self, sid: str) -> list[dict | None] | None:
-        return self._event_logs.get(sid)
+        return self._records.event_log(sid)
 
     def _emit(self, sid: str, event: dict | None) -> None:
         """Append a serialized event to the session log. WS streamers tail it."""
-        log_list = self._event_logs.get(sid)
-        if log_list is not None:
-            log_list.append(event)
+        self._records.emit(sid, event)
 
     def emit_event(self, sid: str, event: dict | None) -> None:
         self._emit(sid, event)
@@ -571,7 +530,7 @@ class DaemonServer:
         agent = runtime.agent if runtime is not None else None
         deps = runtime.deps if runtime is not None else None
         conv = runtime.conversation if runtime is not None else None
-        meta = self._session_meta.get(sid, {})
+        meta = self._records.meta(sid)
         provider = deps.provider if deps is not None else self._configured_provider()
         return build_session_status(
             sid=sid,
@@ -648,18 +607,12 @@ class DaemonServer:
             except asyncio.CancelledError:
                 pass
 
-        log_list = self._event_logs.pop(sid, None)
-        if log_list is not None:
-            log_list.append(None)
-
         await self.session_mgr.close_session(sid)
         entry = self._agents.pop(sid, None)
         hub = getattr(entry.agent, "memory_hub", None) if entry is not None else None
         if hub is not None:
             await hub.shutdown()
-        self._session_meta.pop(sid, None)
-        self._persisted_count.pop(sid, None)
+        self._records.close(sid)
         self._pre_plan_modes.pop(sid, None)
         self._pending_prompts.discard_session(sid)
-        self.session_store.delete_session(sid)
         log.info("Session %s closed", sid)
