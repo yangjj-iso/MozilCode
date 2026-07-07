@@ -34,6 +34,7 @@ from mozilcode.agent_helpers import (
     infer_tool_file_path,
     latest_user_query,
 )
+from mozilcode.agent_recovery import record_tool_recovery_snapshot
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
     ToolBatch,
@@ -84,7 +85,6 @@ from mozilcode.tools.base import (
     ToolCallComplete,
     ToolResult,
 )
-from mozilcode.tools.paths import resolve_tool_path
 
 log = logging.getLogger(__name__)
 
@@ -908,22 +908,12 @@ class Agent:
     def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult
     ) -> None:
-        """捕获 ReadFile 刚交给模型的内容，以便 Layer 2 压缩对话后
-        auto_compact 能重新附加这些数据。每次 ReadFile 多一次磁盘读取，
-        比从 tool 输出中反向解析行号要划算。
-        """
-        if result.is_error or tc.tool_name != "ReadFile":
-            return
-        path = tc.arguments.get("file_path") if isinstance(tc.arguments, dict) else None
-        if not path:
-            return
-        resolved = resolve_tool_path(path, self.work_dir)
-        try:
-            with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
-        except OSError:
-            return
-        self.recovery_state.record_file_read(str(resolved), content)
+        record_tool_recovery_snapshot(
+            recovery_state=self.recovery_state,
+            tool_call=tc,
+            result=result,
+            work_dir=self.work_dir,
+        )
 
     async def _extract_memories(
         self, conversation: ConversationManager
