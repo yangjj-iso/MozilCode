@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 
 from mozilcode.agent import (
@@ -44,6 +43,10 @@ from mozilcode.daemon.task_events import (
 )
 from mozilcode.daemon.responses import DaemonActionResult
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.session_runtime import (
+    DaemonSessionRuntime,
+    create_daemon_session_runtime,
+)
 from mozilcode.daemon.workspace_payloads import task_to_dict, worktree_to_dict
 from mozilcode.daemon.worktree_actions import (
     create_and_enter_worktree,
@@ -56,13 +59,6 @@ from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 
 log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class DaemonSessionRuntime:
-    agent: Agent
-    deps: AgentDeps
-    conversation: ConversationManager
 
 
 class DaemonServer:
@@ -128,14 +124,16 @@ class DaemonServer:
         if self.config is None:
             raise ValueError("model provider is not configured")
         mode = PermissionMode(self.config.permission_mode)
-        agent, deps = await create_agent_from_config(
-            self.config, work_dir, mode, self.hook_engine
+        runtime = await create_daemon_session_runtime(
+            sid=sid,
+            config=self.config,
+            work_dir=work_dir,
+            permission_mode=mode,
+            hook_engine=self.hook_engine,
+            session_mgr=self.session_mgr,
+            agent_factory=create_agent_from_config,
         )
-        agent.session_id = sid
-        conv = ConversationManager()
-        runtime = DaemonSessionRuntime(agent, deps, conv)
         self._agents[sid] = runtime
-        await self.session_mgr.create_session(sid, agent, conv)
         return runtime
 
     async def init_session(
