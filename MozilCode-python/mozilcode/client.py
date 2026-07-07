@@ -37,6 +37,7 @@ from mozilcode.openai_streaming import (
     stream_end_from_openai_chat_usage as _stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage as _stream_end_from_openai_response_usage,
 )
+from mozilcode.openai_compat_request import build_chat_completion_request_kwargs
 from mozilcode.provider_auth import (
     is_local_base_url as _is_local_base_url,
     resolve_openai_api_key as _resolve_openai_api_key,
@@ -348,33 +349,6 @@ class OpenAICompatClient(LLMClient):
     def set_max_output_tokens(self, tokens: int) -> None:
         self.max_output_tokens = tokens
 
-    @staticmethod
-    def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """把 tool schema 转换成 Chat Completions 格式。
-
-        tool 注册表为 ``openai`` 系列输出的是 Responses API 风格的 dict::
-
-            {"type": "function", "name": "...", "description": "...",
-             "parameters": {...}}
-
-        而 Chat Completions 要求把 name/description/parameters 嵌套在
-        ``function`` 键下::
-
-            {"type": "function", "function": {"name": "...",
-             "description": "...", "parameters": {...}}}
-        """
-        converted: list[dict[str, Any]] = []
-        for t in tools:
-            converted.append({
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t.get("description", ""),
-                    "parameters": t.get("parameters", t.get("input_schema", {})),
-                },
-            })
-        return converted
-
     async def stream(
         self,
         conversation: ConversationManager,
@@ -384,20 +358,13 @@ class OpenAICompatClient(LLMClient):
         import openai as _openai
 
         messages = build_chat_completion_messages(conversation.get_messages())
-
-        # 如果有 system 消息则插入到消息列表头部。
-        if system:
-            messages = [{"role": "system", "content": system}] + messages
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": self.max_output_tokens,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-        if tools:
-            kwargs["tools"] = self._convert_tools(tools)
+        kwargs = build_chat_completion_request_kwargs(
+            model=self.model,
+            max_output_tokens=self.max_output_tokens,
+            messages=messages,
+            system=system,
+            tools=tools,
+        )
 
         # 用于累积 streaming tool call 的状态。Chat Completions 流按
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
