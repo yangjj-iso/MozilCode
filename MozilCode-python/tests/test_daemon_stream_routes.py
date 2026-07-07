@@ -52,10 +52,10 @@ def test_stream_unknown_session_reports_session_not_found(tmp_path):
 def test_stream_replays_existing_events_then_marks_replay_done(tmp_path):
     app = _app(tmp_path)
     sid = "existing-session"
-    app.state.server._event_logs[sid] = [
+    app.state.server._records.event_logs[sid] = [
         {"type": "UserMessage", "data": {"content": "hello"}},
     ]
-    app.state.server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
+    app.state.server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
 
     with TestClient(app) as client:
         with client.websocket_connect(f"/api/stream/{sid}") as websocket:
@@ -82,9 +82,9 @@ def test_stream_cancel_action_cancels_active_session_task(tmp_path):
     app = _app(tmp_path)
     sid = "busy-session"
     task = _CancellableTask()
-    app.state.server._event_logs[sid] = []
-    app.state.server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
-    app.state.server._tasks[sid] = task
+    app.state.server._records.event_logs[sid] = []
+    app.state.server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
+    app.state.server._active_tasks.tasks[sid] = task
 
     with TestClient(app) as client:
         with client.websocket_connect(f"/api/stream/{sid}") as websocket:

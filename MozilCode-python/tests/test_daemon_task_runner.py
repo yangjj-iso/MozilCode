@@ -89,9 +89,9 @@ async def _create_server_with_agent(tmp_path, agent, conversation):
         SimpleNamespace(provider=provider),
         conversation,
     )
-    server._event_logs[sid] = []
-    server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
-    server._persisted_count[sid] = 0
+    server._records.event_logs[sid] = []
+    server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
+    server._records.persisted_count[sid] = 0
     await server.session_mgr.create_session(sid, agent, conversation)
     return server, sid
 
@@ -102,15 +102,15 @@ async def test_start_task_runs_agent_and_cleans_active_task(tmp_path):
     server, sid = await _create_server_with_agent(tmp_path, _Agent(), conversation)
 
     task_id = await server.start_task(sid, "run task")
-    task = server._tasks[sid]
+    task = server._active_tasks.tasks[sid]
 
     await task
 
     assert conversation.user_messages == ["run task"]
-    assert server._session_meta[sid]["title"] == "run task"
-    assert sid not in server._tasks
-    assert sid not in server._active_task_ids
-    assert server._event_logs[sid] == [
+    assert server._records.session_meta[sid]["title"] == "run task"
+    assert sid not in server._active_tasks.tasks
+    assert sid not in server._active_tasks.task_ids
+    assert server._records.event_logs[sid] == [
         {"type": "UserMessage", "task_id": task_id, "data": {"content": "run task"}},
         {"type": "StreamText", "task_id": task_id, "data": {"text": "done"}},
         {"type": "LoopComplete", "task_id": task_id, "data": {}},
@@ -130,11 +130,11 @@ async def test_start_task_rejects_concurrent_session_task(tmp_path):
     with pytest.raises(ValueError, match="task already running"):
         await server.start_task(sid, "second")
 
-    assert server._active_task_ids[sid] == first_task_id
+    assert server._active_tasks.task_ids[sid] == first_task_id
     assert conversation.user_messages == ["first"]
 
     agent.release.set()
-    await server._tasks[sid]
+    await server._active_tasks.tasks[sid]
 
 
 @pytest.mark.asyncio
@@ -149,7 +149,7 @@ async def test_start_task_registers_pending_permission_prompt(tmp_path):
     )
 
     task_id = await server.start_task(sid, "needs permission")
-    await server._tasks[sid]
+    await server._active_tasks.tasks[sid]
 
     request_id = str(id(future))
     session = await server.session_mgr.get_session(sid)
@@ -202,7 +202,7 @@ async def test_resolve_permission_clears_pending_prompt_and_emits_event(tmp_path
     assert ok is True
     assert future.result() is PermissionResponse.ALLOW
     assert server.pending_prompt_events(sid) == []
-    assert server._event_logs[sid] == [
+    assert server._records.event_logs[sid] == [
         {
             "type": "PermissionResolved",
             "data": {"request_id": "req-permission"},
@@ -226,7 +226,7 @@ async def test_resolve_askuser_clears_pending_prompt_and_emits_event(tmp_path):
     assert ok is True
     assert future.result() == {"language": "Python"}
     assert server.pending_prompt_events(sid) == []
-    assert server._event_logs[sid] == [
+    assert server._records.event_logs[sid] == [
         {
             "type": "AskUserResolved",
             "data": {"request_id": "req-ask"},

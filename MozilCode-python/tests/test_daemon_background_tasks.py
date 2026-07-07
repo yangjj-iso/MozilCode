@@ -88,9 +88,9 @@ def _server_with_tasks(tmp_path) -> tuple[DaemonServer, str, _TaskManager]:
         SimpleNamespace(provider=_Provider(), task_manager=task_manager),
         _Conversation(),
     )
-    server._event_logs[sid] = []
-    server._session_meta[sid] = {"work_dir": str(tmp_path), "title": "tasks"}
-    server._persisted_count[sid] = 0
+    server._records.event_logs[sid] = []
+    server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": "tasks"}
+    server._records.persisted_count[sid] = 0
     return server, sid, task_manager
 
 

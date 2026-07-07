@@ -70,9 +70,9 @@ def _server_with_agent(tmp_path, result) -> tuple[DaemonServer, str]:
         SimpleNamespace(provider=_Provider()),
         _Conversation(),
     )
-    server._event_logs[sid] = []
-    server._session_meta[sid] = {"work_dir": str(tmp_path), "title": "compact"}
-    server._persisted_count[sid] = 0
+    server._records.event_logs[sid] = []
+    server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": "compact"}
+    server._records.persisted_count[sid] = 0
     return server, sid
 
 
@@ -93,18 +93,18 @@ async def test_manual_compact_success_emits_started_result_and_usage(tmp_path):
     assert result.payload["type"] == "CompactNotification"
     assert result.payload["data"]["message"] == "done"
     assert result.payload["status"]["id"] == sid
-    assert [event["type"] for event in server._event_logs[sid]] == [
+    assert [event["type"] for event in server._records.event_logs[sid]] == [
         "CompactStarted",
         "CompactNotification",
         "UsageEvent",
     ]
-    started = server._event_logs[sid][0]["data"]
+    started = server._records.event_logs[sid][0]["data"]
     assert started["current_tokens"] == 42_000
     assert started["threshold"] == max(
         0,
         compute_compact_threshold(128_000, manual=True),
     )
-    assert server._event_logs[sid][2]["data"] == {
+    assert server._records.event_logs[sid][2]["data"] == {
         "input_tokens": 11,
         "output_tokens": 7,
         "context_tokens": 42_000,
@@ -121,7 +121,7 @@ async def test_manual_compact_failure_emits_error_without_usage(tmp_path):
         {"error": "compact failed"},
         status_code=400,
     )
-    assert [event["type"] for event in server._event_logs[sid]] == [
+    assert [event["type"] for event in server._records.event_logs[sid]] == [
         "CompactStarted",
         "ErrorEvent",
     ]

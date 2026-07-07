@@ -117,9 +117,9 @@ def _server_with_worktrees(tmp_path) -> tuple[DaemonServer, str, _Agent, _Worktr
         SimpleNamespace(provider=_Provider(), worktree_manager=manager),
         _Conversation(),
     )
-    server._event_logs[sid] = []
-    server._session_meta[sid] = {"work_dir": str(tmp_path), "title": "worktrees"}
-    server._persisted_count[sid] = 0
+    server._records.event_logs[sid] = []
+    server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": "worktrees"}
+    server._records.persisted_count[sid] = 0
     return server, sid, agent, manager
 
 

@@ -63,17 +63,12 @@ class DaemonServer:
         self.session_mgr = SessionManager()
         self._records = SessionRecords(self.session_store, self.work_dir)
         self._agents: dict[str, DaemonSessionRuntime] = {}
-        self._event_logs = self._records.event_logs
         self._active_tasks = ActiveTaskRegistry()
-        self._tasks = self._active_tasks.tasks
-        self._active_task_ids = self._active_tasks.task_ids
         self._runtime_requirements = SessionRuntimeRequirements(
             ensure_agent=self.ensure_agent,
             runtimes=self._agents,
         )
         self._pre_plan_modes: dict[str, PermissionMode] = {}
-        self._session_meta = self._records.session_meta
-        self._persisted_count = self._records.persisted_count
         self._pending_prompts = PendingPromptRegistry()
         self._agent_task_runner = AgentTaskRunner(
             active_tasks=self._active_tasks,
@@ -123,7 +118,7 @@ class DaemonServer:
             hook_engine=self.hook_engine,
             session_mgr=self.session_mgr,
             runtimes=self._agents,
-            session_meta=self._session_meta,
+            session_meta=self._records.session_meta,
             records=self._records,
             agent_factory=create_agent_from_config,
         )

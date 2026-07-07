@@ -306,8 +306,8 @@ async def test_command_acceptance_stays_separate_from_plan_mode(tmp_path):
     agent = _FakeAgent(PermissionMode.ACCEPT_EDITS)
     sid = "test-session"
     server._agents[sid] = DaemonSessionRuntime(agent, _FakeDeps(provider), object())
-    server._event_logs[sid] = []
-    server._session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
+    server._records.event_logs[sid] = []
+    server._records.session_meta[sid] = {"work_dir": str(tmp_path), "title": ""}
 
     status = await server.set_permission_mode(sid, "plan")
 
@@ -420,7 +420,7 @@ async def test_ensure_agent_recreates_persisted_runtime(tmp_path, monkeypatch):
         str(tmp_path),
         session_store=SessionStore(tmp_path / "sessions"),
     )
-    server._session_meta["sid-persisted"] = {
+    server._records.session_meta["sid-persisted"] = {
         "work_dir": str(tmp_path),
         "title": "persisted",
     }
@@ -430,6 +430,6 @@ async def test_ensure_agent_recreates_persisted_runtime(tmp_path, monkeypatch):
     runtime = server._agents["sid-persisted"]
     session = await server.session_mgr.get_session("sid-persisted")
     assert runtime.agent.session_id == "sid-persisted"
-    assert server._event_logs["sid-persisted"] == []
+    assert server._records.event_logs["sid-persisted"] == []
     assert session is not None
     assert session.agent is runtime.agent
