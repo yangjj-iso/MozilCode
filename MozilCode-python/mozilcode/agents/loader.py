@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 PROJECT_AGENTS_DIR = ".mozilcode/agents"
 USER_AGENTS_DIR = "~/.mozilcode/agents"
+PLUGIN_AGENTS_DIR = "agents"
 
 
 class AgentLoader:
@@ -25,10 +26,14 @@ class AgentLoader:
         self,
         work_dir: str,
         enable_verification: bool = False,
+        plugin_sources: list[str | Path] | None = None,
     ) -> None:
         self._work_dir = work_dir
         self._enable_verification = enable_verification
         self._agents: dict[str, AgentDef] = {}
+        self._plugin_sources: list[Path] = []
+        for source in plugin_sources or []:
+            self.register_plugin_source(source)
 
 
     def _scan_directory(self, path: Path, source: str) -> list[AgentDef]:
@@ -47,6 +52,29 @@ class AgentLoader:
             except AgentParseError as e:
                 log.warning("Skipping agent file %s: %s", entry, e)
         return results
+
+    def _scan_plugin_sources(self) -> list[AgentDef]:
+        results: list[AgentDef] = []
+        seen_paths: set[Path] = set()
+
+        for source in self._plugin_sources:
+            candidates = [source, source / PLUGIN_AGENTS_DIR]
+            for candidate in candidates:
+                if candidate in seen_paths:
+                    continue
+                seen_paths.add(candidate)
+                results.extend(self._scan_directory(candidate, "plugin"))
+
+        return results
+
+    @staticmethod
+    def _merge_missing(
+        seen: dict[str, AgentDef],
+        agents: list[AgentDef],
+    ) -> None:
+        for agent_def in agents:
+            if agent_def.agent_type not in seen:
+                seen[agent_def.agent_type] = agent_def
 
 
     def _load_builtins(self) -> list[AgentDef]:
@@ -87,22 +115,17 @@ class AgentLoader:
 
         # 优先级 1：项目级（最高）
         project_path = Path(self._work_dir) / PROJECT_AGENTS_DIR
-        for agent_def in self._scan_directory(project_path, "project"):
-            if agent_def.agent_type not in seen:
-                seen[agent_def.agent_type] = agent_def
+        self._merge_missing(seen, self._scan_directory(project_path, "project"))
 
         # 优先级 2：用户级
         user_path = Path(USER_AGENTS_DIR).expanduser()
-        for agent_def in self._scan_directory(user_path, "user"):
-            if agent_def.agent_type not in seen:
-                seen[agent_def.agent_type] = agent_def
+        self._merge_missing(seen, self._scan_directory(user_path, "user"))
 
         # 优先级 3：内置
-        for agent_def in self._load_builtins():
-            if agent_def.agent_type not in seen:
-                seen[agent_def.agent_type] = agent_def
+        self._merge_missing(seen, self._load_builtins())
 
-        # 优先级 4：插件（保留，未实现）
+        # 优先级 4：插件。插件可以新增 agent，但不能覆盖项目/用户/内置定义。
+        self._merge_missing(seen, self._scan_plugin_sources())
 
         self._agents = seen
         return seen
@@ -134,5 +157,10 @@ class AgentLoader:
             (ad.agent_type, ad.when_to_use) for ad in self._agents.values()
         ]
 
-    def register_plugin_source(self, path: Path) -> None:
-        pass
+    def register_plugin_source(self, path: str | Path) -> None:
+        normalized = Path(path).expanduser()
+        if normalized in self._plugin_sources:
+            return
+        self._plugin_sources.append(normalized)
+        if self._agents:
+            self.load_all()

@@ -304,6 +304,66 @@ class TestAgentLoader:
         assert "good" in agents
         assert "bad" not in agents
 
+    def test_plugin_source_loads_agents_from_registered_directory(self, tmp_path: Path):
+        plugin_agents = tmp_path / "plugin-agents"
+        plugin_agents.mkdir()
+        (plugin_agents / "reviewer.md").write_text(
+            make_agent_md(name="plugin-reviewer", description="Plugin reviewer")
+        )
+
+        loader = AgentLoader(str(tmp_path))
+        loader.register_plugin_source(plugin_agents)
+        agents = loader.load_all()
+
+        assert agents["plugin-reviewer"].source == "plugin"
+        assert agents["plugin-reviewer"].when_to_use == "Plugin reviewer"
+
+    def test_plugin_source_loads_agents_from_plugin_root(self, tmp_path: Path):
+        plugin_root = tmp_path / "plugin"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "coder.md").write_text(
+            make_agent_md(name="plugin-coder", description="Plugin coder")
+        )
+
+        loader = AgentLoader(str(tmp_path), plugin_sources=[plugin_root])
+        agents = loader.load_all()
+
+        assert agents["plugin-coder"].source == "plugin"
+        assert agents["plugin-coder"].file_path == agents_dir / "coder.md"
+
+    def test_register_plugin_source_refreshes_loaded_catalog(self, tmp_path: Path):
+        plugin_agents = tmp_path / "plugin-agents"
+        plugin_agents.mkdir()
+        (plugin_agents / "auditor.md").write_text(
+            make_agent_md(name="plugin-auditor", description="Plugin auditor")
+        )
+
+        loader = AgentLoader(str(tmp_path))
+        loader.load_all()
+        loader.register_plugin_source(str(plugin_agents))
+
+        assert loader.get("plugin-auditor") is not None
+        assert ("plugin-auditor", "Plugin auditor") in loader.list_agents()
+
+    def test_plugin_source_does_not_override_builtin(self, tmp_path: Path):
+        plugin_root = tmp_path / "plugin"
+        agents_dir = plugin_root / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "explore.md").write_text(
+            make_agent_md(
+                name="Explore",
+                description="Plugin Explore",
+                body="Plugin system prompt.",
+            )
+        )
+
+        loader = AgentLoader(str(tmp_path), plugin_sources=[plugin_root])
+        agents = loader.load_all()
+
+        assert agents["Explore"].source == "builtin"
+        assert agents["Explore"].when_to_use != "Plugin Explore"
+
 # =====================================================================
 # 3. 工具过滤
 # =====================================================================
