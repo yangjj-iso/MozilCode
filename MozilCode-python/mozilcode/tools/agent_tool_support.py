@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from mozilcode.permissions import (
     DangerousCommandDetector,
@@ -49,3 +50,15 @@ def unique_agent_name(base_name: str, existing_names: Iterable[str]) -> str:
     while f"{base_name}-{counter}" in existing:
         counter += 1
     return f"{base_name}-{counter}"
+
+
+def parent_has_full_registry(parent_agent: Any) -> bool:
+    return getattr(parent_agent, "_full_registry", None) is not None
+
+
+def resolve_parent_registry(parent_agent: Any) -> Any:
+    return getattr(parent_agent, "_full_registry", None) or parent_agent.registry
+
+
+def resolve_parent_trace_id(parent_agent: Any) -> str:
+    return parent_agent.trace_id or parent_agent.agent_id

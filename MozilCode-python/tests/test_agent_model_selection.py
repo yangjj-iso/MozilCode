@@ -4,6 +4,7 @@ from mozilcode.agents.model_selection import (
     build_subagent_provider_config,
     create_subagent_client,
     resolve_subagent_model_override,
+    select_subagent_client,
 )
 from mozilcode.config import ProviderConfig
 
@@ -94,3 +95,68 @@ def test_create_subagent_client_returns_created_client(monkeypatch) -> None:
 
     assert create_subagent_client(parent, "sonnet") is created
     assert captured["config"].model == "claude-sonnet-4-6-20250514"
+
+
+def test_select_subagent_client_returns_parent_when_no_override() -> None:
+    parent_client = object()
+
+    assert (
+        select_subagent_client(
+            parent_client=parent_client,
+            provider_config=None,
+            requested_model=None,
+            definition_model="inherit",
+        )
+        is parent_client
+    )
+
+
+def test_select_subagent_client_returns_created_override(monkeypatch) -> None:
+    parent = ProviderConfig(
+        name="main",
+        protocol="openai",
+        base_url="https://api.example.test/v1",
+        model="parent-model",
+    )
+    parent_client = object()
+    created = object()
+
+    monkeypatch.setattr(
+        "mozilcode.agents.model_selection.create_subagent_client",
+        lambda _provider, _model: created,
+    )
+
+    assert (
+        select_subagent_client(
+            parent_client=parent_client,
+            provider_config=parent,
+            requested_model="haiku",
+            definition_model="inherit",
+        )
+        is created
+    )
+
+
+def test_select_subagent_client_falls_back_when_override_creation_fails(monkeypatch) -> None:
+    parent = ProviderConfig(
+        name="main",
+        protocol="openai",
+        base_url="https://api.example.test/v1",
+        model="parent-model",
+    )
+    parent_client = object()
+
+    monkeypatch.setattr(
+        "mozilcode.agents.model_selection.create_subagent_client",
+        lambda _provider, _model: None,
+    )
+
+    assert (
+        select_subagent_client(
+            parent_client=parent_client,
+            provider_config=parent,
+            requested_model=None,
+            definition_model="sonnet",
+        )
+        is parent_client
+    )

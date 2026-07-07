@@ -57,3 +57,22 @@ def create_subagent_client(
         return create_client(config)
     except Exception:
         return None
+
+
+def select_subagent_client(
+    *,
+    parent_client: LLMClient,
+    provider_config: ProviderConfig | None,
+    requested_model: str | None,
+    definition_model: str,
+) -> LLMClient:
+    model_override = resolve_subagent_model_override(
+        requested_model,
+        definition_model,
+    )
+    if model_override:
+        client = create_subagent_client(provider_config, model_override)
+        if client is not None:
+            return client
+
+    return parent_client

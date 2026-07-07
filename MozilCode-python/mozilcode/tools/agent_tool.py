@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from mozilcode.agents.model_selection import (
-    create_subagent_client,
-    resolve_subagent_model_override,
-)
+from mozilcode.agents.model_selection import select_subagent_client
 from mozilcode.agents.defaults import (
     fork_agent_def,
     teammate_agent_def,
@@ -27,17 +24,18 @@ from mozilcode.tools.agent_tool_messages import (
 )
 from mozilcode.tools.agent_tool_support import (
     create_subagent_permission_checker,
+    parent_has_full_registry,
+    resolve_parent_registry,
+    resolve_parent_trace_id,
     unique_agent_name,
 )
 from mozilcode.tools.base import Tool, ToolResult
 
 if TYPE_CHECKING:
     from mozilcode.agent import Agent
-    from mozilcode.agents.parser import AgentDef
     from mozilcode.agents.loader import AgentLoader
     from mozilcode.agents.task_manager import TaskManager
     from mozilcode.agents.trace import TraceManager
-    from mozilcode.client import LLMClient
 
 log = logging.getLogger(__name__)
 
@@ -163,7 +161,12 @@ class AgentTool(Tool):
             definition = fork_agent_def(self._parent_agent.max_iterations)
 
         # 选择 LLM 客户端
-        client = self._select_llm(p, definition)
+        client = select_subagent_client(
+            parent_client=self._parent_agent.client,
+            provider_config=self._provider_config,
+            requested_model=p.model,
+            definition_model=definition.model,
+        )
 
         # 判断是否后台运行
         is_background = p.run_in_background or definition.background
@@ -171,7 +174,7 @@ class AgentTool(Tool):
             is_background = True
 
         # 过滤工具（coordinator 模式可能缩减了注册表，这里用完整注册表）
-        _base_registry = getattr(self._parent_agent, '_full_registry', None) or self._parent_agent.registry
+        _base_registry = resolve_parent_registry(self._parent_agent)
         filtered_registry = resolve_agent_tools(
             _base_registry, definition, is_background
         )
@@ -199,7 +202,7 @@ class AgentTool(Tool):
             hook_engine=self._parent_agent.hook_engine,
         )
         sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
+        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
 
         # fork 子 agent 继承父 agent 的替换状态，确保共享的 tool_use_id 做出一致的
         # 决策——这样父子共享的 prompt cache 前缀才能保持字节级一致
@@ -318,7 +321,12 @@ class AgentTool(Tool):
             return ToolResult(output=f"Failed to create worktree for teammate: {e}", is_error=True)
 
         # 3. 选择 LLM
-        client = self._select_llm(p, definition)
+        client = select_subagent_client(
+            parent_client=self._parent_agent.client,
+            provider_config=self._provider_config,
+            requested_model=p.model,
+            definition_model=definition.model,
+        )
 
         # 4. 检测后端类型
         backend = self._team_manager.detect_backend()
@@ -327,12 +335,12 @@ class AgentTool(Tool):
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,
             parent_id=self._parent_agent.agent_id,
-            trace_id=self._parent_agent.trace_id or self._parent_agent.agent_id,
+            trace_id=resolve_parent_trace_id(self._parent_agent),
         )
         agent_id = trace_node.agent_id
 
-        _has_full = getattr(self._parent_agent, '_full_registry', None) is not None
-        full_registry = getattr(self._parent_agent, '_full_registry', None) or self._parent_agent.registry
+        _has_full = parent_has_full_registry(self._parent_agent)
+        full_registry = resolve_parent_registry(self._parent_agent)
         _full_tools = [t.name for t in full_registry.list_tools()]
         log.info(
             "[teammate] has_full_registry=%s full_tools=%d names=%s backend=%s def_tools=%s def_disallowed=%s",
@@ -374,7 +382,7 @@ class AgentTool(Tool):
             hook_engine=self._parent_agent.hook_engine,
         )
         sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
+        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
         sub_agent.agent_id = agent_id
         sub_agent.team_name = p.team_name
         sub_agent._team_manager = self._team_manager
@@ -470,23 +478,6 @@ class AgentTool(Tool):
         )
 
 
-    def _select_llm(
-        self,
-        params: AgentToolParams,
-        definition: AgentDef,
-    ) -> LLMClient:
-        model_override = resolve_subagent_model_override(
-            params.model,
-            definition.model,
-        )
-        if model_override and model_override != "inherit":
-            client = create_subagent_client(self._provider_config, model_override)
-            if client is not None:
-                return client
-
-        return self._parent_agent.client
-
-
     async def _execute_with_worktree(self, p: AgentToolParams) -> ToolResult:
         if self._worktree_manager is None:
             return ToolResult(
@@ -529,9 +520,14 @@ class AgentTool(Tool):
         notice = build_worktree_notice(self._parent_agent.work_dir, wt.path)
         task = notice + "\n\n" + p.prompt
 
-        client = self._select_llm(p, definition)
+        client = select_subagent_client(
+            parent_client=self._parent_agent.client,
+            provider_config=self._provider_config,
+            requested_model=p.model,
+            definition_model=definition.model,
+        )
 
-        _base_registry = getattr(self._parent_agent, '_full_registry', None) or self._parent_agent.registry
+        _base_registry = resolve_parent_registry(self._parent_agent)
         filtered_registry = resolve_agent_tools(
             _base_registry, definition, False
         )
@@ -554,7 +550,7 @@ class AgentTool(Tool):
             hook_engine=self._parent_agent.hook_engine,
         )
         sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
+        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
 
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,
