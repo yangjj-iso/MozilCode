@@ -81,6 +81,11 @@ from mozilcode.agent_tool_results import (
     tool_result_block,
     tool_result_event,
 )
+from mozilcode.agent_usage import (
+    UsageTotals,
+    accumulate_response_usage,
+    usage_callback_payload,
+)
 from mozilcode.client import LLMClient
 from mozilcode.context import (
     CompactCircuitBreaker,
@@ -401,19 +406,13 @@ class Agent:
             ):
                 yield he
 
-            self.total_input_tokens += response.input_tokens
-            self.total_output_tokens += response.output_tokens
-            context_tokens = (
-                response.input_tokens
-                + response.output_tokens
-                + response.cache_read
-                + response.cache_creation
+            usage_update = accumulate_response_usage(
+                UsageTotals(self.total_input_tokens, self.total_output_tokens),
+                response,
             )
-            yield UsageEvent(
-                input_tokens=self.total_input_tokens,
-                output_tokens=self.total_output_tokens,
-                context_tokens=context_tokens,
-            )
+            self.total_input_tokens = usage_update.totals.input_tokens
+            self.total_output_tokens = usage_update.totals.output_tokens
+            yield usage_update.event
 
             conv_thinking = response_thinking_blocks(response)
 
@@ -900,17 +899,15 @@ class Agent:
                 pass
 
             response = collector.response
-            self.total_input_tokens += response.input_tokens
-            self.total_output_tokens += response.output_tokens
+            usage_update = accumulate_response_usage(
+                UsageTotals(self.total_input_tokens, self.total_output_tokens),
+                response,
+            )
+            self.total_input_tokens = usage_update.totals.input_tokens
+            self.total_output_tokens = usage_update.totals.output_tokens
 
             if event_callback:
-                event_callback({
-                    "type": "usage",
-                    "usage": {
-                        "inputTokens": self.total_input_tokens,
-                        "outputTokens": self.total_output_tokens,
-                    },
-                })
+                event_callback(usage_callback_payload(usage_update.totals))
 
             if response.text:
                 last_text = response.text
