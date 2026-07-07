@@ -54,6 +54,10 @@ from mozilcode.agent_notifications import (
     inject_external_notifications,
 )
 from mozilcode.agent_noninteractive_tools import execute_noninteractive_tool_call
+from mozilcode.agent_output_recovery import (
+    OutputRecoveryState,
+    handle_output_token_limit,
+)
 from mozilcode.agent_recovery import record_tool_recovery_snapshot
 from mozilcode.agent_response_history import (
     add_final_response,
@@ -115,10 +119,6 @@ from mozilcode.tools.base import (
 log = logging.getLogger(__name__)
 
 MEMORY_EXTRACTION_INTERVAL = 5
-MAX_TOKENS_CEILING = 64000
-MAX_OUTPUT_TOKENS_RECOVERIES = 3
-
-
 # ---------------------------------------------------------------------------
 # AgentEvent 事件类型
 # ---------------------------------------------------------------------------
@@ -283,8 +283,7 @@ class Agent:
 
         iteration = 0
         consecutive_unknown = 0
-        max_tokens_escalated = False
-        output_recoveries = 0
+        output_recovery_state = OutputRecoveryState()
 
         while True:
             iteration += 1
@@ -418,35 +417,17 @@ class Agent:
 
             conv_thinking = response_thinking_blocks(response)
 
-            if response.stop_reason == "max_tokens":
-                if not max_tokens_escalated:
-                    self.client.set_max_output_tokens(MAX_TOKENS_CEILING)
-                    max_tokens_escalated = True
-                    if response.text:
-                        conversation.add_assistant_message(
-                            response.text, thinking_blocks=conv_thinking
-                        )
-                        conversation.add_user_message(
-                            "Output token limit hit. Resume directly from where you stopped. "
-                            "Do not apologize or repeat previous content. Pick up mid-thought if needed."
-                        )
-                    yield RetryEvent(reason="max_tokens escalation")
-                    continue
-                elif output_recoveries < MAX_OUTPUT_TOKENS_RECOVERIES:
-                    output_recoveries += 1
-                    conversation.add_assistant_message(
-                        response.text, thinking_blocks=conv_thinking
-                    )
-                    conversation.add_user_message(
-                        "Output token limit hit. Resume directly from where you stopped. "
-                        "Break remaining work into smaller pieces."
-                    )
-                    yield RetryEvent(
-                        reason=f"max_tokens recovery {output_recoveries}/{MAX_OUTPUT_TOKENS_RECOVERIES}"
-                    )
-                    continue
-            else:
-                output_recoveries = 0
+            output_recovery_decision = handle_output_token_limit(
+                response=response,
+                conversation=conversation,
+                client=self.client,
+                thinking_blocks=conv_thinking,
+                state=output_recovery_state,
+            )
+            output_recovery_state = output_recovery_decision.state
+            if output_recovery_decision.retry_event is not None:
+                yield output_recovery_decision.retry_event
+                continue
 
             if not response.tool_calls:
                 add_final_response(
