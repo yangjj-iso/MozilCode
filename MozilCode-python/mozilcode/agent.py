@@ -28,6 +28,12 @@ from mozilcode.agent_events import (
     UsageEvent,
 )
 from mozilcode.agent_stream import LLMResponse, StreamCollector, ThinkingBlock
+from mozilcode.agent_helpers import (
+    build_hook_context,
+    build_permission_description,
+    infer_tool_file_path,
+    latest_user_query,
+)
 from mozilcode.agent_tool_execution import (
     StreamingExecutor,
     ToolBatch,
@@ -196,17 +202,10 @@ class Agent:
             self._agent_catalog_list = catalog_list
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
-        return HookContext(
-            event_name=event,
-            tool_name=str(kwargs.get("tool_name", "")),
-            tool_args=kwargs.get("tool_args", {}),
-            file_path=str(kwargs.get("file_path", "")),
-            message=str(kwargs.get("message", "")),
-            error=str(kwargs.get("error", "")),
-        )
+        return build_hook_context(event, **kwargs)
 
     def _infer_file_path(self, args: dict) -> str:
-        return str(args.get("file_path", args.get("path", "")))
+        return infer_tool_file_path(args)
 
     def _drain_hook_events(self) -> list[HookEvent]:
         if not self.hook_engine:
@@ -234,18 +233,7 @@ class Agent:
 
     @staticmethod
     def _latest_user_query(conversation: ConversationManager) -> str:
-        for message in reversed(conversation.history):
-            if message.role != "user" or message.tool_results:
-                continue
-            content = message.content.strip()
-            if not content:
-                continue
-            if content.startswith("<system-reminder>"):
-                continue
-            if content.startswith("Current working directory:"):
-                continue
-            return content
-        return ""
+        return latest_user_query(conversation)
 
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
         self._current_conversation = conversation
@@ -717,11 +705,7 @@ class Agent:
             log.debug("Mailbox consumption failed: %s", e)
 
     def _build_permission_description(self, tc: ToolCallComplete) -> str:
-        if tc.tool_name == "Bash":
-            return tc.arguments.get("command", tc.tool_name)
-        if tc.tool_name in ("ReadFile", "WriteFile", "EditFile"):
-            return tc.arguments.get("file_path", tc.tool_name)
-        return str(tc.arguments)
+        return build_permission_description(tc)
 
     async def _execute_single_tool_direct(
         self, tc: ToolCallComplete
