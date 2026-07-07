@@ -49,6 +49,7 @@ from mozilcode.context import (
     create_replacement_state,
     ensure_session_dir,
     load_replacement_records,
+    prepare_tool_result_content,
     reconstruct_replacement_state,
     should_auto_compact,
 )
@@ -74,7 +75,6 @@ from mozilcode.hooks.engine import HookNotification
 from mozilcode.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from mozilcode.tools import ToolRegistry
 from mozilcode.tools.base import (
-    MAX_OUTPUT_CHARS,
     ToolCallComplete,
     ToolResult,
 )
@@ -574,8 +574,8 @@ class Agent:
                             br = exec_results[tc.tool_id]
                             result = br.result
                             elapsed = br.elapsed
-                        content = self._maybe_persist_or_truncate(
-                            tc.tool_id, result.output
+                        content = prepare_tool_result_content(
+                            tc.tool_id, result.output, self.session_dir
                         )
                         tool_results.append(
                             ToolResultBlock(
@@ -613,8 +613,8 @@ class Agent:
                                     output=f"Hook rejected: {rejection.reason}",
                                     is_error=True,
                                 )
-                                content = self._maybe_persist_or_truncate(
-                                    tc.tool_id, result.output
+                                content = prepare_tool_result_content(
+                                    tc.tool_id, result.output, self.session_dir
                                 )
                                 tool_results.append(
                                     ToolResultBlock(
@@ -658,8 +658,8 @@ class Agent:
                             for he in self._drain_hook_events():
                                 yield he
 
-                        content = self._maybe_persist_or_truncate(
-                            tc.tool_id, result.output
+                        content = prepare_tool_result_content(
+                            tc.tool_id, result.output, self.session_dir
                         )
                         tool_results.append(
                             ToolResultBlock(
@@ -1171,7 +1171,9 @@ class Agent:
                         "args": tc.arguments,
                     })
                 result = await self._execute_tool_noninteractive(tc)
-                content = self._maybe_persist_or_truncate(tc.tool_id, result.output)
+                content = prepare_tool_result_content(
+                    tc.tool_id, result.output, self.session_dir
+                )
                 tool_results.append(
                     ToolResultBlock(
                         tool_use_id=tc.tool_id,
@@ -1258,17 +1260,3 @@ class Agent:
             await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
 
         return result
-
-    def _maybe_persist_or_truncate(self, tool_use_id: str, text: str) -> str:
-        from mozilcode.context.tool_results import (
-            SINGLE_RESULT_CHAR_LIMIT,
-            make_persisted_preview,
-            persist_tool_result,
-        )
-
-        if len(text) > SINGLE_RESULT_CHAR_LIMIT:
-            fp = persist_tool_result(tool_use_id, text, self.session_dir)
-            return make_persisted_preview(text, fp)
-        if len(text) > MAX_OUTPUT_CHARS:
-            return text[:MAX_OUTPUT_CHARS] + "\n… (output truncated)"
-        return text

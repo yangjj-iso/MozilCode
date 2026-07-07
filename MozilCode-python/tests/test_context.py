@@ -22,12 +22,14 @@ from mozilcode.context.manager import (
 )
 from mozilcode.context.tool_results import (
     AGGREGATE_CHAR_LIMIT,
+    INLINE_RESULT_CHAR_LIMIT,
     PERSISTED_TAG,
     SINGLE_RESULT_CHAR_LIMIT,
     apply_tool_result_budget,
     cleanup_tool_results,
     ensure_session_dir,
     make_persisted_preview,
+    prepare_tool_result_content,
     persist_tool_result,
 )
 from mozilcode.conversation import (
@@ -74,6 +76,30 @@ class TestMakePersistedPreview:
         preview_line = [l for l in lines if l.startswith("aaa")]
         assert len(preview_line) == 1
         assert len(preview_line[0]) == 2_000
+
+# ---------------------------------------------------------------------------
+# prepare_tool_result_content
+# ---------------------------------------------------------------------------
+
+class TestPrepareToolResultContent:
+    def test_small_result_unchanged(self, tmp_path: Path) -> None:
+        assert prepare_tool_result_content("toolu_small", "hello", tmp_path) == "hello"
+
+    def test_medium_result_truncated_inline(self, tmp_path: Path) -> None:
+        content = "x" * (INLINE_RESULT_CHAR_LIMIT + 1)
+
+        prepared = prepare_tool_result_content("toolu_medium", content, tmp_path)
+
+        assert prepared == "x" * INLINE_RESULT_CHAR_LIMIT + "\n… (output truncated)"
+        assert not (tmp_path / "toolu_medium.txt").exists()
+
+    def test_large_result_persisted(self, tmp_path: Path) -> None:
+        content = "x" * (SINGLE_RESULT_CHAR_LIMIT + 1)
+
+        prepared = prepare_tool_result_content("toolu_large", content, tmp_path)
+
+        assert prepared.startswith(PERSISTED_TAG)
+        assert (tmp_path / "toolu_large.txt").read_text(encoding="utf-8") == content
 
 # ---------------------------------------------------------------------------
 # apply_tool_result_budget

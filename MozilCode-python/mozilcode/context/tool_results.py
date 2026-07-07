@@ -16,6 +16,7 @@ from mozilcode.conversation import (
 
 
 SINGLE_RESULT_CHAR_LIMIT = 50_000
+INLINE_RESULT_CHAR_LIMIT = 10_000
 AGGREGATE_CHAR_LIMIT = 200_000
 PREVIEW_CHARS = 2_000
 
@@ -30,6 +31,7 @@ SESSION_SUBDIR = ".mozilcode/session/tool-results"
 __all__ = [
     "AGGREGATE_CHAR_LIMIT",
     "KEEP_RECENT_TURNS",
+    "INLINE_RESULT_CHAR_LIMIT",
     "OLD_RESULT_SNIP_CHARS",
     "PERSISTED_TAG",
     "PREVIEW_CHARS",
@@ -40,6 +42,7 @@ __all__ = [
     "cleanup_tool_results",
     "ensure_session_dir",
     "make_persisted_preview",
+    "prepare_tool_result_content",
     "persist_tool_result",
 ]
 
@@ -79,6 +82,17 @@ def make_persisted_preview(content: str, file_path: Path) -> str:
         f"{preview}\n"
         f"</persisted-output>"
     )
+
+
+def prepare_tool_result_content(tool_use_id: str, content: str, session_dir: Path) -> str:
+    """Return the conversation-safe representation of a fresh tool result."""
+
+    if len(content) > SINGLE_RESULT_CHAR_LIMIT:
+        file_path = persist_tool_result(tool_use_id, content, session_dir)
+        return make_persisted_preview(content, file_path)
+    if len(content) > INLINE_RESULT_CHAR_LIMIT:
+        return content[:INLINE_RESULT_CHAR_LIMIT] + "\n… (output truncated)"
+    return content
 
 
 def apply_tool_result_budget(

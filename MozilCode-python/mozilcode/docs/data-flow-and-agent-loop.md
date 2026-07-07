@@ -388,7 +388,7 @@ Agent._execute_batch_parallel
 工具输出可能很大，项目有两层保护：
 
 1. 执行后立即处理：
-   - `Agent._maybe_persist_or_truncate`
+   - `prepare_tool_result_content`
    - 超过 `SINGLE_RESULT_CHAR_LIMIT` 的结果写入 `.mozilcode/session/tool-results/<tool_use_id>.txt`
    - 对话里只保留预览和文件路径
 

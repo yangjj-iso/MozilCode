@@ -28,6 +28,7 @@ from mozilcode.context.tool_results import (
     apply_tool_result_budget,
     cleanup_tool_results,
     ensure_session_dir,
+    prepare_tool_result_content,
 )
 
 
@@ -52,6 +53,7 @@ __all__ = [
     "create_replacement_state",
     "ensure_session_dir",
     "load_replacement_records",
+    "prepare_tool_result_content",
     "reconstruct_replacement_state",
     "should_auto_compact",
 ]
