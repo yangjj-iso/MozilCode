@@ -3,20 +3,12 @@ from mozilcode.context.manager import (
     CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
-    ContentReplacementRecord,
-    ContentReplacementState,
-    REPLACEMENT_RECORDS_FILENAME,
-    append_replacement_records,
     apply_tool_result_budget,
     auto_compact,
     build_compact_messages,
     cleanup_tool_results,
-    clone_replacement_state,
     compute_compact_threshold,
-    create_replacement_state,
     ensure_session_dir,
-    load_replacement_records,
-    reconstruct_replacement_state,
     should_auto_compact,
 )
 from mozilcode.context.recovery import (
@@ -24,6 +16,16 @@ from mozilcode.context.recovery import (
     RecoveryState,
     SkillInvocationRecord,
     build_recovery_attachment,
+)
+from mozilcode.context.replacement import (
+    REPLACEMENT_RECORDS_FILENAME,
+    ContentReplacementRecord,
+    ContentReplacementState,
+    append_replacement_records,
+    clone_replacement_state,
+    create_replacement_state,
+    load_replacement_records,
+    reconstruct_replacement_state,
 )
 
 

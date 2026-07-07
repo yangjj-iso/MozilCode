@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -23,6 +22,16 @@ from mozilcode.context.recovery import (
     SkillInvocationRecord,
     _RECOVERY_CHARS_PER_TOKEN,
     build_recovery_attachment,
+)
+from mozilcode.context.replacement import (
+    REPLACEMENT_RECORDS_FILENAME,
+    ContentReplacementRecord,
+    ContentReplacementState,
+    append_replacement_records,
+    clone_replacement_state,
+    create_replacement_state,
+    load_replacement_records,
+    reconstruct_replacement_state,
 )
 from mozilcode.serialization import build_messages
 
@@ -84,92 +93,6 @@ class CompactEvent:
     # 摘要成功时填充，调用方可据此持久化 compact_boundary 记录。
     # 未产出摘要时为 None。
     boundary: CompactBoundary | None = None
-
-
-# ---------------------------------------------------------------------------
-# 内容替换状态 — Design B（决策冻结，不做原地修改）
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ContentReplacementState:
-    seen_ids: set[str] = field(default_factory=set)
-    replacements: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class ContentReplacementRecord:
-    tool_use_id: str
-    replacement: str
-    kind: str = "tool-result"
-
-
-def create_replacement_state() -> ContentReplacementState:
-    return ContentReplacementState()
-
-
-def clone_replacement_state(src: ContentReplacementState) -> ContentReplacementState:
-    return ContentReplacementState(
-        seen_ids=set(src.seen_ids),
-        replacements=dict(src.replacements),
-    )
-
-
-REPLACEMENT_RECORDS_FILENAME = "replacement_records.jsonl"
-
-
-def append_replacement_records(
-    session_dir: Path, records: list[ContentReplacementRecord]
-) -> None:
-    if not records:
-        return
-    path = session_dir / REPLACEMENT_RECORDS_FILENAME
-    with path.open("a", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps({
-                "kind": r.kind,
-                "tool_use_id": r.tool_use_id,
-                "replacement": r.replacement,
-            }, ensure_ascii=False) + "\n")
-
-
-def load_replacement_records(session_dir: Path) -> list[ContentReplacementRecord]:
-    path = session_dir / REPLACEMENT_RECORDS_FILENAME
-    if not path.exists():
-        return []
-    out: list[ContentReplacementRecord] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            out.append(ContentReplacementRecord(
-                kind=obj.get("kind", "tool-result"),
-                tool_use_id=obj["tool_use_id"],
-                replacement=obj["replacement"],
-            ))
-    return out
-
-
-def reconstruct_replacement_state(
-    messages: list[Message],
-    records: list[ContentReplacementRecord],
-    inherited_replacements: Mapping[str, str] | None = None,
-) -> ContentReplacementState:
-    state = create_replacement_state()
-    candidate_ids: set[str] = set()
-    for msg in messages:
-        for tr in msg.tool_results:
-            candidate_ids.add(tr.tool_use_id)
-    state.seen_ids.update(candidate_ids)
-    for r in records:
-        if r.kind == "tool-result" and r.tool_use_id in candidate_ids:
-            state.replacements[r.tool_use_id] = r.replacement
-    if inherited_replacements:
-        for tool_use_id, replacement in inherited_replacements.items():
-            if tool_use_id in candidate_ids and tool_use_id not in state.replacements:
-                state.replacements[tool_use_id] = replacement
-    return state
 
 
 # ---------------------------------------------------------------------------

@@ -7,11 +7,13 @@ from pathlib import Path
 from mozilcode.context.manager import (
     AGGREGATE_CHAR_LIMIT,
     PERSISTED_TAG,
-    REPLACEMENT_RECORDS_FILENAME,
     SINGLE_RESULT_CHAR_LIMIT,
+    apply_tool_result_budget,
+)
+from mozilcode.context.replacement import (
+    REPLACEMENT_RECORDS_FILENAME,
     ContentReplacementRecord,
     append_replacement_records,
-    apply_tool_result_budget,
     clone_replacement_state,
     create_replacement_state,
     load_replacement_records,
