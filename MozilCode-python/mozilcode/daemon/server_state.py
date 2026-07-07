@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from pathlib import Path
 
 from mozilcode.agent import Agent
@@ -32,6 +33,7 @@ from mozilcode.daemon.responses import (
     session_not_found_result,
 )
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
     create_daemon_session_runtime,
@@ -407,45 +409,29 @@ class DaemonServer:
         self, sid: str, request_id: str, response: str
     ) -> bool:
         """Resolve a pending permission request. response: allow|deny|allow_always."""
-        return await self._resolve_pending_request(
+        return await resolve_session_pending_prompt(
             sid,
             request_id,
             PermissionResponse(response),
             "PermissionResolved",
+            session_mgr=self.session_mgr,
+            pending_prompts=self._pending_prompts,
+            emit_event=self._emit,
         )
 
     async def resolve_askuser(
         self, sid: str, request_id: str, answers: dict[str, str]
     ) -> bool:
         """Resolve a pending ask_user request."""
-        return await self._resolve_pending_request(
+        return await resolve_session_pending_prompt(
             sid,
             request_id,
             answers,
             "AskUserResolved",
+            session_mgr=self.session_mgr,
+            pending_prompts=self._pending_prompts,
+            emit_event=self._emit,
         )
-
-    async def _resolve_pending_request(
-        self,
-        sid: str,
-        request_id: str,
-        result: object,
-        resolved_event_type: str,
-    ) -> bool:
-        session = await self.session_mgr.get_session(sid)
-        if session is None:
-            return False
-        ok = session.resolve_future(request_id, result)
-        if ok:
-            self._pending_prompts.discard(sid, request_id)
-            self._emit(
-                sid,
-                {
-                    "type": resolved_event_type,
-                    "data": {"request_id": request_id},
-                },
-            )
-        return ok
 
     async def close_session(self, sid: str) -> None:
         """Clean up a session."""

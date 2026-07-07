@@ -301,6 +301,20 @@ def test_create_session_accepts_safe_custom_session_id(tmp_path):
     assert (tmp_path / "sessions" / "custom-1" / "meta.json").exists()
 
 
+def test_create_session_generates_safe_default_session_id(tmp_path):
+    app = _app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post("/api/session", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    session_id = body["session_id"]
+    assert len(session_id) == 12
+    assert app.state.server.has_session(session_id)
+    assert (tmp_path / "sessions" / session_id / "meta.json").exists()
+
+
 def test_create_session_rejects_duplicate_session_id_without_resetting_state(tmp_path):
     app = _app(tmp_path)
 
