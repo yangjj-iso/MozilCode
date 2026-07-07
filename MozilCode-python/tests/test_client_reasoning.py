@@ -24,7 +24,15 @@ from mozilcode.openai_streaming import (
     stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage,
 )
-from mozilcode.tools.base import StreamEnd, TextDelta, ThinkingComplete, ThinkingDelta
+from mozilcode.tools.base import (
+    StreamEnd,
+    TextDelta,
+    ThinkingComplete,
+    ThinkingDelta,
+    ToolCallComplete,
+    ToolCallDelta,
+    ToolCallStart,
+)
 
 
 class _AsyncStream:
@@ -87,6 +95,55 @@ async def test_openai_responses_streams_reasoning_summary():
     assert any(isinstance(e, ThinkingDelta) and e.text == "先分析" for e in events)
     assert any(isinstance(e, ThinkingComplete) and e.thinking == "先分析" for e in events)
     assert any(isinstance(e, TextDelta) and e.text == "答案" for e in events)
+    assert any(isinstance(e, StreamEnd) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_openai_responses_streams_function_call_arguments():
+    class Responses:
+        async def create(self, **_kwargs):
+            return _AsyncStream([
+                SimpleNamespace(
+                    type="response.output_item.added",
+                    item=SimpleNamespace(
+                        type="function_call",
+                        name="Bash",
+                        call_id="call-1",
+                    ),
+                ),
+                SimpleNamespace(
+                    type="response.function_call_arguments.delta",
+                    delta='{"command":"git',
+                ),
+                SimpleNamespace(
+                    type="response.function_call_arguments.delta",
+                    delta=' status"}',
+                ),
+                SimpleNamespace(type="response.function_call_arguments.done"),
+                SimpleNamespace(
+                    type="response.completed",
+                    response=SimpleNamespace(usage=None),
+                ),
+            ])
+
+    client = OpenAIClient.__new__(OpenAIClient)
+    client.model = "gpt-test"
+    client.thinking = False
+    client.max_output_tokens = 1024
+    client._client = SimpleNamespace(responses=Responses())
+
+    events = await _collect(client.stream(ConversationManager()))
+
+    assert events[:4] == [
+        ToolCallStart(tool_name="Bash", tool_id="call-1"),
+        ToolCallDelta(text='{"command":"git'),
+        ToolCallDelta(text=' status"}'),
+        ToolCallComplete(
+            tool_id="call-1",
+            tool_name="Bash",
+            arguments={"command": "git status"},
+        ),
+    ]
     assert any(isinstance(e, StreamEnd) for e in events)
 
 

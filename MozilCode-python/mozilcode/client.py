@@ -29,6 +29,7 @@ from mozilcode.llm_errors import (
     rate_limit_error as _rate_limit_error,
 )
 from mozilcode.openai_streaming import (
+    OpenAIResponseToolCallState,
     RESPONSE_REASONING_DELTA_EVENTS as _RESPONSE_REASONING_DELTA_EVENTS,
     RESPONSE_REASONING_DONE_EVENTS as _RESPONSE_REASONING_DONE_EVENTS,
     extract_chat_reasoning_delta as _extract_chat_reasoning_delta,
@@ -235,9 +236,7 @@ class OpenAIClient(LLMClient):
             thinking=self.thinking,
         )
 
-        current_tool_name = ""
-        current_call_id = ""
-        json_accum = ""
+        response_tool_call = OpenAIResponseToolCallState()
         reasoning_accum = ""
         reasoning_completed = False
 
@@ -263,42 +262,16 @@ class OpenAIClient(LLMClient):
                         )
                         reasoning_completed = True
                 elif event.type == "response.function_call_arguments.delta":
-                    if not current_tool_name:
-                        current_tool_name = getattr(event, "name", "") or ""
-                        current_call_id = getattr(event, "call_id", "") or ""
-                        if current_tool_name:
-                            yield ToolCallStart(
-                                tool_name=current_tool_name,
-                                tool_id=current_call_id,
-                            )
-                    json_accum += event.delta
-                    yield ToolCallDelta(text=event.delta)
+                    for tool_event in response_tool_call.add_arguments_delta(event):
+                        yield tool_event
                 elif event.type == "response.function_call_arguments.done":
-                    if not current_tool_name:
-                        current_tool_name = getattr(event, "name", "") or ""
-                        current_call_id = getattr(event, "call_id", "") or ""
-                    try:
-                        args = json.loads(json_accum) if json_accum else {}
-                    except json.JSONDecodeError:
-                        args = {}
-                    yield ToolCallComplete(
-                        tool_id=current_call_id,
-                        tool_name=current_tool_name,
-                        arguments=args,
-                    )
-                    current_tool_name = ""
-                    current_call_id = ""
-                    json_accum = ""
+                    yield response_tool_call.complete(event)
                 elif event.type == "response.output_item.added":
-                    item = getattr(event, "item", None)
-                    if item and getattr(item, "type", "") == "function_call":
-                        current_tool_name = getattr(item, "name", "")
-                        current_call_id = getattr(item, "call_id", "")
-                        json_accum = ""
-                        yield ToolCallStart(
-                            tool_name=current_tool_name,
-                            tool_id=current_call_id,
-                        )
+                    tool_start = response_tool_call.add_output_item(
+                        getattr(event, "item", None)
+                    )
+                    if tool_start is not None:
+                        yield tool_start
                 elif event.type == "response.completed":
                     resp = getattr(event, "response", None)
                     if self.thinking and not reasoning_completed:

@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import json
 from typing import Any
 
-from mozilcode.tools.base import StreamEnd
+from mozilcode.tools.base import (
+    StreamEnd,
+    ToolCallComplete,
+    ToolCallDelta,
+    ToolCallStart,
+)
 
 RESPONSE_REASONING_DELTA_EVENTS = {
     "response.reasoning_summary_text.delta",
@@ -42,6 +49,66 @@ def get_text(value: Any, *names: str) -> str:
         if isinstance(item, str) and item:
             return item
     return ""
+
+
+def parse_tool_arguments(raw: str) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+@dataclass
+class OpenAIResponseToolCallState:
+    tool_name: str = ""
+    call_id: str = ""
+    arguments_json: str = ""
+
+    def _update_identity(self, source: Any) -> None:
+        if not self.tool_name:
+            self.tool_name = getattr(source, "name", "") or ""
+        if not self.call_id:
+            self.call_id = getattr(source, "call_id", "") or ""
+
+    def add_output_item(self, item: Any) -> ToolCallStart | None:
+        if not item or getattr(item, "type", "") != "function_call":
+            return None
+        self.tool_name = getattr(item, "name", "") or ""
+        self.call_id = getattr(item, "call_id", "") or ""
+        self.arguments_json = ""
+        return ToolCallStart(tool_name=self.tool_name, tool_id=self.call_id)
+
+    def add_arguments_delta(
+        self,
+        event: Any,
+    ) -> list[ToolCallStart | ToolCallDelta]:
+        events: list[ToolCallStart | ToolCallDelta] = []
+        if not self.tool_name:
+            self._update_identity(event)
+            if self.tool_name:
+                events.append(
+                    ToolCallStart(tool_name=self.tool_name, tool_id=self.call_id)
+                )
+        delta = getattr(event, "delta", "") or ""
+        self.arguments_json += delta
+        events.append(ToolCallDelta(text=delta))
+        return events
+
+    def complete(self, event: Any) -> ToolCallComplete:
+        if not self.tool_name:
+            self._update_identity(event)
+        complete = ToolCallComplete(
+            tool_id=self.call_id,
+            tool_name=self.tool_name,
+            arguments=parse_tool_arguments(self.arguments_json),
+        )
+        self.tool_name = ""
+        self.call_id = ""
+        self.arguments_json = ""
+        return complete
 
 
 def extract_response_reasoning_summary(response: Any) -> str:
