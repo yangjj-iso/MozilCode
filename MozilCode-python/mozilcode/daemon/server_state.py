@@ -41,7 +41,11 @@ from mozilcode.daemon.task_events import (
     task_error_event,
     user_message_event,
 )
-from mozilcode.daemon.responses import DaemonActionResult
+from mozilcode.daemon.responses import (
+    DaemonActionResult,
+    bad_request_result,
+    session_not_found_result,
+)
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
@@ -231,12 +235,6 @@ class DaemonServer:
     def pending_prompt_events(self, sid: str) -> list[dict]:
         return self._pending_prompts.events(sid)
 
-    def _session_not_found(self) -> DaemonActionResult:
-        return DaemonActionResult({"error": "session not found"}, status_code=404)
-
-    def _bad_request(self, message: str) -> DaemonActionResult:
-        return DaemonActionResult({"error": message}, status_code=400)
-
     def _status_payload(self, sid: str, **payload: object) -> dict:
         return {**payload, "status": self.status(sid)}
 
@@ -260,7 +258,7 @@ class DaemonServer:
     ) -> tuple[DaemonSessionRuntime | None, DaemonActionResult | None]:
         runtime = await self._ensure_runtime(sid)
         if runtime is None:
-            return None, self._session_not_found()
+            return None, session_not_found_result()
         return runtime, None
 
     async def _require_deps(
@@ -468,7 +466,7 @@ class DaemonServer:
         try:
             name, base_branch = normalize_create_worktree_request(name, base_branch)
         except ValueError as e:
-            return self._bad_request(str(e))
+            return bad_request_result(str(e))
 
         agent, deps, error = await self._require_agent_and_deps(sid)
         if error is not None:
@@ -483,7 +481,7 @@ class DaemonServer:
             )
             self._set_agent_work_dir(sid, agent, entry.work_dir)
         except Exception as e:
-            return self._bad_request(str(e))
+            return bad_request_result(str(e))
 
         return DaemonActionResult(
             self._status_payload(
@@ -502,7 +500,7 @@ class DaemonServer:
             entry = await enter_worktree_action(deps.worktree_manager, name)
             self._set_agent_work_dir(sid, agent, entry.work_dir)
         except Exception as e:
-            return self._bad_request(str(e))
+            return bad_request_result(str(e))
 
         return DaemonActionResult(self._status_payload(sid, entered=True))
 
@@ -527,7 +525,7 @@ class DaemonServer:
             )
             self._set_agent_work_dir(sid, agent, entry.work_dir)
         except Exception as e:
-            return self._bad_request(str(e))
+            return bad_request_result(str(e))
 
         return DaemonActionResult(self._status_payload(sid, exited=True))
 
