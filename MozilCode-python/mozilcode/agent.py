@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
@@ -28,6 +28,7 @@ from mozilcode.agent_events import (
     TurnComplete,
     UsageEvent,
 )
+from mozilcode.agent_stream import LLMResponse, StreamCollector, ThinkingBlock
 from mozilcode.client import LLMClient
 from mozilcode.context import (
     CompactCircuitBreaker,
@@ -68,14 +69,7 @@ from mozilcode.prompts import build_environment_context, build_plan_mode_reminde
 from mozilcode.tools import ToolRegistry
 from mozilcode.tools.base import (
     MAX_OUTPUT_CHARS,
-    StreamEnd,
-    StreamEvent,
-    TextDelta,
-    ThinkingComplete,
-    ThinkingDelta,
     ToolCallComplete,
-    ToolCallDelta,
-    ToolCallStart,
     ToolResult,
 )
 from mozilcode.tools.paths import resolve_tool_path
@@ -93,64 +87,6 @@ MAX_OUTPUT_TOKENS_RECOVERIES = 3
 
 # Event DTOs are defined in mozilcode.agent_events and imported here so existing
 # public imports from mozilcode.agent remain valid.
-
-
-# ---------------------------------------------------------------------------
-# LLM 响应收集器
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ThinkingBlock:
-    thinking: str
-    signature: str
-
-
-@dataclass
-class LLMResponse:
-    text: str = ""
-    tool_calls: list[ToolCallComplete] = field(default_factory=list)
-    thinking_blocks: list[ThinkingBlock] = field(default_factory=list)
-    stop_reason: str = ""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_read: int = 0
-    cache_creation: int = 0
-
-
-class StreamCollector:
-    def __init__(self) -> None:
-        self.response = LLMResponse()
-
-    async def consume(
-        self, stream: AsyncIterator[StreamEvent]
-    ) -> AsyncIterator[AgentEvent]:
-        async for event in stream:
-            if isinstance(event, TextDelta):
-                self.response.text += event.text
-                yield StreamText(text=event.text)
-            elif isinstance(event, ThinkingDelta):
-                yield ThinkingText(text=event.text)
-            elif isinstance(event, ThinkingComplete):
-                self.response.thinking_blocks.append(
-                    ThinkingBlock(thinking=event.thinking, signature=event.signature)
-                )
-            elif isinstance(event, ToolCallStart):
-                pass
-            elif isinstance(event, ToolCallDelta):
-                pass
-            elif isinstance(event, ToolCallComplete):
-                self.response.tool_calls.append(event)
-                yield ToolUseEvent(
-                    tool_name=event.tool_name,
-                    tool_id=event.tool_id,
-                    arguments=event.arguments,
-                )
-            elif isinstance(event, StreamEnd):
-                self.response.stop_reason = event.stop_reason
-                self.response.input_tokens = event.input_tokens
-                self.response.output_tokens = event.output_tokens
-                self.response.cache_read = event.cache_read
-                self.response.cache_creation = event.cache_creation
 
 
 # ---------------------------------------------------------------------------
