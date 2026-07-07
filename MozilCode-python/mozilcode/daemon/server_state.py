@@ -7,16 +7,14 @@ from mozilcode.agent_events import PermissionResponse
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
-from mozilcode.daemon.active_tasks import (
-    ACTIVE_TASK_RUNNING_ERROR,
-    ActiveTaskRegistry,
-)
+from mozilcode.daemon.active_tasks import ActiveTaskRegistry
 from mozilcode.daemon.agent_task_runner import AgentTaskRunner
 from mozilcode.daemon.background_task_actions import (
     cancel_session_background_task,
     list_session_background_tasks,
 )
 from mozilcode.daemon.compact_actions import run_manual_compact
+from mozilcode.daemon.foreground_task_actions import start_session_task
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore
@@ -182,17 +180,13 @@ class DaemonServer:
 
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
-        self._active_tasks.ensure_available(sid)
-        runtime = await self._runtime_requirements.ensure_runtime(sid)
-        log_list = self.get_event_log(sid)
-        if runtime is None or log_list is None:
-            raise ValueError(f"Session {sid} not found")
-
-        return self._agent_task_runner.start(
-            sid,
-            prompt,
-            runtime.agent,
-            runtime.conversation,
+        return await start_session_task(
+            sid=sid,
+            prompt=prompt,
+            active_tasks=self._active_tasks,
+            runtime_requirements=self._runtime_requirements,
+            get_event_log=self.get_event_log,
+            task_runner=self._agent_task_runner,
         )
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
