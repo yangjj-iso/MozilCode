@@ -4,7 +4,7 @@ import logging
 
 from mozilcode.agent import Agent
 from mozilcode.agent_events import PermissionResponse
-from mozilcode.config import AppConfig, ProviderConfig
+from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.active_tasks import (
@@ -18,10 +18,6 @@ from mozilcode.daemon.background_task_actions import (
 )
 from mozilcode.daemon.compact_actions import run_manual_compact
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.session_status import (
-    build_session_status,
-    command_acceptance_mode,
-)
 from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.responses import (
@@ -39,6 +35,7 @@ from mozilcode.daemon.session_lifecycle_actions import (
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
 )
+from mozilcode.daemon.session_status_actions import build_daemon_session_status
 from mozilcode.daemon.worktree_session_actions import (
     create_session_worktree,
     enter_session_worktree,
@@ -174,11 +171,6 @@ class DaemonServer:
 
     def pending_prompt_events(self, sid: str) -> list[dict]:
         return self._pending_prompts.events(sid)
-
-    def _configured_provider(self) -> ProviderConfig | None:
-        if self.config is None or not self.config.providers:
-            return None
-        return self.config.providers[0]
 
     def _set_agent_work_dir(self, sid: str, agent: Agent, work_dir: str) -> None:
         agent.work_dir = work_dir
@@ -327,40 +319,15 @@ class DaemonServer:
             self._require_deps,
         )
 
-    def _command_acceptance_mode(self, sid: str, agent: Agent | None) -> PermissionMode:
-        configured_mode = (
-            PermissionMode(self.config.permission_mode)
-            if self.config is not None
-            else None
-        )
-        return command_acceptance_mode(
-            agent.permission_mode if agent is not None else None,
-            self._pre_plan_modes.get(sid),
-            configured_mode,
-        )
-
     def status(self, sid: str) -> dict:
-        runtime = self._agents.get(sid)
-        agent = runtime.agent if runtime is not None else None
-        deps = runtime.deps if runtime is not None else None
-        conv = runtime.conversation if runtime is not None else None
-        meta = self._records.meta(sid)
-        provider = deps.provider if deps is not None else self._configured_provider()
-        return build_session_status(
+        return build_daemon_session_status(
             sid=sid,
+            config=self.config,
             server_work_dir=self.work_dir,
-            meta=meta,
-            agent=agent,
-            provider=provider,
-            conversation=conv,
-            configured_permission_mode=(
-                self.config.permission_mode
-                if self.config is not None
-                else "default"
-            ),
-            command_mode=self._command_acceptance_mode(sid, agent),
-            active_task_id=self._active_tasks.task_id(sid),
-            active_task_running=self._active_tasks.is_running(sid),
+            runtime=self._agents.get(sid),
+            records=self._records,
+            active_tasks=self._active_tasks,
+            pre_plan_modes=self._pre_plan_modes,
         )
 
     def cancel_active_task(self, sid: str) -> bool:
