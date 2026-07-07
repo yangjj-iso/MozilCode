@@ -7,9 +7,9 @@ Architecture:
 
     Client (CLI/A2A/local tool)
         │  HTTP POST /api/task        → start a task
-        │  WS   /api/stream/{task_id} → stream events
-        │  HTTP POST /api/permission  → resolve permission request
-        │  HTTP POST /api/askuser     → resolve ask_user request
+        │  WS   /api/stream/{sid}     → stream session events
+        │  HTTP POST /api/permission/{sid}  → resolve permission request
+        │  HTTP POST /api/askuser/{sid}     → resolve ask_user request
         ▼
     DaemonServer (this package)
         │  creates Agent, drives run(), serializes events

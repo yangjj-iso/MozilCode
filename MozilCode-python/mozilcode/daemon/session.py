@@ -20,7 +20,6 @@ class Session:
     session_id: str
     agent: Agent
     conversation: ConversationManager
-    active_task_id: str | None = None
     # Pending permission/askuser futures, keyed by request_id (str(id(future)))
     _pending_futures: dict[str, asyncio.Future] = field(default_factory=dict)
 

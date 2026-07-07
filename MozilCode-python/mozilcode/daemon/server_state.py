@@ -43,6 +43,7 @@ from mozilcode.daemon.task_events import (
     user_message_event,
 )
 from mozilcode.daemon.responses import DaemonActionResult
+from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.workspace_payloads import task_to_dict, worktree_to_dict
 from mozilcode.daemon.worktree_actions import (
     create_and_enter_worktree,
@@ -87,7 +88,7 @@ class DaemonServer:
         self._pre_plan_modes: dict[str, PermissionMode] = {}
         self._session_meta: dict[str, dict] = {}
         self._persisted_count: dict[str, int] = {}
-        self._pending_prompts: dict[str, dict[str, dict]] = {}
+        self._pending_prompts = PendingPromptRegistry()
         self._load_persisted_sessions()
 
     def _load_persisted_sessions(self) -> None:
@@ -230,7 +231,7 @@ class DaemonServer:
         self._persist_events(sid)
 
     def pending_prompt_events(self, sid: str) -> list[dict]:
-        return list(self._pending_prompts.get(sid, {}).values())
+        return self._pending_prompts.events(sid)
 
     def _session_not_found(self) -> DaemonActionResult:
         return DaemonActionResult({"error": "session not found"}, status_code=404)
@@ -359,9 +360,11 @@ class DaemonServer:
                     task_event.future,
                 )
         if task_event.pending_request_id:
-            self._pending_prompts.setdefault(sid, {})[
-                task_event.pending_request_id
-            ] = task_event.message
+            self._pending_prompts.record(
+                sid,
+                task_event.pending_request_id,
+                task_event.message,
+            )
         self._emit(sid, task_event.message)
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
@@ -628,11 +631,7 @@ class DaemonServer:
             return False
         ok = session.resolve_future(request_id, result)
         if ok:
-            prompts = self._pending_prompts.get(sid)
-            if prompts is not None:
-                prompts.pop(request_id, None)
-                if not prompts:
-                    self._pending_prompts.pop(sid, None)
+            self._pending_prompts.discard(sid, request_id)
             self._emit(
                 sid,
                 {
@@ -665,6 +664,6 @@ class DaemonServer:
         self._session_meta.pop(sid, None)
         self._persisted_count.pop(sid, None)
         self._pre_plan_modes.pop(sid, None)
-        self._pending_prompts.pop(sid, None)
+        self._pending_prompts.discard_session(sid)
         self.session_store.delete_session(sid)
         log.info("Session %s closed", sid)

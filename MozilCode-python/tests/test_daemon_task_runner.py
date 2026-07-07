@@ -180,12 +180,14 @@ async def _register_pending_future(
     session = await server.session_mgr.get_session(sid)
     assert session is not None
     session.register_future(request_id, future)
-    server._pending_prompts[sid] = {
-        request_id: {
+    server._pending_prompts.record(
+        sid,
+        request_id,
+        {
             "type": event_type,
             "data": {"request_id": request_id, "resolved": False},
-        }
-    }
+        },
+    )
     return future
 
 
