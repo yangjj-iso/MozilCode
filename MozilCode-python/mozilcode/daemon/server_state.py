@@ -25,7 +25,6 @@ from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
 from mozilcode.daemon.responses import (
     DaemonActionResult,
-    bad_request_result,
     session_not_found_result,
 )
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
@@ -33,13 +32,12 @@ from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
     create_daemon_session_runtime,
 )
-from mozilcode.daemon.workspace_payloads import task_to_dict, worktree_to_dict
-from mozilcode.daemon.worktree_actions import (
-    create_and_enter_worktree,
-    enter_worktree as enter_worktree_action,
-    exit_worktree as exit_worktree_action,
-    list_worktrees_payload,
-    normalize_create_worktree_request,
+from mozilcode.daemon.workspace_payloads import task_to_dict
+from mozilcode.daemon.worktree_session_actions import (
+    create_session_worktree,
+    enter_session_worktree,
+    exit_session_worktree,
+    list_session_worktrees,
 )
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
@@ -307,12 +305,7 @@ class DaemonServer:
         )
 
     async def list_worktrees(self, sid: str) -> DaemonActionResult:
-        deps, error = await self._require_deps(sid)
-        if error is not None:
-            return error
-        assert deps is not None
-
-        return DaemonActionResult(list_worktrees_payload(deps.worktree_manager))
+        return await list_session_worktrees(sid, self._require_deps)
 
     async def create_worktree(
         self,
@@ -320,46 +313,23 @@ class DaemonServer:
         name: str,
         base_branch: str = "HEAD",
     ) -> DaemonActionResult:
-        try:
-            name, base_branch = normalize_create_worktree_request(name, base_branch)
-        except ValueError as e:
-            return bad_request_result(str(e))
-
-        agent, deps, error = await self._require_agent_and_deps(sid)
-        if error is not None:
-            return error
-        assert agent is not None and deps is not None
-
-        try:
-            entry = await create_and_enter_worktree(
-                deps.worktree_manager,
-                name,
-                base_branch,
-            )
-            self._set_agent_work_dir(sid, agent, entry.work_dir)
-        except Exception as e:
-            return bad_request_result(str(e))
-
-        return DaemonActionResult(
-            self._status_payload(
-                sid,
-                worktree=worktree_to_dict(entry.worktree, name),
-            )
+        return await create_session_worktree(
+            sid,
+            name,
+            base_branch,
+            require_agent_and_deps=self._require_agent_and_deps,
+            set_agent_work_dir=self._set_agent_work_dir,
+            status_provider=self.status,
         )
 
     async def enter_worktree(self, sid: str, name: str) -> DaemonActionResult:
-        agent, deps, error = await self._require_agent_and_deps(sid)
-        if error is not None:
-            return error
-        assert agent is not None and deps is not None
-
-        try:
-            entry = await enter_worktree_action(deps.worktree_manager, name)
-            self._set_agent_work_dir(sid, agent, entry.work_dir)
-        except Exception as e:
-            return bad_request_result(str(e))
-
-        return DaemonActionResult(self._status_payload(sid, entered=True))
+        return await enter_session_worktree(
+            sid,
+            name,
+            require_agent_and_deps=self._require_agent_and_deps,
+            set_agent_work_dir=self._set_agent_work_dir,
+            status_provider=self.status,
+        )
 
     async def exit_worktree(
         self,
@@ -368,23 +338,14 @@ class DaemonServer:
         remove: bool = False,
         discard: bool = False,
     ) -> DaemonActionResult:
-        agent, deps, error = await self._require_agent_and_deps(sid)
-        if error is not None:
-            return error
-        assert agent is not None and deps is not None
-
-        manager = deps.worktree_manager
-        try:
-            entry = await exit_worktree_action(
-                manager,
-                remove=remove,
-                discard=discard,
-            )
-            self._set_agent_work_dir(sid, agent, entry.work_dir)
-        except Exception as e:
-            return bad_request_result(str(e))
-
-        return DaemonActionResult(self._status_payload(sid, exited=True))
+        return await exit_session_worktree(
+            sid,
+            remove=remove,
+            discard=discard,
+            require_agent_and_deps=self._require_agent_and_deps,
+            set_agent_work_dir=self._set_agent_work_dir,
+            status_provider=self.status,
+        )
 
     async def list_background_tasks(self, sid: str) -> DaemonActionResult:
         deps, error = await self._require_deps(sid)
