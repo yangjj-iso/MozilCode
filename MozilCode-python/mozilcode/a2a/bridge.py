@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -17,42 +15,20 @@ from mozilcode.a2a.protocol import (
     should_wait,
     task_id_from_params,
 )
-
-
-TASK_SUBMITTED = "TASK_STATE_SUBMITTED"
-TASK_WORKING = "TASK_STATE_WORKING"
-TASK_INPUT_REQUIRED = "TASK_STATE_INPUT_REQUIRED"
-TASK_COMPLETED = "TASK_STATE_COMPLETED"
-TASK_FAILED = "TASK_STATE_FAILED"
-TASK_CANCELED = "TASK_STATE_CANCELED"
-
-TERMINAL_STATES = {TASK_COMPLETED, TASK_FAILED, TASK_CANCELED}
-
-
-@dataclass
-class A2ATask:
-    id: str
-    context_id: str
-    session_id: str
-    internal_task_id: str
-    prompt: str
-    source: str = "a2a"
-    state: str = TASK_SUBMITTED
-    status_message: str = ""
-    created_at: str = field(default_factory=lambda: _iso_now())
-    updated_at: str = field(default_factory=lambda: _iso_now())
-    cursor: int = 0
-    output_parts: list[str] = field(default_factory=list)
-    error: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def output(self) -> str:
-        return "".join(self.output_parts).strip()
-
-
-def _iso_now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+# Keep task state symbols importable from mozilcode.a2a.bridge for compatibility.
+from mozilcode.a2a.tasks import (
+    A2ATask,
+    TASK_CANCELED,
+    TASK_COMPLETED,
+    TASK_FAILED,
+    TASK_INPUT_REQUIRED,
+    TASK_SUBMITTED,
+    TASK_WORKING,
+    TERMINAL_STATES,
+    refresh_task_from_log,
+    set_task_state,
+    task_to_a2a_payload,
+)
 
 
 def _package_version() -> str:
@@ -60,92 +36,6 @@ def _package_version() -> str:
         return version("mozilcode")
     except PackageNotFoundError:
         return "0.2.0"
-
-
-def _set_task_state(
-    task: A2ATask,
-    state: str,
-    *,
-    status_message: str | None = None,
-    error: str | None = None,
-) -> None:
-    task.state = state
-    if status_message is not None:
-        task.status_message = status_message
-    if error is not None:
-        task.error = error
-    task.updated_at = _iso_now()
-
-
-def _event_applies_to_task(task: A2ATask, event: dict[str, Any]) -> bool:
-    event_task_id = event.get("task_id")
-    return not event_task_id or event_task_id == task.internal_task_id
-
-
-def _event_data(event: dict[str, Any]) -> dict[str, Any]:
-    data = event.get("data")
-    return data if isinstance(data, dict) else {}
-
-
-def _apply_task_log_event(task: A2ATask, event: object) -> None:
-    if task.state in TERMINAL_STATES:
-        return
-    if event is None:
-        _set_task_state(
-            task,
-            TASK_FAILED,
-            status_message="Session closed.",
-            error="Session closed.",
-        )
-        return
-    if not isinstance(event, dict):
-        return
-    if not _event_applies_to_task(task, event):
-        return
-
-    event_type = event.get("type")
-    data = _event_data(event)
-    if event_type == "StreamText":
-        text = data.get("text", "")
-        if text:
-            task.output_parts.append(str(text))
-            _set_task_state(task, TASK_WORKING)
-    elif event_type == "ErrorEvent":
-        message = str(data.get("message") or "Agent task failed.")
-        _set_task_state(
-            task,
-            TASK_FAILED,
-            status_message=message,
-            error=message,
-        )
-    elif event_type == "TaskCancelled":
-        _set_task_state(
-            task,
-            TASK_CANCELED,
-            status_message=str(data.get("message") or "Task cancelled."),
-        )
-    elif event_type in {"PermissionRequest", "AskUserRequest"}:
-        if task.state not in TERMINAL_STATES:
-            _set_task_state(
-                task,
-                TASK_INPUT_REQUIRED,
-                status_message=(
-                    "The task requires interactive input from a "
-                    "MozilCode daemon client."
-                ),
-            )
-    elif event_type == "LoopComplete":
-        if task.state not in {TASK_FAILED, TASK_CANCELED}:
-            _set_task_state(task, TASK_COMPLETED, status_message="")
-
-
-def _task_metadata(task: A2ATask) -> dict[str, Any]:
-    return {
-        **task.metadata,
-        "source": task.source,
-        "session_id": task.session_id,
-        "internal_task_id": task.internal_task_id,
-    }
 
 
 class A2ABridge:
@@ -165,7 +55,10 @@ class A2ABridge:
         base = base_url.rstrip("/")
         endpoint = f"{base}/a2a/rpc" if base else "/a2a/rpc"
         model = ""
-        if getattr(self._server, "config", None) is not None and self._server.config.providers:
+        if (
+            getattr(self._server, "config", None) is not None
+            and self._server.config.providers
+        ):
             model = self._server.config.providers[0].model
         return {
             "protocolVersion": "1.0.0",
@@ -348,7 +241,7 @@ class A2ABridge:
         if task.state not in TERMINAL_STATES:
             cancelled = self._server.cancel_active_task(task.session_id)
             if cancelled:
-                _set_task_state(
+                set_task_state(
                     task,
                     TASK_CANCELED,
                     status_message="Task cancellation requested.",
@@ -357,10 +250,13 @@ class A2ABridge:
 
     async def wait_for_task(self, task_id: str, timeout: float | None = None) -> A2ATask:
         task = self.get_task(task_id)
-        deadline = time.monotonic() + (timeout if timeout is not None else self._default_wait_timeout)
+        timeout_seconds = (
+            timeout if timeout is not None else self._default_wait_timeout
+        )
+        deadline = time.monotonic() + timeout_seconds
         while task.state not in TERMINAL_STATES:
             if time.monotonic() >= deadline:
-                _set_task_state(
+                set_task_state(
                     task,
                     task.state,
                     status_message="Timed out waiting for task completion.",
@@ -372,59 +268,10 @@ class A2ABridge:
 
     def task_to_a2a(self, task: A2ATask) -> dict[str, Any]:
         self._refresh_task_from_log(task)
-        status: dict[str, Any] = {
-            "state": task.state,
-            "timestamp": task.updated_at,
-        }
-        if task.status_message:
-            status["message"] = {
-                "role": "ROLE_AGENT",
-                "parts": [{"kind": "text", "text": task.status_message}],
-            }
-        out: dict[str, Any] = {
-            "kind": "task",
-            "id": task.id,
-            "contextId": task.context_id,
-            "status": status,
-            "history": [
-                {
-                    "role": "ROLE_USER",
-                    "parts": [{"kind": "text", "text": task.prompt}],
-                }
-            ],
-            "metadata": _task_metadata(task),
-        }
-        if task.output:
-            out["artifacts"] = [
-                {
-                    "artifactId": "response",
-                    "name": "MozilCode response",
-                    "parts": [{"kind": "text", "text": task.output}],
-                }
-            ]
-        if task.error:
-            out.setdefault("metadata", {})["error"] = task.error
-        return out
+        return task_to_a2a_payload(task)
 
     def _refresh_task_from_log(self, task: A2ATask) -> None:
-        log_list = self._server.get_event_log(task.session_id)
-        if log_list is None:
-            if task.state not in TERMINAL_STATES:
-                _set_task_state(
-                    task,
-                    TASK_FAILED,
-                    status_message="Session disappeared.",
-                    error="Session disappeared.",
-                )
-            return
-
-        if task.cursor > len(log_list):
-            task.cursor = len(log_list)
-            return
-
-        for ev in log_list[task.cursor:]:
-            _apply_task_log_event(task, ev)
-        task.cursor = len(log_list)
+        refresh_task_from_log(task, self._server.get_event_log(task.session_id))
 
     def _json_error(
         self,
