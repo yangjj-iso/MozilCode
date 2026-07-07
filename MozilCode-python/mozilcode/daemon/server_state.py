@@ -13,7 +13,7 @@ from mozilcode.agent import (
     PermissionResponse,
     UsageEvent,
 )
-from mozilcode.config import AppConfig
+from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent_factory import AgentDeps, create_agent_from_config
 from mozilcode.context import compute_compact_threshold
@@ -241,60 +241,78 @@ class DaemonServer:
     def _status_payload(self, sid: str, **payload: object) -> dict:
         return {**payload, "status": self.status(sid)}
 
+    def _configured_provider(self) -> ProviderConfig | None:
+        if self.config is None or not self.config.providers:
+            return None
+        return self.config.providers[0]
+
     def _set_agent_work_dir(self, sid: str, agent: Agent, work_dir: str) -> None:
         agent.work_dir = work_dir
         self.update_session_work_dir(sid, work_dir)
+
+    async def _ensure_runtime(self, sid: str) -> DaemonSessionRuntime | None:
+        if not await self.ensure_agent(sid):
+            return None
+        return self._agents.get(sid)
+
+    async def _require_runtime(
+        self,
+        sid: str,
+    ) -> tuple[DaemonSessionRuntime | None, DaemonActionResult | None]:
+        runtime = await self._ensure_runtime(sid)
+        if runtime is None:
+            return None, self._session_not_found()
+        return runtime, None
 
     async def _require_deps(
         self,
         sid: str,
     ) -> tuple[AgentDeps | None, DaemonActionResult | None]:
-        if not await self.ensure_agent(sid):
-            return None, self._session_not_found()
-        deps = self.get_deps(sid)
-        if deps is None:
-            return None, self._session_not_found()
-        return deps, None
+        runtime, error = await self._require_runtime(sid)
+        if error is not None:
+            return None, error
+        assert runtime is not None
+        return runtime.deps, None
 
     async def _require_agent_and_deps(
         self,
         sid: str,
     ) -> tuple[Agent | None, AgentDeps | None, DaemonActionResult | None]:
-        deps, error = await self._require_deps(sid)
+        runtime, error = await self._require_runtime(sid)
         if error is not None:
             return None, None, error
-        agent = self.get_agent(sid)
-        if agent is None or deps is None:
-            return None, None, self._session_not_found()
-        return agent, deps, None
+        assert runtime is not None
+        return runtime.agent, runtime.deps, None
 
     async def _require_agent_and_conversation(
         self,
         sid: str,
     ) -> tuple[Agent | None, ConversationManager | None, DaemonActionResult | None]:
-        if not await self.ensure_agent(sid):
-            return None, None, self._session_not_found()
-        agent = self.get_agent(sid)
-        conv = self.get_conversation(sid)
-        if agent is None or conv is None:
-            return None, None, self._session_not_found()
-        return agent, conv, None
+        runtime, error = await self._require_runtime(sid)
+        if error is not None:
+            return None, None, error
+        assert runtime is not None
+        return runtime.agent, runtime.conversation, None
 
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
         self._active_tasks.ensure_available(sid)
 
-        await self.ensure_agent(sid)
-        agent = self.get_agent(sid)
-        conv = self.get_conversation(sid)
+        runtime = await self._ensure_runtime(sid)
         log_list = self.get_event_log(sid)
-        if agent is None or conv is None or log_list is None:
+        if runtime is None or log_list is None:
             raise ValueError(f"Session {sid} not found")
 
         self._set_session_title_from_prompt(sid, prompt)
         task_id = uuid.uuid4().hex[:8]
         task = asyncio.create_task(
-            self._run_agent_task(sid, task_id, prompt, agent, conv),
+            self._run_agent_task(
+                sid,
+                task_id,
+                prompt,
+                runtime.agent,
+                runtime.conversation,
+            ),
             name=f"agent-{sid}-{task_id}",
         )
         self._active_tasks.register(sid, task_id, task)
@@ -550,11 +568,12 @@ class DaemonServer:
         )
 
     def status(self, sid: str) -> dict:
-        agent = self.get_agent(sid)
-        deps = self.get_deps(sid)
-        conv = self.get_conversation(sid)
+        runtime = self._agents.get(sid)
+        agent = runtime.agent if runtime is not None else None
+        deps = runtime.deps if runtime is not None else None
+        conv = runtime.conversation if runtime is not None else None
         meta = self._session_meta.get(sid, {})
-        provider = deps.provider if deps is not None else (self.config.providers[0] if self.config and self.config.providers else None)
+        provider = deps.provider if deps is not None else self._configured_provider()
         return build_session_status(
             sid=sid,
             server_work_dir=self.work_dir,
