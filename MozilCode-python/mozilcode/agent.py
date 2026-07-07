@@ -45,6 +45,8 @@ from mozilcode.agent_tool_execution import (
     ToolBatch,
     _AuthResult,
     _ToolExecResult,
+    execute_direct_tool_call,
+    execute_validated_tool,
     partition_tool_calls,
 )
 from mozilcode.agent_tool_authorization import authorize_tool_call
@@ -713,44 +715,9 @@ class Agent:
     ) -> _ToolExecResult:
         # 纯执行器：不做权限检查 / hooks。仅供并发批处理使用，授权预检由
         # 调用方（Agent.run 的并发分支通过 _authorize_tool）在执行前完成。
-        tool = self.registry.get(tc.tool_name)
-        start = time.monotonic()
-
-        if tool is None:
-            return _ToolExecResult(
-                tool_id=tc.tool_id,
-                tool_name=tc.tool_name,
-                result=ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True),
-                elapsed=time.monotonic() - start,
-                is_unknown=True,
-            )
-
-        if not self.registry.is_enabled(tc.tool_name):
-            return _ToolExecResult(
-                tool_id=tc.tool_id,
-                tool_name=tc.tool_name,
-                result=ToolResult(output=f"Error: tool '{tc.tool_name}' is disabled", is_error=True),
-                elapsed=time.monotonic() - start,
-                is_unknown=False,
-            )
-
-        try:
-            params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
-        except ValidationError as e:
-            result = ToolResult(output=f"Parameter validation error: {e}", is_error=True)
-        except Exception as e:
-            result = ToolResult(output=f"Tool execution error: {e}", is_error=True)
-
-        self._snapshot_for_recovery(tc, result)
-
-        return _ToolExecResult(
-            tool_id=tc.tool_id,
-            tool_name=tc.tool_name,
-            result=result,
-            elapsed=time.monotonic() - start,
-            is_unknown=False,
-        )
+        exec_result = await execute_direct_tool_call(self.registry, tc)
+        self._snapshot_for_recovery(tc, exec_result.result)
+        return exec_result
 
 
     async def _execute_batch_parallel(
@@ -1150,17 +1117,7 @@ class Agent:
                         is_error=True,
                     )
 
-        try:
-            params = tool.params_model.model_validate(tc.arguments)
-            result = await tool.execute(params)
-        except ValidationError as e:
-            result = ToolResult(
-                output=f"Parameter validation error: {e}", is_error=True
-            )
-        except Exception as e:
-            result = ToolResult(
-                output=f"Tool execution error: {e}", is_error=True
-            )
+        result = await execute_validated_tool(tool, tc.arguments)
 
         if self.hook_engine:
             file_path = self._infer_file_path(tc.arguments)

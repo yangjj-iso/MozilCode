@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
 from mozilcode.tools import ToolRegistry
-from mozilcode.tools.base import ToolCallComplete, ToolResult
+from mozilcode.tools.base import Tool, ToolCallComplete, ToolResult
 
 
 @dataclass
@@ -50,6 +53,57 @@ class _AuthResult:
     approved: bool
     error: ToolResult | None = None
     is_unknown: bool = False
+
+
+async def execute_validated_tool(tool: Tool, arguments: dict[str, Any]) -> ToolResult:
+    try:
+        params = tool.params_model.model_validate(arguments)
+        return await tool.execute(params)
+    except ValidationError as e:
+        return ToolResult(output=f"Parameter validation error: {e}", is_error=True)
+    except Exception as e:
+        return ToolResult(output=f"Tool execution error: {e}", is_error=True)
+
+
+async def execute_direct_tool_call(
+    registry: ToolRegistry,
+    tool_call: ToolCallComplete,
+) -> _ToolExecResult:
+    start = time.monotonic()
+    tool = registry.get(tool_call.tool_name)
+
+    if tool is None:
+        return _ToolExecResult(
+            tool_id=tool_call.tool_id,
+            tool_name=tool_call.tool_name,
+            result=ToolResult(
+                output=f"Error: unknown tool '{tool_call.tool_name}'",
+                is_error=True,
+            ),
+            elapsed=time.monotonic() - start,
+            is_unknown=True,
+        )
+
+    if not registry.is_enabled(tool_call.tool_name):
+        return _ToolExecResult(
+            tool_id=tool_call.tool_id,
+            tool_name=tool_call.tool_name,
+            result=ToolResult(
+                output=f"Error: tool '{tool_call.tool_name}' is disabled",
+                is_error=True,
+            ),
+            elapsed=time.monotonic() - start,
+            is_unknown=False,
+        )
+
+    result = await execute_validated_tool(tool, tool_call.arguments)
+    return _ToolExecResult(
+        tool_id=tool_call.tool_id,
+        tool_name=tool_call.tool_name,
+        result=result,
+        elapsed=time.monotonic() - start,
+        is_unknown=False,
+    )
 
 
 class StreamingExecutor:
