@@ -47,6 +47,7 @@ from mozilcode.agent_tool_execution import (
     _ToolExecResult,
     partition_tool_calls,
 )
+from mozilcode.agent_tool_authorization import authorize_tool_call
 from mozilcode.client import LLMClient
 from mozilcode.context import (
     CompactCircuitBreaker,
@@ -767,61 +768,13 @@ class Agent:
         但不执行工具本身。ask 决策通过 yield PermissionRequest 交回调用方处理，
         最终 yield 一个 _AuthResult 表示是否放行。
         """
-        tool = self.registry.get(tc.tool_name)
-        if tool is None:
-            yield _AuthResult(
-                False,
-                ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True),
-                is_unknown=True,
-            )
-            return
-
-        if not self.registry.is_enabled(tc.tool_name):
-            yield _AuthResult(
-                False,
-                ToolResult(
-                    output=f"Error: tool '{tc.tool_name}' is disabled in current mode",
-                    is_error=True,
-                ),
-            )
-            return
-
-        if self.permission_checker:
-            decision = self.permission_checker.check(tool, tc.arguments)
-
-            if decision.effect == "deny":
-                yield _AuthResult(
-                    False,
-                    ToolResult(output=f"Permission denied: {decision.reason}", is_error=True),
-                )
-                return
-
-            if decision.effect == "ask":
-                loop = asyncio.get_running_loop()
-                future: asyncio.Future[PermissionResponse] = loop.create_future()
-                desc = self._build_permission_description(tc)
-                yield PermissionRequest(
-                    tool_name=tc.tool_name,
-                    description=desc,
-                    future=future,
-                )
-                response = await future
-
-                if response == PermissionResponse.DENY:
-                    yield _AuthResult(
-                        False,
-                        ToolResult(output="Permission denied: 用户拒绝了此操作", is_error=True),
-                    )
-                    return
-
-                if response == PermissionResponse.ALLOW_ALWAYS:
-                    from mozilcode.permissions.rules import Rule, extract_content
-                    content = extract_content(tc.tool_name, tc.arguments)
-                    pattern = f"{content[:60]}*" if len(content) > 60 else f"{content}*"
-                    rule = Rule(tool_name=tc.tool_name, pattern=pattern, effect="allow")
-                    self.permission_checker.rule_engine.append_local_rule(rule)
-
-        yield _AuthResult(True, None)
+        async for item in authorize_tool_call(
+            registry=self.registry,
+            permission_checker=self.permission_checker,
+            tool_call=tc,
+            permission_description=self._build_permission_description(tc),
+        ):
+            yield item
 
     async def _execute_tool(
         self, tc: ToolCallComplete
