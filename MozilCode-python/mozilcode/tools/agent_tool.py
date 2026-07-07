@@ -15,6 +15,16 @@ from mozilcode.agents.defaults import (
     worktree_agent_def,
 )
 from mozilcode.tools import rebase_file_tools
+from mozilcode.tools.agent_tool_messages import (
+    background_launch_message,
+    empty_subagent_output,
+    fork_disabled_message,
+    pane_spawn_failed_message,
+    pane_teammate_launch_message,
+    teammate_launch_message,
+    unknown_agent_type_message,
+    worktree_preserved_suffix,
+)
 from mozilcode.tools.agent_tool_support import (
     create_subagent_permission_checker,
     unique_agent_name,
@@ -126,17 +136,17 @@ class AgentTool(Tool):
             definition = self._agent_loader.get(p.subagent_type)
             if definition is None:
                 return ToolResult(
-                    output=f"Unknown agent type: '{p.subagent_type}'. "
-                    f"Available types: {', '.join(t for t, _ in self._agent_loader.list_agents())}",
+                    output=unknown_agent_type_message(
+                        p.subagent_type,
+                        self._agent_loader.list_agents(),
+                    ),
                     is_error=True,
                 )
             conversation = ConversationManager()
         else:
             if not self._enable_fork:
                 return ToolResult(
-                    output="Fork mode is not enabled. "
-                    "Set 'enable_fork: true' in config.yaml to use fork, "
-                    "or specify a subagent_type parameter.",
+                    output=fork_disabled_message(),
                     is_error=True,
                 )
             try:
@@ -220,12 +230,11 @@ class AgentTool(Tool):
                 fork_conversation=conversation if is_fork else None,
             )
             return ToolResult(
-                output=f"Sub-agent launched in background.\n"
-                f"Task ID: {task_id}\n"
-                f"Agent: {agent_name}\n"
-                f"Type: {definition.agent_type}\n"
-                f"The system will notify automatically when it completes.\n"
-                f"Do NOT wait, sleep, or poll. Report the task ID to the user and move on.",
+                output=background_launch_message(
+                    task_id=task_id,
+                    agent_name=agent_name,
+                    agent_type=definition.agent_type,
+                ),
             )
 
         # 前台同步执行
@@ -247,7 +256,7 @@ class AgentTool(Tool):
         )
         self._trace_manager.complete(trace_node.agent_id, "completed")
 
-        return ToolResult(output=result_text or "(sub-agent returned no output)")
+        return ToolResult(output=empty_subagent_output(result_text))
 
     async def _execute_as_teammate(self, p: AgentToolParams) -> ToolResult:
         if self._team_manager is None:
@@ -280,8 +289,11 @@ class AgentTool(Tool):
             defn = self._agent_loader.get(p.subagent_type)
             if defn is None:
                 return ToolResult(
-                    output=f"Unknown agent type: '{p.subagent_type}'. "
-                    f"Available: {', '.join(t for t, _ in self._agent_loader.list_agents())}",
+                    output=unknown_agent_type_message(
+                        p.subagent_type,
+                        self._agent_loader.list_agents(),
+                        available_label="Available",
+                    ),
                     is_error=True,
                 )
             definition = defn
@@ -396,13 +408,13 @@ class AgentTool(Tool):
         )
 
         return ToolResult(
-            output=(
-                f"Teammate '{teammate_name}' spawned in team '{p.team_name}'.\n"
-                f"Agent ID: {agent_id}\n"
-                f"Backend: {backend.value}\n"
-                f"Worktree: {wt.path}\n"
-                f"Task ID: {task_id}\n"
-                f"The system will notify when it completes."
+            output=teammate_launch_message(
+                teammate_name=teammate_name,
+                team_name=p.team_name,
+                agent_id=agent_id,
+                backend=backend.value,
+                worktree_path=wt.path,
+                task_id=task_id,
             )
         )
 
@@ -443,17 +455,17 @@ class AgentTool(Tool):
         except Exception as e:
             log.warning("Pane spawn failed, falling back to in-process: %s", e)
             return ToolResult(
-                output=f"Pane spawn failed ({e}), teammate not started. Retry or set teammate_mode to in-process.",
+                output=pane_spawn_failed_message(e),
                 is_error=True,
             )
 
         return ToolResult(
-            output=(
-                f"Teammate '{teammate_name}' spawned in team '{p.team_name}'.\n"
-                f"Agent ID: {agent_id}\n"
-                f"Backend: {backend.value} (pane)\n"
-                f"Worktree: {wt.path}\n"
-                f"The teammate is running in an independent process."
+            output=pane_teammate_launch_message(
+                teammate_name=teammate_name,
+                team_name=p.team_name,
+                agent_id=agent_id,
+                backend=backend.value,
+                worktree_path=wt.path,
             )
         )
 
@@ -496,8 +508,10 @@ class AgentTool(Tool):
             definition = self._agent_loader.get(p.subagent_type)
             if definition is None:
                 return ToolResult(
-                    output=f"Unknown agent type: '{p.subagent_type}'. "
-                    f"Available types: {', '.join(t for t, _ in self._agent_loader.list_agents())}",
+                    output=unknown_agent_type_message(
+                        p.subagent_type,
+                        self._agent_loader.list_agents(),
+                    ),
                     is_error=True,
                 )
         else:
@@ -567,8 +581,9 @@ class AgentTool(Tool):
 
         cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
         if cleanup.kept:
-            result_text = (result_text or "") + (
-                f"\n[Worktree preserved at {cleanup.path}, branch {cleanup.branch}]"
+            result_text = (result_text or "") + worktree_preserved_suffix(
+                cleanup.path,
+                cleanup.branch,
             )
 
-        return ToolResult(output=result_text or "(sub-agent returned no output)")
+        return ToolResult(output=empty_subagent_output(result_text))
