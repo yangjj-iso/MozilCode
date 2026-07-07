@@ -6,6 +6,7 @@ from typing import Any
 
 from starlette.routing import BaseRoute, Route, WebSocketRoute
 
+from mozilcode.removed_capabilities import assert_no_removed_route_paths
 from mozilcode.daemon.a2a_routes import (
     a2a_agent_card,
     a2a_message_send,
@@ -94,6 +95,9 @@ WEBSOCKET_ROUTES: tuple[WebSocketRouteSpec, ...] = (
 
 
 def build_routes() -> list[BaseRoute]:
+    assert_no_removed_route_paths(
+        [spec.path for spec in HTTP_ROUTES] + [spec.path for spec in WEBSOCKET_ROUTES]
+    )
     routes: list[BaseRoute] = [
         Route(spec.path, spec.endpoint, methods=list(spec.methods))
         for spec in HTTP_ROUTES

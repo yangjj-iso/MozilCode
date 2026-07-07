@@ -7,7 +7,10 @@ import pytest
 from mozilcode.config import ConfigError, load_config
 from mozilcode.removed_capabilities import (
     REMOVED_CONFIG_SECTIONS,
+    assert_no_removed_route_paths,
     find_removed_config_sections,
+    find_removed_route_paths,
+    removed_route_terms,
 )
 from mozilcode.validator import (
     REMOVED_CONFIG_SECTIONS as VALIDATOR_REMOVED_CONFIG_SECTIONS,
@@ -197,6 +200,22 @@ def test_removed_config_sections_are_reported_in_stable_order() -> None:
 
 def test_validator_keeps_removed_config_sections_export() -> None:
     assert VALIDATOR_REMOVED_CONFIG_SECTIONS is REMOVED_CONFIG_SECTIONS
+
+
+def test_removed_route_terms_are_matched_as_path_tokens() -> None:
+    assert removed_route_terms("/api/cloud/status") == ("cloud",)
+    assert removed_route_terms("/api/session/{sid}/status") == ()
+
+
+def test_removed_route_paths_are_reported_in_stable_order() -> None:
+    assert find_removed_route_paths(
+        ["/api/health", "/cloud", "/api/settings/gui", "/api/session/{sid}"]
+    ) == ("/cloud", "/api/settings/gui")
+
+
+def test_removed_route_guard_rejects_product_surfaces() -> None:
+    with pytest.raises(RuntimeError, match="Removed GUI/cloud/bot route"):
+        assert_no_removed_route_paths(["/api/health", "/api/auth/login"])
 
 
 @pytest.mark.parametrize("section", sorted(REMOVED_CONFIG_SECTIONS))

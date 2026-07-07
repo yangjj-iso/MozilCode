@@ -12,6 +12,11 @@ from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime
 from mozilcode.daemon.session_store import SessionStore
 from mozilcode.permissions.modes import PermissionMode
+from mozilcode.removed_capabilities import (
+    REMOVED_APP_SHELL_PATHS,
+    REMOVED_MANAGEMENT_PATHS,
+    find_removed_route_paths,
+)
 
 
 class _FakeRegistry:
@@ -115,7 +120,7 @@ def test_app_does_not_mount_gui_or_cloud_shells(tmp_path):
     assert app.user_middleware == []
     assert [route for route in app.routes if isinstance(route, Mount)] == []
     assert {route.path for route in app.routes if isinstance(route, Route)}.isdisjoint(
-        {"/", "/app", "/cloud", "/login", "/models"}
+        REMOVED_APP_SHELL_PATHS
     )
 
 
@@ -225,28 +230,12 @@ def test_route_registry_keeps_local_daemon_surface_only():
 
 
 def test_route_registry_excludes_gui_cloud_and_bot_management():
-    forbidden_terms = {
-        "auth",
-        "cloud",
-        "frontend",
-        "gui",
-        "hosted",
-        "login",
-        "official",
-        "qqbot",
-        "settings",
-        "telegrambot",
-    }
     route_paths = [
         spec.path.lower()
         for spec in (*HTTP_ROUTES, *WEBSOCKET_ROUTES)
     ]
 
-    assert [
-        path
-        for path in route_paths
-        if any(term in path for term in forbidden_terms)
-    ] == []
+    assert find_removed_route_paths(route_paths) == ()
 
 
 def test_removed_gui_cloud_and_bot_routes_are_not_served(tmp_path):
@@ -258,17 +247,8 @@ def test_removed_gui_cloud_and_bot_routes_are_not_served(tmp_path):
     )
     app = _create_app(provider, tmp_path)
 
-    removed_paths = [
-        "/api/auth/login",
-        "/api/cloud/status",
-        "/api/models/official",
-        "/api/settings/gui",
-        "/api/settings/qqbot",
-        "/api/settings/telegrambot",
-    ]
-
     with TestClient(app) as client:
-        for path in removed_paths:
+        for path in sorted(REMOVED_MANAGEMENT_PATHS):
             response = client.post(path, json={})
             assert response.status_code == 404, path
 

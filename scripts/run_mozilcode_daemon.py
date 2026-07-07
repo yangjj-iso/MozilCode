@@ -6,7 +6,7 @@ from mozilcode.daemon.server import run_daemon
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run MozilCode daemon with explicit deployment options.")
+    parser = argparse.ArgumentParser(description="Run the local MozilCode daemon.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7800)
     parser.add_argument("--work-dir", default=None)
