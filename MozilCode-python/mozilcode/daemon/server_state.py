@@ -22,7 +22,6 @@ from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore
 from mozilcode.daemon.responses import (
     DaemonActionResult,
-    session_not_found_result,
 )
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
@@ -35,6 +34,7 @@ from mozilcode.daemon.session_lifecycle_actions import (
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
 )
+from mozilcode.daemon.session_runtime_requirements import SessionRuntimeRequirements
 from mozilcode.daemon.session_status_actions import build_daemon_session_status
 from mozilcode.daemon.worktree_session_actions import (
     create_session_worktree,
@@ -69,6 +69,10 @@ class DaemonServer:
         self._active_tasks = ActiveTaskRegistry()
         self._tasks = self._active_tasks.tasks
         self._active_task_ids = self._active_tasks.task_ids
+        self._runtime_requirements = SessionRuntimeRequirements(
+            ensure_agent=self.ensure_agent,
+            runtimes=self._agents,
+        )
         self._pre_plan_modes: dict[str, PermissionMode] = {}
         self._session_meta = self._records.session_meta
         self._persisted_count = self._records.persisted_count
@@ -176,54 +180,10 @@ class DaemonServer:
         agent.work_dir = work_dir
         self.update_session_work_dir(sid, work_dir)
 
-    async def _ensure_runtime(self, sid: str) -> DaemonSessionRuntime | None:
-        if not await self.ensure_agent(sid):
-            return None
-        return self._agents.get(sid)
-
-    async def _require_runtime(
-        self,
-        sid: str,
-    ) -> tuple[DaemonSessionRuntime | None, DaemonActionResult | None]:
-        runtime = await self._ensure_runtime(sid)
-        if runtime is None:
-            return None, session_not_found_result()
-        return runtime, None
-
-    async def _require_deps(
-        self,
-        sid: str,
-    ) -> tuple[AgentDeps | None, DaemonActionResult | None]:
-        runtime, error = await self._require_runtime(sid)
-        if error is not None:
-            return None, error
-        assert runtime is not None
-        return runtime.deps, None
-
-    async def _require_agent_and_deps(
-        self,
-        sid: str,
-    ) -> tuple[Agent | None, AgentDeps | None, DaemonActionResult | None]:
-        runtime, error = await self._require_runtime(sid)
-        if error is not None:
-            return None, None, error
-        assert runtime is not None
-        return runtime.agent, runtime.deps, None
-
-    async def _require_agent_and_conversation(
-        self,
-        sid: str,
-    ) -> tuple[Agent | None, ConversationManager | None, DaemonActionResult | None]:
-        runtime, error = await self._require_runtime(sid)
-        if error is not None:
-            return None, None, error
-        assert runtime is not None
-        return runtime.agent, runtime.conversation, None
-
     async def start_task(self, sid: str, prompt: str) -> str:
         """Start agent.run() as a background task. Returns task_id."""
         self._active_tasks.ensure_available(sid)
-        runtime = await self._ensure_runtime(sid)
+        runtime = await self._runtime_requirements.ensure_runtime(sid)
         log_list = self.get_event_log(sid)
         if runtime is None or log_list is None:
             raise ValueError(f"Session {sid} not found")
@@ -248,7 +208,9 @@ class DaemonServer:
         )
 
     async def manual_compact(self, sid: str) -> DaemonActionResult:
-        agent, conv, error = await self._require_agent_and_conversation(sid)
+        agent, conv, error = (
+            await self._runtime_requirements.require_agent_and_conversation(sid)
+        )
         if error is not None:
             return error
         assert agent is not None and conv is not None
@@ -263,7 +225,10 @@ class DaemonServer:
         )
 
     async def list_worktrees(self, sid: str) -> DaemonActionResult:
-        return await list_session_worktrees(sid, self._require_deps)
+        return await list_session_worktrees(
+            sid,
+            self._runtime_requirements.require_deps,
+        )
 
     async def create_worktree(
         self,
@@ -275,7 +240,7 @@ class DaemonServer:
             sid,
             name,
             base_branch,
-            require_agent_and_deps=self._require_agent_and_deps,
+            require_agent_and_deps=self._runtime_requirements.require_agent_and_deps,
             set_agent_work_dir=self._set_agent_work_dir,
             status_provider=self.status,
         )
@@ -284,7 +249,7 @@ class DaemonServer:
         return await enter_session_worktree(
             sid,
             name,
-            require_agent_and_deps=self._require_agent_and_deps,
+            require_agent_and_deps=self._runtime_requirements.require_agent_and_deps,
             set_agent_work_dir=self._set_agent_work_dir,
             status_provider=self.status,
         )
@@ -300,13 +265,16 @@ class DaemonServer:
             sid,
             remove=remove,
             discard=discard,
-            require_agent_and_deps=self._require_agent_and_deps,
+            require_agent_and_deps=self._runtime_requirements.require_agent_and_deps,
             set_agent_work_dir=self._set_agent_work_dir,
             status_provider=self.status,
         )
 
     async def list_background_tasks(self, sid: str) -> DaemonActionResult:
-        return await list_session_background_tasks(sid, self._require_deps)
+        return await list_session_background_tasks(
+            sid,
+            self._runtime_requirements.require_deps,
+        )
 
     async def cancel_background_task(
         self,
@@ -316,7 +284,7 @@ class DaemonServer:
         return await cancel_session_background_task(
             sid,
             task_id,
-            self._require_deps,
+            self._runtime_requirements.require_deps,
         )
 
     def status(self, sid: str) -> dict:
