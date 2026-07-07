@@ -38,6 +38,7 @@ from mozilcode.openai_streaming import (
     stream_end_from_openai_response_usage as _stream_end_from_openai_response_usage,
 )
 from mozilcode.openai_compat_request import build_chat_completion_request_kwargs
+from mozilcode.openai_responses_request import build_openai_response_request_kwargs
 from mozilcode.provider_auth import (
     is_local_base_url as _is_local_base_url,
     resolve_openai_api_key as _resolve_openai_api_key,
@@ -226,19 +227,13 @@ class OpenAIClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         import openai as _openai
 
-        input_messages = build_openai_input(conversation.get_messages())
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "input": input_messages,
-            "stream": True,
-        }
-        if system:
-            kwargs["instructions"] = system
-        if tools:
-            kwargs["tools"] = tools
-        if self.thinking:
-            kwargs["reasoning"] = {"summary": "auto"}
+        kwargs = build_openai_response_request_kwargs(
+            model=self.model,
+            input_messages=build_openai_input(conversation.get_messages()),
+            system=system,
+            tools=tools,
+            thinking=self.thinking,
+        )
 
         current_tool_name = ""
         current_call_id = ""
