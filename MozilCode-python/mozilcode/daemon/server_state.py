@@ -5,8 +5,8 @@ import logging
 import uuid
 from pathlib import Path
 
-from mozilcode.agent import (
-    Agent,
+from mozilcode.agent import Agent
+from mozilcode.agent_events import (
     CompactStarted,
     ErrorEvent,
     PermissionResponse,

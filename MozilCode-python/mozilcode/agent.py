@@ -5,15 +5,31 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
 from pydantic import ValidationError
 
+from mozilcode.agent_events import (
+    AgentEvent,
+    AskUserRequest,
+    CompactNotification,
+    CompactStarted,
+    ErrorEvent,
+    HookEvent,
+    LoopComplete,
+    PermissionRequest,
+    PermissionResponse,
+    RetryEvent,
+    StreamText,
+    ThinkingText,
+    ToolResultEvent,
+    ToolUseEvent,
+    TurnComplete,
+    UsageEvent,
+)
 from mozilcode.client import LLMClient
 from mozilcode.context import (
-    CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
     ContentReplacementRecord,
@@ -75,126 +91,8 @@ MAX_OUTPUT_TOKENS_RECOVERIES = 3
 # AgentEvent 事件类型
 # ---------------------------------------------------------------------------
 
-@dataclass
-class StreamText:
-    text: str
-
-
-@dataclass
-class ThinkingText:
-    text: str
-
-
-@dataclass
-class RetryEvent:
-    reason: str
-    wait: float = 0.0
-
-
-@dataclass
-class ToolUseEvent:
-    tool_name: str
-    tool_id: str
-    arguments: dict[str, Any]
-
-
-@dataclass
-class ToolResultEvent:
-    tool_id: str
-    tool_name: str
-    output: str
-    is_error: bool
-    elapsed: float
-
-
-@dataclass
-class TurnComplete:
-    turn: int
-
-
-@dataclass
-class LoopComplete:
-    total_turns: int
-
-
-@dataclass
-class UsageEvent:
-    input_tokens: int
-    output_tokens: int
-    context_tokens: int = 0
-
-
-@dataclass
-class ErrorEvent:
-    message: str
-
-
-@dataclass
-class CompactNotification:
-    before_tokens: int
-    message: str
-    after_tokens: int = 0
-    # 结构化 boundary（摘要 + 原文保留尾部），daemon/session 层用它持久化 compact_boundary 记录。
-    # 失败路径下为 None。
-    boundary: "CompactBoundary | None" = None
-
-
-@dataclass
-class CompactStarted:
-    current_tokens: int
-    threshold: int
-    context_window: int
-    message: str = "正在自动压缩上下文"
-
-
-@dataclass
-class HookEvent:
-    hook_id: str
-    event: str
-    output: str
-    success: bool
-
-
-class PermissionResponse(Enum):
-    ALLOW = "allow"
-    DENY = "deny"
-    ALLOW_ALWAYS = "allow_always"
-
-
-@dataclass
-class PermissionRequest:
-    tool_name: str
-    description: str
-    future: asyncio.Future[PermissionResponse]
-
-
-@dataclass
-class AskUserRequest:
-    """Yielded when AskUserQuestion tool needs user input.
-
-    The caller (daemon / embedding runtime) must resolve ``future`` with a dict of
-    {question_name: answer} via ``future.set_result(answers)``.
-    """
-    questions: list[dict[str, Any]]
-    future: asyncio.Future[dict[str, str]]
-
-
-AgentEvent = (
-    StreamText
-    | ThinkingText
-    | RetryEvent
-    | ToolUseEvent
-    | ToolResultEvent
-    | TurnComplete
-    | LoopComplete
-    | UsageEvent
-    | ErrorEvent
-    | PermissionRequest
-    | AskUserRequest
-    | CompactNotification
-    | CompactStarted
-    | HookEvent
-)
+# Event DTOs are defined in mozilcode.agent_events and imported here so existing
+# public imports from mozilcode.agent remain valid.
 
 
 # ---------------------------------------------------------------------------

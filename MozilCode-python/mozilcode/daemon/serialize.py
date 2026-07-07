@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from mozilcode.agent import (
+from mozilcode.agent_events import (
     AskUserRequest,
     CompactNotification,
     CompactStarted,
