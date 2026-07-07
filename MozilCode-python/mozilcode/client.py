@@ -30,6 +30,7 @@ from mozilcode.llm_errors import (
 )
 from mozilcode.openai_streaming import (
     OpenAIChatToolCallState,
+    OpenAIReasoningState,
     OpenAIResponseToolCallState,
     RESPONSE_REASONING_DELTA_EVENTS as _RESPONSE_REASONING_DELTA_EVENTS,
     RESPONSE_REASONING_DONE_EVENTS as _RESPONSE_REASONING_DONE_EVENTS,
@@ -49,8 +50,6 @@ from mozilcode.tools.base import (
     StreamEnd,
     StreamEvent,
     TextDelta,
-    ThinkingComplete,
-    ThinkingDelta,
 )
 
 
@@ -200,8 +199,7 @@ class OpenAIClient(LLMClient):
         )
 
         response_tool_call = OpenAIResponseToolCallState()
-        reasoning_accum = ""
-        reasoning_completed = False
+        reasoning_state = OpenAIReasoningState()
 
         try:
             response_stream = await self._client.responses.create(**kwargs)
@@ -210,20 +208,14 @@ class OpenAIClient(LLMClient):
                     yield TextDelta(text=event.delta)
                 elif event.type in _RESPONSE_REASONING_DELTA_EVENTS:
                     text = _get_text(event, "delta", "text")
-                    if text:
-                        reasoning_accum += text
-                        yield ThinkingDelta(text=text)
+                    for reasoning_event in reasoning_state.add_delta(text):
+                        yield reasoning_event
                 elif event.type in _RESPONSE_REASONING_DONE_EVENTS:
                     text = _get_text(event, "text")
-                    if text and not reasoning_accum.endswith(text):
-                        reasoning_accum += text
-                        yield ThinkingDelta(text=text)
-                    if reasoning_accum:
-                        yield ThinkingComplete(
-                            thinking=reasoning_accum,
-                            signature="",
-                        )
-                        reasoning_completed = True
+                    for reasoning_event in reasoning_state.complete_from_done_text(
+                        text
+                    ):
+                        yield reasoning_event
                 elif event.type == "response.function_call_arguments.delta":
                     for tool_event in response_tool_call.add_arguments_delta(event):
                         yield tool_event
@@ -237,12 +229,12 @@ class OpenAIClient(LLMClient):
                         yield tool_start
                 elif event.type == "response.completed":
                     resp = getattr(event, "response", None)
-                    if self.thinking and not reasoning_completed:
+                    if self.thinking:
                         summary = _extract_response_reasoning_summary(resp)
-                        if summary:
-                            yield ThinkingDelta(text=summary)
-                            yield ThinkingComplete(thinking=summary, signature="")
-                            reasoning_completed = True
+                        for reasoning_event in reasoning_state.complete_from_summary(
+                            summary
+                        ):
+                            yield reasoning_event
                     usage = getattr(resp, "usage", None) if resp else None
                     yield _stream_end_from_openai_response_usage(usage)
 
@@ -298,8 +290,7 @@ class OpenAICompatClient(LLMClient):
         )
 
         chat_tool_call = OpenAIChatToolCallState()
-        reasoning_accum = ""
-        reasoning_completed = False
+        reasoning_state = OpenAIReasoningState()
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -315,9 +306,8 @@ class OpenAICompatClient(LLMClient):
 
                 if self.thinking and delta:
                     reasoning = _extract_chat_reasoning_delta(delta)
-                    if reasoning:
-                        reasoning_accum += reasoning
-                        yield ThinkingDelta(text=reasoning)
+                    for reasoning_event in reasoning_state.add_delta(reasoning):
+                        yield reasoning_event
 
                 # --- 文本内容 ---
                 if delta and delta.content:
@@ -332,9 +322,9 @@ class OpenAICompatClient(LLMClient):
 
                 # --- 结束原因 ---
                 if choice.finish_reason in ("tool_calls", "stop"):
-                    if reasoning_accum and not reasoning_completed:
-                        yield ThinkingComplete(thinking=reasoning_accum, signature="")
-                        reasoning_completed = True
+                    complete = reasoning_state.complete_if_pending()
+                    if complete is not None:
+                        yield complete
                     if choice.finish_reason == "tool_calls":
                         for tool_complete in chat_tool_call.complete():
                             yield tool_complete

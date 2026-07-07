@@ -8,6 +8,8 @@ from typing import Any
 
 from mozilcode.tools.base import (
     StreamEnd,
+    ThinkingComplete,
+    ThinkingDelta,
     ToolCallComplete,
     ToolCallDelta,
     ToolCallStart,
@@ -153,6 +155,50 @@ class OpenAIChatToolCallState:
         ]
         self.active_calls.clear()
         return completed
+
+
+@dataclass
+class OpenAIReasoningState:
+    text: str = ""
+    completed: bool = False
+
+    def add_delta(self, text: str) -> list[ThinkingDelta]:
+        if not text:
+            return []
+        self.text += text
+        return [ThinkingDelta(text=text)]
+
+    def complete_from_done_text(
+        self,
+        text: str,
+    ) -> list[ThinkingDelta | ThinkingComplete]:
+        events: list[ThinkingDelta | ThinkingComplete] = []
+        if text and not self.text.endswith(text):
+            self.text += text
+            events.append(ThinkingDelta(text=text))
+        complete = self.complete_if_pending()
+        if complete is not None:
+            events.append(complete)
+        return events
+
+    def complete_from_summary(
+        self,
+        summary: str,
+    ) -> list[ThinkingDelta | ThinkingComplete]:
+        if self.completed or not summary:
+            return []
+        self.text = summary
+        self.completed = True
+        return [
+            ThinkingDelta(text=summary),
+            ThinkingComplete(thinking=summary, signature=""),
+        ]
+
+    def complete_if_pending(self) -> ThinkingComplete | None:
+        if self.completed or not self.text:
+            return None
+        self.completed = True
+        return ThinkingComplete(thinking=self.text, signature="")
 
 
 def extract_response_reasoning_summary(response: Any) -> str:

@@ -4,10 +4,17 @@ from types import SimpleNamespace
 
 from mozilcode.openai_streaming import (
     OpenAIChatToolCallState,
+    OpenAIReasoningState,
     OpenAIResponseToolCallState,
     parse_tool_arguments,
 )
-from mozilcode.tools.base import ToolCallComplete, ToolCallDelta, ToolCallStart
+from mozilcode.tools.base import (
+    ThinkingComplete,
+    ThinkingDelta,
+    ToolCallComplete,
+    ToolCallDelta,
+    ToolCallStart,
+)
 
 
 def test_parse_tool_arguments_returns_empty_for_invalid_json() -> None:
@@ -125,3 +132,41 @@ def test_chat_tool_call_state_uses_empty_args_for_invalid_json() -> None:
     assert state.complete() == [
         ToolCallComplete(tool_id="call-1", tool_name="Bash", arguments={})
     ]
+
+
+def test_openai_reasoning_state_accumulates_and_completes() -> None:
+    state = OpenAIReasoningState()
+
+    events = state.add_delta("think")
+    events += state.complete_from_done_text("")
+
+    assert events == [
+        ThinkingDelta(text="think"),
+        ThinkingComplete(thinking="think", signature=""),
+    ]
+    assert state == OpenAIReasoningState(text="think", completed=True)
+
+
+def test_openai_reasoning_state_avoids_duplicate_done_text() -> None:
+    state = OpenAIReasoningState()
+
+    events = state.add_delta("think")
+    events += state.complete_from_done_text("think")
+
+    assert events == [
+        ThinkingDelta(text="think"),
+        ThinkingComplete(thinking="think", signature=""),
+    ]
+
+
+def test_openai_reasoning_state_completes_from_summary_once() -> None:
+    state = OpenAIReasoningState()
+
+    events = state.complete_from_summary("summary")
+    events += state.complete_from_summary("ignored")
+
+    assert events == [
+        ThinkingDelta(text="summary"),
+        ThinkingComplete(thinking="summary", signature=""),
+    ]
+    assert state == OpenAIReasoningState(text="summary", completed=True)
