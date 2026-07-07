@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from mozilcode.hooks.executors import execute_action
+from mozilcode.hooks.executors import AgentActionRunner, execute_action
 from mozilcode.hooks.models import ActionResult, Hook, HookContext, ToolRejectedError
 
 log = logging.getLogger(__name__)
@@ -19,8 +19,13 @@ class HookNotification:
 
 
 class HookEngine:
-    def __init__(self, hooks: list[Hook] | None = None) -> None:
+    def __init__(
+        self,
+        hooks: list[Hook] | None = None,
+        agent_runner: AgentActionRunner | None = None,
+    ) -> None:
         self.hooks: list[Hook] = hooks or []
+        self.agent_runner = agent_runner
         self._prompt_messages: list[str] = []
         self._notifications: list[HookNotification] = []
         self._background_tasks: set[asyncio.Task[None]] = set()
@@ -72,7 +77,11 @@ class HookEngine:
 
     async def _run_single(self, hook: Hook, ctx: HookContext) -> None:
         try:
-            result = await execute_action(hook.action, ctx)
+            result = await execute_action(
+                hook.action,
+                ctx,
+                self.agent_runner,
+            )
             if hook.action.type == "prompt" and result.success:
                 self._prompt_messages.append(result.output)
             self._record_result(hook, hook.event, result)
@@ -92,7 +101,11 @@ class HookEngine:
         for hook in matched:
             hook.mark_executed()
             try:
-                result = await execute_action(hook.action, ctx)
+                result = await execute_action(
+                    hook.action,
+                    ctx,
+                    self.agent_runner,
+                )
                 self._record_result(hook, "pre_tool_use", result)
                 if hook.reject:
                     return ToolRejectedError(

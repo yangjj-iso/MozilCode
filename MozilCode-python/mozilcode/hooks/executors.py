@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from mozilcode.hooks.models import Action, ActionResult, HookContext
 
 log = logging.getLogger(__name__)
+
+AgentRunnerResult = ActionResult | str
+AgentActionRunner = Callable[
+    [str, HookContext],
+    AgentRunnerResult | Awaitable[AgentRunnerResult],
+]
 
 
 async def execute_command(action: Action, ctx: HookContext) -> ActionResult:
@@ -71,13 +79,29 @@ async def execute_http(action: Action, ctx: HookContext) -> ActionResult:
     return await loop.run_in_executor(None, _do_request)
 
 
-async def execute_agent(action: Action, ctx: HookContext) -> ActionResult:
+async def execute_agent(
+    action: Action,
+    ctx: HookContext,
+    agent_runner: AgentActionRunner | None = None,
+) -> ActionResult:
     prompt = ctx.expand(action.prompt)
-    log.info("Agent executor stub called with prompt: %s", prompt[:100])
-    return ActionResult(
-        output="agent executor not yet implemented",
-        success=True,
-    )
+    if agent_runner is None:
+        return ActionResult(
+            output="agent action requires a configured hook agent runner",
+            success=False,
+        )
+
+    try:
+        result = agent_runner(prompt, ctx)
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as e:
+        log.warning("Hook agent runner failed: %s", e)
+        return ActionResult(output=f"Agent runner error: {e}", success=False)
+
+    if isinstance(result, ActionResult):
+        return result
+    return ActionResult(output=str(result), success=True)
 
 
 _EXECUTOR_MAP = {
@@ -88,11 +112,17 @@ _EXECUTOR_MAP = {
 }
 
 
-async def execute_action(action: Action, ctx: HookContext) -> ActionResult:
+async def execute_action(
+    action: Action,
+    ctx: HookContext,
+    agent_runner: AgentActionRunner | None = None,
+) -> ActionResult:
     executor = _EXECUTOR_MAP.get(action.type)
     if executor is None:
         return ActionResult(
             output=f"Unknown action type: {action.type}",
             success=False,
         )
+    if action.type == "agent":
+        return await execute_agent(action, ctx, agent_runner)
     return await executor(action, ctx)

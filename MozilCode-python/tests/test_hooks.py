@@ -361,14 +361,65 @@ class TestHttpExecutor:
 
 class TestAgentExecutor:
     @pytest.mark.asyncio
-    async def test_stub(self):
+    async def test_requires_configured_runner(self):
         from mozilcode.hooks.executors import execute_agent
 
         action = Action(type="agent", prompt="Check $FILE_PATH")
         ctx = HookContext(file_path="test.py")
         result = await execute_agent(action, ctx)
+        assert result.success is False
+        assert "configured hook agent runner" in result.output
+
+    @pytest.mark.asyncio
+    async def test_runner_receives_expanded_prompt(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        captured = {}
+
+        def runner(prompt, ctx):
+            captured["prompt"] = prompt
+            captured["ctx"] = ctx
+            return "review complete"
+
+        action = Action(type="agent", prompt="Check $FILE_PATH")
+        ctx = HookContext(file_path="test.py")
+        result = await execute_agent(action, ctx, runner)
+
         assert result.success is True
-        assert "not yet implemented" in result.output
+        assert result.output == "review complete"
+        assert captured == {"prompt": "Check test.py", "ctx": ctx}
+
+    @pytest.mark.asyncio
+    async def test_async_runner_can_return_action_result(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        async def runner(_prompt, _ctx):
+            return ActionResult(output="blocked by reviewer", success=False)
+
+        result = await execute_agent(
+            Action(type="agent", prompt="Check"),
+            HookContext(),
+            runner,
+        )
+
+        assert result.success is False
+        assert result.output == "blocked by reviewer"
+
+    @pytest.mark.asyncio
+    async def test_runner_exception_returns_failed_result(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        def runner(_prompt, _ctx):
+            raise RuntimeError("runner unavailable")
+
+        result = await execute_agent(
+            Action(type="agent", prompt="Check"),
+            HookContext(),
+            runner,
+        )
+
+        assert result.success is False
+        assert "runner unavailable" in result.output
 
 class TestExecuteAction:
     @pytest.mark.asyncio
@@ -800,7 +851,7 @@ class TestHookEngine:
         engine = HookEngine([h])
         ctx = HookContext(event_name="post_tool_use")
 
-        async def slow_execute(_action, _ctx):
+        async def slow_execute(_action, _ctx, _agent_runner=None):
             await asyncio.sleep(0.05)
             return ActionResult(output="async complete", success=True)
 
@@ -813,6 +864,30 @@ class TestHookEngine:
         assert len(notifications) == 1
         assert notifications[0].hook_id == "tracked"
         assert notifications[0].success is True
+
+    @pytest.mark.asyncio
+    async def test_agent_action_uses_configured_runner(self):
+        hook = self._make_hook(
+            id="agent-hook",
+            event="post_tool_use",
+            action=Action(type="agent", prompt="Inspect $TOOL_NAME"),
+        )
+
+        async def runner(prompt, ctx):
+            assert prompt == "Inspect WriteFile"
+            assert ctx.tool_name == "WriteFile"
+            return "agent reviewed"
+
+        engine = HookEngine([hook], agent_runner=runner)
+        ctx = HookContext(event_name="post_tool_use", tool_name="WriteFile")
+
+        await engine.run_hooks("post_tool_use", ctx)
+
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "agent-hook"
+        assert notifications[0].success is True
+        assert notifications[0].output == "agent reviewed"
 
 # ---------------------------------------------------------------------------
 # Agent 循环集成
