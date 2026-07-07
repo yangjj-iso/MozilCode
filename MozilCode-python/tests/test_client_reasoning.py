@@ -187,6 +187,73 @@ async def test_openai_compat_streams_reasoning_content():
     assert any(isinstance(e, TextDelta) and e.text == "回答" for e in events)
 
 
+@pytest.mark.asyncio
+async def test_openai_compat_streams_tool_call_arguments():
+    class Completions:
+        async def create(self, **_kwargs):
+            return _AsyncStream([
+                SimpleNamespace(
+                    choices=[SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="call-1",
+                                    function=SimpleNamespace(
+                                        name="Bash",
+                                        arguments='{"command":"git',
+                                    ),
+                                )
+                            ],
+                        ),
+                        finish_reason=None,
+                    )],
+                    usage=None,
+                ),
+                SimpleNamespace(
+                    choices=[SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="",
+                                    function=SimpleNamespace(
+                                        name="",
+                                        arguments=' status"}',
+                                    ),
+                                )
+                            ],
+                        ),
+                        finish_reason="tool_calls",
+                    )],
+                    usage=None,
+                ),
+            ])
+
+    client = OpenAICompatClient.__new__(OpenAICompatClient)
+    client.model = "compat-test"
+    client.thinking = False
+    client.max_output_tokens = 1024
+    client._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=Completions())
+    )
+
+    events = await _collect(client.stream(ConversationManager()))
+
+    assert events == [
+        ToolCallStart(tool_name="Bash", tool_id="call-1"),
+        ToolCallDelta(text='{"command":"git'),
+        ToolCallDelta(text=' status"}'),
+        ToolCallComplete(
+            tool_id="call-1",
+            tool_name="Bash",
+            arguments={"command": "git status"},
+        ),
+    ]
+
+
 def test_local_openai_base_url_allows_empty_api_key():
     config = ProviderConfig(
         name="local",

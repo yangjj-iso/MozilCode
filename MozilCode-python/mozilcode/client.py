@@ -29,6 +29,7 @@ from mozilcode.llm_errors import (
     rate_limit_error as _rate_limit_error,
 )
 from mozilcode.openai_streaming import (
+    OpenAIChatToolCallState,
     OpenAIResponseToolCallState,
     RESPONSE_REASONING_DELTA_EVENTS as _RESPONSE_REASONING_DELTA_EVENTS,
     RESPONSE_REASONING_DONE_EVENTS as _RESPONSE_REASONING_DONE_EVENTS,
@@ -334,9 +335,7 @@ class OpenAICompatClient(LLMClient):
             tools=tools,
         )
 
-        # 用于累积 streaming tool call 的状态。Chat Completions 流按
-        # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
-        active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
+        chat_tool_call = OpenAIChatToolCallState()
         reasoning_accum = ""
         reasoning_completed = False
 
@@ -364,23 +363,10 @@ class OpenAICompatClient(LLMClient):
 
                 # --- tool call 增量 ---
                 if delta and delta.tool_calls:
-                    for tc in delta.tool_calls:
-                        idx = tc.index
-                        if idx not in active_calls:
-                            active_calls[idx] = {"id": "", "name": "", "args": ""}
-                        call = active_calls[idx]
-
-                        if tc.id:
-                            call["id"] = tc.id
-                        if tc.function and tc.function.name:
-                            call["name"] = tc.function.name
-                            yield ToolCallStart(
-                                tool_name=call["name"],
-                                tool_id=call["id"],
-                            )
-                        if tc.function and tc.function.arguments:
-                            call["args"] += tc.function.arguments
-                            yield ToolCallDelta(text=tc.function.arguments)
+                    for tool_event in chat_tool_call.add_tool_call_deltas(
+                        delta.tool_calls
+                    ):
+                        yield tool_event
 
                 # --- 结束原因 ---
                 if choice.finish_reason in ("tool_calls", "stop"):
@@ -388,17 +374,8 @@ class OpenAICompatClient(LLMClient):
                         yield ThinkingComplete(thinking=reasoning_accum, signature="")
                         reasoning_completed = True
                     if choice.finish_reason == "tool_calls":
-                        for _idx, call in sorted(active_calls.items()):
-                            try:
-                                args = json.loads(call["args"]) if call["args"] else {}
-                            except json.JSONDecodeError:
-                                args = {}
-                            yield ToolCallComplete(
-                                tool_id=call["id"],
-                                tool_name=call["name"],
-                                arguments=args,
-                            )
-                        active_calls.clear()
+                        for tool_complete in chat_tool_call.complete():
+                            yield tool_complete
 
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e

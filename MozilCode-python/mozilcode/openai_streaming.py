@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from typing import Any
 
@@ -109,6 +109,50 @@ class OpenAIResponseToolCallState:
         self.call_id = ""
         self.arguments_json = ""
         return complete
+
+
+@dataclass
+class OpenAIChatToolCallState:
+    active_calls: dict[int, dict[str, str]] = field(default_factory=dict)
+
+    def add_tool_call_deltas(
+        self,
+        tool_calls: Any,
+    ) -> list[ToolCallStart | ToolCallDelta]:
+        events: list[ToolCallStart | ToolCallDelta] = []
+        for tool_call in tool_calls or []:
+            index = getattr(tool_call, "index", 0)
+            if index not in self.active_calls:
+                self.active_calls[index] = {"id": "", "name": "", "args": ""}
+            call = self.active_calls[index]
+
+            call_id = getattr(tool_call, "id", "") or ""
+            if call_id:
+                call["id"] = call_id
+            function = getattr(tool_call, "function", None)
+            name = getattr(function, "name", "") if function else ""
+            if name:
+                call["name"] = name
+                events.append(
+                    ToolCallStart(tool_name=call["name"], tool_id=call["id"])
+                )
+            arguments = getattr(function, "arguments", "") if function else ""
+            if arguments:
+                call["args"] += arguments
+                events.append(ToolCallDelta(text=arguments))
+        return events
+
+    def complete(self) -> list[ToolCallComplete]:
+        completed = [
+            ToolCallComplete(
+                tool_id=call["id"],
+                tool_name=call["name"],
+                arguments=parse_tool_arguments(call["args"]),
+            )
+            for _index, call in sorted(self.active_calls.items())
+        ]
+        self.active_calls.clear()
+        return completed
 
 
 def extract_response_reasoning_summary(response: Any) -> str:
