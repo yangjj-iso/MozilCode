@@ -24,7 +24,6 @@ from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session_status import (
     build_session_status,
     command_acceptance_mode,
-    resolve_mode_transition,
 )
 from mozilcode.daemon.session_records import SessionRecords
 from mozilcode.daemon.session_store import SessionStore, validate_session_id
@@ -34,6 +33,7 @@ from mozilcode.daemon.responses import (
 )
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
+from mozilcode.daemon.permission_mode_actions import set_session_permission_mode
 from mozilcode.daemon.session_runtime import (
     DaemonSessionRuntime,
     create_daemon_session_runtime,
@@ -192,9 +192,6 @@ class DaemonServer:
     def pending_prompt_events(self, sid: str) -> list[dict]:
         return self._pending_prompts.events(sid)
 
-    def _status_payload(self, sid: str, **payload: object) -> dict:
-        return {**payload, "status": self.status(sid)}
-
     def _configured_provider(self) -> ProviderConfig | None:
         if self.config is None or not self.config.providers:
             return None
@@ -265,34 +262,15 @@ class DaemonServer:
 
     async def set_permission_mode(self, sid: str, mode: str) -> dict:
         """Switch a session's permission mode and return fresh status."""
-        await self.ensure_agent(sid)
-        agent = self.get_agent(sid)
-        if agent is None:
-            raise ValueError(f"Session {sid} not found")
-
-        transition = resolve_mode_transition(
-            agent.permission_mode,
+        return await set_session_permission_mode(
+            sid,
             mode,
-            self._pre_plan_modes.get(sid),
+            ensure_agent=self.ensure_agent,
+            get_agent=self.get_agent,
+            pre_plan_modes=self._pre_plan_modes,
+            status_provider=self.status,
+            emit_event=self._emit,
         )
-        next_mode = transition.next_mode
-        if transition.pre_plan_mode is None:
-            self._pre_plan_modes.pop(sid, None)
-        else:
-            self._pre_plan_modes[sid] = transition.pre_plan_mode
-
-        agent.set_permission_mode(next_mode)
-        status = self.status(sid)
-        self._emit(sid, {
-            "type": "ModeChanged",
-            "data": {
-                "mode": status["permission_mode"],
-                "permission_mode": status["permission_mode"],
-                "command_acceptance_mode": status["command_acceptance_mode"],
-                "plan_mode": status["plan_mode"],
-            },
-        })
-        return status
 
     async def manual_compact(self, sid: str) -> DaemonActionResult:
         agent, conv, error = await self._require_agent_and_conversation(sid)
