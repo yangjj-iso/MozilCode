@@ -5,9 +5,9 @@ import asyncio
 import pytest
 
 from mozilcode.agent import PermissionRequest, StreamText
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.agent_task_runner import AgentTaskRunner
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
+from mozilcode.daemon.tasks.runner import AgentTaskRunner
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
 
 

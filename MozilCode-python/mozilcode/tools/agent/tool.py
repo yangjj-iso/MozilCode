@@ -12,7 +12,7 @@ from mozilcode.agents.defaults import (
     worktree_agent_def,
 )
 from mozilcode.tools import rebase_file_tools
-from mozilcode.tools.agent_tool_messages import (
+from mozilcode.tools.agent.messages import (
     background_launch_message,
     empty_subagent_output,
     fork_disabled_message,
@@ -22,13 +22,13 @@ from mozilcode.tools.agent_tool_messages import (
     unknown_agent_type_message,
     worktree_preserved_suffix,
 )
-from mozilcode.tools.agent_tool_support import (
+from mozilcode.tools.agent.support import (
     parent_has_full_registry,
     resolve_parent_registry,
     resolve_parent_trace_id,
     unique_agent_name,
 )
-from mozilcode.tools.agent_tool_runtime import (
+from mozilcode.tools.agent.runtime import (
     complete_trace_from_agent,
     create_child_agent,
 )

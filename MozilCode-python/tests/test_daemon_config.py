@@ -6,7 +6,7 @@ from mozilcode.config import (
     AppConfig,
     ProviderConfig,
 )
-from mozilcode.daemon.routes import HTTP_ROUTES, WEBSOCKET_ROUTES, build_routes
+from mozilcode.daemon.routes.core import HTTP_ROUTES, WEBSOCKET_ROUTES, build_routes
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime

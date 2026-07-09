@@ -155,10 +155,10 @@ def build_teammate_tools(
 ) -> ToolRegistry:
     from mozilcode.teams.models import BackendType
     from mozilcode.tools.send_message import SendMessageTool
-    from mozilcode.tools.task_create import TaskCreateTool
-    from mozilcode.tools.task_get import TaskGetTool
-    from mozilcode.tools.task_list import TaskListTool
-    from mozilcode.tools.task_update import TaskUpdateTool
+    from mozilcode.tools.tasks.create import TaskCreateTool
+    from mozilcode.tools.tasks.get import TaskGetTool
+    from mozilcode.tools.tasks.list import TaskListTool
+    from mozilcode.tools.tasks.update import TaskUpdateTool
 
     if backend_type == BackendType.IN_PROCESS.value:
         filtered = _only_tools(

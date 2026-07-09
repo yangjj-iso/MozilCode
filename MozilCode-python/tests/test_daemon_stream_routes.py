@@ -5,7 +5,7 @@ from starlette.testclient import TestClient
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.session.store import SessionStore
-from mozilcode.daemon.stream_routes import (
+from mozilcode.daemon.routes.stream import (
     parse_client_action,
     pending_prompt_events_after_replay,
 )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
 
 EmitEvent = Callable[[str, dict[str, Any] | None], None]

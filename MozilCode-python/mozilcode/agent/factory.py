@@ -23,7 +23,7 @@ from mozilcode.permissions import (
 )
 from mozilcode.teams.manager import TeamManager
 from mozilcode.tools import ToolRegistry, create_default_registry
-from mozilcode.tools.agent_tool import AgentTool
+from mozilcode.tools.agent.tool import AgentTool
 from mozilcode.tools.ask_user import AskUserTool
 from mozilcode.tools.exit_plan_mode import ExitPlanModeTool
 from mozilcode.tools.impl.tool_search import ToolSearchTool

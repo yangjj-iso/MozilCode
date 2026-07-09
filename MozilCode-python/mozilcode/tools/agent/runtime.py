@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mozilcode.permissions import PermissionMode
-from mozilcode.tools.agent_tool_support import (
+from mozilcode.tools.agent.support import (
     create_subagent_permission_checker,
     resolve_parent_trace_id,
 )

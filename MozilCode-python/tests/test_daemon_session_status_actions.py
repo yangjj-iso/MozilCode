@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from mozilcode.config import AppConfig, ProviderConfig
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
 from mozilcode.daemon.session.runtime import DaemonSessionRuntime
 from mozilcode.daemon.session.status_actions import (
     build_daemon_session_status,

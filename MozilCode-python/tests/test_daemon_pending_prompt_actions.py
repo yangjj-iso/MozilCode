@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from mozilcode.daemon.actions.pending_prompt import resolve_session_pending_prompt
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
 
 

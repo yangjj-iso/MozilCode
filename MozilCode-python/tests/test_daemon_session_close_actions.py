@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session.close_actions import close_daemon_session
 from mozilcode.permissions import PermissionMode

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
 from mozilcode.daemon.session.runtime_requirements import SessionRuntimeRequirements
 
 GetEventLog = Callable[[str], list[dict | None] | None]

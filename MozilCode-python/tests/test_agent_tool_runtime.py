@@ -6,7 +6,7 @@ from mozilcode.agents.parser import AgentDef
 from mozilcode.agents.trace import TraceManager
 from mozilcode.permissions import PermissionMode
 from mozilcode.tools import ToolRegistry
-from mozilcode.tools.agent_tool_runtime import (
+from mozilcode.tools.agent.runtime import (
     complete_trace_from_agent,
     create_child_agent,
 )

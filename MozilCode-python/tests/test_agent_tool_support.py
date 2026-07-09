@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mozilcode.permissions import PermissionMode
-from mozilcode.tools.agent_tool_support import (
+from mozilcode.tools.agent.support import (
     create_subagent_permission_checker,
     parent_has_full_registry,
     resolve_parent_registry,

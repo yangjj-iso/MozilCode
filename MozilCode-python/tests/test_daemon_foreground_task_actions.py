@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozilcode.daemon.active_tasks import ACTIVE_TASK_RUNNING_ERROR, ActiveTaskRegistry
+from mozilcode.daemon.tasks.active import ACTIVE_TASK_RUNNING_ERROR, ActiveTaskRegistry
 from mozilcode.daemon.actions.foreground_task import start_session_task
 from mozilcode.daemon.session.runtime import DaemonSessionRuntime
 from mozilcode.daemon.session.runtime_requirements import SessionRuntimeRequirements

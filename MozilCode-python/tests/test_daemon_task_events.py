@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from mozilcode.agent import AskUserRequest, PermissionRequest, StreamText
-from mozilcode.daemon.task_events import (
+from mozilcode.daemon.tasks.events import (
     loop_complete_event,
     pending_prompt_request_id,
     serialize_task_event,

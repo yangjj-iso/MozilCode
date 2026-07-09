@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.tools.agent_tool_messages import (
+from mozilcode.tools.agent.messages import (
     NO_SUBAGENT_OUTPUT,
     available_agent_names,
     background_launch_message,

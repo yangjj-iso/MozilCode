@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 
 
 def test_pending_prompt_registry_records_events_in_order() -> None:

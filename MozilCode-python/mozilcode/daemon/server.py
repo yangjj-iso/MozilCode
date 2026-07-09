@@ -22,7 +22,7 @@ from mozilcode.config import load_config, AppConfig
 from mozilcode.config.validator import ConfigError
 from mozilcode.hooks import HookEngine, load_hooks
 
-from mozilcode.daemon.routes import build_routes
+from mozilcode.daemon.routes.core import build_routes
 from mozilcode.daemon.server_state import DaemonServer
 from mozilcode.daemon.session.store import SessionStore
 from mozilcode.a2a.bridge import A2ABridge

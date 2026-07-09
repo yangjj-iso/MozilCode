@@ -7,8 +7,8 @@ from mozilcode.agent.events import PermissionResponse
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.agent.factory import AgentDeps, create_agent_from_config
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.agent_task_runner import AgentTaskRunner
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
+from mozilcode.daemon.tasks.runner import AgentTaskRunner
 from mozilcode.daemon.actions.background_task import (
     cancel_session_background_task,
     list_session_background_tasks,
@@ -21,7 +21,7 @@ from mozilcode.daemon.session.store import SessionStore
 from mozilcode.daemon.responses import (
     DaemonActionResult,
 )
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.actions.pending_prompt import resolve_session_pending_prompt
 from mozilcode.daemon.actions.permission_mode import set_session_permission_mode
 from mozilcode.daemon.session.close_actions import close_daemon_session

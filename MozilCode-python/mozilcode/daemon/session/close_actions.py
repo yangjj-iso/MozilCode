@@ -4,8 +4,8 @@ import asyncio
 from collections.abc import Callable, MutableMapping
 from typing import Any
 
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
 from mozilcode.daemon.session.store import validate_session_id
 from mozilcode.permissions import PermissionMode

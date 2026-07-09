@@ -8,7 +8,7 @@ from typing import Any
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mozilcode.daemon.request_context import daemon_server, path_param
-from mozilcode.daemon.task_events import pending_prompt_request_id
+from mozilcode.daemon.tasks.events import pending_prompt_request_id
 
 log = logging.getLogger(__name__)
 

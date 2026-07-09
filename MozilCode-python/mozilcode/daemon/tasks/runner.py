@@ -7,10 +7,10 @@ from collections.abc import Callable
 
 from mozilcode.agent import Agent
 from mozilcode.conversation import ConversationManager
-from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.pending_prompts import PendingPromptRegistry
+from mozilcode.daemon.tasks.active import ActiveTaskRegistry
+from mozilcode.daemon.tasks.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.task_events import (
+from mozilcode.daemon.tasks.events import (
     loop_complete_event,
     serialize_task_event,
     task_cancelled_event,

@@ -7,7 +7,7 @@ from typing import Any
 from starlette.routing import BaseRoute, Route, WebSocketRoute
 
 from mozilcode.config.removed_capabilities import assert_no_removed_route_paths
-from mozilcode.daemon.a2a_routes import (
+from mozilcode.daemon.routes.a2a import (
     a2a_agent_card,
     a2a_message_send,
     a2a_rpc,
@@ -30,8 +30,8 @@ from mozilcode.daemon.session.routes import (
     set_session_mode,
     start_task,
 )
-from mozilcode.daemon.stream_routes import stream_events
-from mozilcode.daemon.workspace_routes import (
+from mozilcode.daemon.routes.stream import stream_events
+from mozilcode.daemon.routes.workspace import (
     create_worktree,
     enter_worktree,
     exit_worktree,

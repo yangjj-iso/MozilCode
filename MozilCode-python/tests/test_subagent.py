@@ -827,14 +827,14 @@ class TestPermissionMode:
 
 class TestAgentToolParams:
     def test_required_fields(self):
-        from mozilcode.tools.agent_tool import AgentToolParams
+        from mozilcode.tools.agent.tool import AgentToolParams
         params = AgentToolParams(prompt="do this", description="test")
         assert params.prompt == "do this"
         assert params.subagent_type is None
         assert params.run_in_background is False
 
     def test_optional_fields(self):
-        from mozilcode.tools.agent_tool import AgentToolParams
+        from mozilcode.tools.agent.tool import AgentToolParams
         params = AgentToolParams(
             prompt="do",
             description="test",

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from mozilcode.daemon.active_tasks import (
+from mozilcode.daemon.tasks.active import (
     ACTIVE_TASK_RUNNING_ERROR,
     ActiveTaskRegistry,
 )

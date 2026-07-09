@@ -12,7 +12,7 @@ from mozilcode.daemon.responses import (
     bad_request_response,
     not_found_response,
 )
-from mozilcode.daemon.active_tasks import ACTIVE_TASK_RUNNING_ERROR
+from mozilcode.daemon.tasks.active import ACTIVE_TASK_RUNNING_ERROR
 from mozilcode.daemon.session.payloads import (
     parse_askuser_resolution_body,
     parse_create_session_body,
