@@ -40,15 +40,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.p is None:
-        print(
-            "A prompt is required for headless CLI execution. "
-            'Use `mozilcode -p "your prompt"` '
-            "or `mozilcode-daemon` for the local API daemon.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
     try:
         config = load_config()
     except ConfigError as e:
@@ -66,7 +57,26 @@ def main() -> None:
 
     hook_engine = HookEngine(hooks) if hooks else None
 
-    asyncio.run(_run_prompt(config, permission_mode, hook_engine, args.p))
+    if args.p is not None:
+        asyncio.run(_run_prompt(config, permission_mode, hook_engine, args.p))
+        return
+
+    from mozilcode.app import MozilCodeApp
+    from mozilcode.driver import NoAltScreenDriver
+
+    app = MozilCodeApp(
+        providers=config.providers,
+        permission_mode=permission_mode,
+        mcp_servers=config.mcp_servers,
+        hook_engine=hook_engine,
+        enable_fork=config.enable_fork,
+        enable_verification_agent=config.enable_verification_agent,
+        worktree_config=config.worktree,
+        teammate_mode=config.teammate_mode,
+        enable_coordinator_mode=config.enable_coordinator_mode,
+        driver_class=NoAltScreenDriver,
+    )
+    app.run()
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:

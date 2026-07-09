@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MewCode Cloud</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --border: #e9ecef; --text: #212529; --muted: #6c757d; --primary: #4263eb; --green: #2f9e44; --red: #e03131; --amber: #f08c00; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.6; }
+  .container { max-width: 960px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  h2 { font-size: 18px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 200px; }
+  input, select, button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; outline: none; }
+  input:focus, select:focus { border-color: var(--primary); }
+  button { cursor: pointer; background: var(--primary); color: #fff; border: none; font-weight: 500; }
+  button:hover { opacity: 0.9; }
+  button.secondary { background: var(--muted); }
+  button.danger { background: var(--red); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .nav { display: flex; gap: 16px; align-items: center; margin-bottom: 20px; }
+  .nav .logo { font-weight: 700; font-size: 20px; }
+  .nav .spacer { flex: 1; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  .badge.green { background: #d3f9d8; color: var(--green); }
+  .badge.amber { background: #fff3bf; color: var(--amber); }
+  .badge.red { background: #ffe3e3; color: var(--red); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  th { font-weight: 500; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+  .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .model-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; cursor: pointer; transition: border-color 0.2s; }
+  .model-card:hover { border-color: var(--primary); }
+  .model-card.selected { border-color: var(--primary); background: #edf2ff; }
+  .model-card .name { font-weight: 600; font-size: 15px; }
+  .model-card .provider { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .stat { text-align: center; }
+  .stat .num { font-size: 28px; font-weight: 700; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .progress-bar .fill { height: 100%; background: var(--green); border-radius: 4px; transition: width 0.3s; }
+  .progress-bar .fill.warn { background: var(--amber); }
+  .progress-bar .fill.danger { background: var(--red); }
+  .hidden { display: none; }
+  .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; z-index: 1000; animation: slideIn 0.3s; }
+  .toast.ok { background: var(--green); }
+  .toast.err { background: var(--red); }
+  @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <!-- Nav -->
+  <div class="nav">
+    <span class="logo">🐱 MewCode Cloud</span>
+    <span class="spacer"></span>
+    <span id="nav-user" class="muted"></span>
+    <button class="secondary" id="btn-logout" onclick="logout()">退出</button>
+  </div>
+
+  <!-- Login / Register -->
+  <div id="auth-view">
+    <div class="card" style="max-width:400px;margin:60px auto">
+      <h2>登录 / 注册</h2>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <input id="email" placeholder="邮箱" type="email">
+        <input id="password" placeholder="密码 (至少6位)" type="password">
+        <div class="row">
+          <button onclick="login()">登录</button>
+          <button class="secondary" onclick="register()">注册</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:12px">注册后自动登录。体验码：<code>MEWCODE-FREE-500K</code></p>
+    </div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dash-view" class="hidden">
+    <!-- Subscription -->
+    <div class="card">
+      <h2>套餐状态</h2>
+      <div id="sub-content">
+        <p class="muted">加载中...</p>
+      </div>
+    </div>
+
+    <!-- Redeem -->
+    <div class="card">
+      <h2>兑换码</h2>
+      <div class="row">
+        <input id="redeem-code" placeholder="输入兑换码" style="flex:2">
+        <button onclick="redeem()">兑换</button>
+      </div>
+    </div>
+
+    <!-- Models -->
+    <div class="card">
+      <h2>选择模型</h2>
+      <div id="model-list" class="model-grid">
+        <p class="muted">加载中...</p>
+      </div>
+    </div>
+
+    <!-- Usage Stats -->
+    <div class="card">
+      <h2>用量统计</h2>
+      <div id="usage-stats">
+        <p class="muted">加载中...</p>
+      </div>
+    </div>
+
+    <!-- API Info -->
+    <div class="card">
+      <h2>API 接入</h2>
+      <p class="muted">本地 daemon 配置云端网关地址：</p>
+      <pre style="background:#f1f3f5;padding:12px;border-radius:8px;margin-top:8px;overflow-x:auto">base_url: http://localhost:8000/api/gateway
+api_key: <span id="api-key-hint">你的 provider key</span>
+token: <span id="jwt-hint">登录后获取</span></pre>
+      <p class="muted" style="margin-top:8px">请求示例：</p>
+      <pre style="background:#f1f3f5;padding:12px;border-radius:8px;overflow-x:auto">curl -X POST http://localhost:8000/api/gateway/chat/completions \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "X-Api-Key: YOUR_PROVIDER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"你好"}],"stream":true}'</pre>
+    </div>
+  </div>
+</div>
+
+<script>
+let JWT = localStorage.getItem('jwt') || '';
+let USER = localStorage.getItem('user') || '';
+
+// --- Auth ---
+async function register() {
+  const email = document.getElementById('email').value;
+  const pwd = document.getElementById('password').value;
+  if (!email || pwd.length < 6) return toast('填写邮箱和6位以上密码', 'err');
+  const r = await api('/api/auth/register', 'POST', {email, password: pwd});
+  if (r.error) return toast(r.error, 'err');
+  toast('注册成功，正在登录...');
+  login();
+}
+
+async function login() {
+  const email = document.getElementById('email').value;
+  const pwd = document.getElementById('password').value;
+  if (!email || !pwd) return toast('请填写邮箱和密码', 'err');
+  const r = await api('/api/auth/login', 'POST', {email, password: pwd});
+  if (r.error) return toast(r.error, 'err');
+  JWT = r.token; USER = r.email;
+  localStorage.setItem('jwt', JWT);
+  localStorage.setItem('user', USER);
+  showDashboard();
+}
+
+function logout() {
+  JWT = ''; USER = '';
+  localStorage.removeItem('jwt');
+  localStorage.removeItem('user');
+  location.reload();
+}
+
+// --- Dashboard ---
+async function showDashboard() {
+  document.getElementById('auth-view').classList.add('hidden');
+  document.getElementById('dash-view').classList.remove('hidden');
+  document.getElementById('nav-user').textContent = USER;
+  document.getElementById('jwt-hint').textContent = JWT.substring(0,20) + '...';
+  await Promise.all([loadSubscription(), loadModels(), loadUsage()]);
+}
+
+async function loadSubscription() {
+  const r = await api('/api/subscription', 'GET');
+  const el = document.getElementById('sub-content');
+  if (!r.subscription) {
+    el.innerHTML = '<p class="muted">暂无套餐，请使用兑换码激活</p>';
+    return;
+  }
+  const s = r.subscription;
+  const pct = Math.min(100, (s.token_used / s.token_quota) * 100);
+  const cls = pct > 80 ? 'danger' : pct > 50 ? 'warn' : '';
+  const remaining = s.token_quota - s.token_used;
+  el.innerHTML = `
+    <div class="row">
+      <div><span class="badge green">${s.plan_name}</span></div>
+      <div class="muted">到期: ${s.expires_at}</div>
+    </div>
+    <div class="progress-bar"><div class="fill ${cls}" style="width:${pct}%"></div></div>
+    <div class="row">
+      <div class="stat"><div class="num">${fmt(s.token_used)}</div><div class="label">已用 token</div></div>
+      <div class="stat"><div class="num">${fmt(remaining)}</div><div class="label">剩余 token</div></div>
+      <div class="stat"><div class="num">${fmt(s.token_quota)}</div><div class="label">总配额</div></div>
+    </div>`;
+}
+
+async function loadModels() {
+  const r = await api('/api/models', 'GET');
+  if (!r.models) return;
+  // Get current selected
+  const prof = await api('/api/user/profile', 'GET');
+  const selId = prof.selected_model_id;
+  const el = document.getElementById('model-list');
+  el.innerHTML = r.models.map(m => `
+    <div class="model-card ${m.id===selId?'selected':''}" onclick="selectModel(${m.id})">
+      <div class="name">${m.display_name}</div>
+      <div class="provider">${m.provider} · ${m.model_id}</div>
+      ${m.id===selId?'<span class="badge green" style="margin-top:8px">已选</span>':''}
+    </div>`).join('');
+}
+
+async function selectModel(id) {
+  const r = await api('/api/user/model', 'PUT', {model_id: id});
+  if (r.error) return toast(r.error, 'err');
+  toast('模型已切换');
+  loadModels();
+}
+
+async function loadUsage() {
+  const r = await api('/api/usage', 'GET');
+  const el = document.getElementById('usage-stats');
+  if (r.error) { el.innerHTML = '<p class="muted">暂无数据</p>'; return; }
+  let html = `<div class="row">
+    <div class="stat"><div class="num">${fmt(r.total_input)}</div><div class="label">输入 token</div></div>
+    <div class="stat"><div class="num">${fmt(r.total_output)}</div><div class="label">输出 token</div></div>
+    <div class="stat"><div class="num">${r.total_requests||0}</div><div class="label">请求次数</div></div>
+  </div>`;
+  if (r.by_model && r.by_model.length) {
+    html += '<table style="margin-top:16px"><tr><th>模型</th><th>输入</th><th>输出</th><th>次数</th></tr>';
+    r.by_model.forEach(m => {
+      html += `<tr><td>${m.model}</td><td>${fmt(m.total_input_tokens)}</td><td>${fmt(m.total_output_tokens)}</td><td>${m.total_requests}</td></tr>`;
+    });
+    html += '</table>';
+  }
+  el.innerHTML = html;
+}
+
+async function redeem() {
+  const code = document.getElementById('redeem-code').value.trim();
+  if (!code) return toast('请输入兑换码', 'err');
+  const r = await api('/api/redeem', 'POST', {code});
+  if (r.error) return toast(r.error, 'err');
+  toast('兑换成功！');
+  document.getElementById('redeem-code').value = '';
+  loadSubscription();
+}
+
+// --- Utils ---
+async function api(path, method, body) {
+  const opts = {method, headers: {'Content-Type': 'application/json'}};
+  if (JWT) opts.headers['Authorization'] = 'Bearer ' + JWT;
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const r = await fetch(path, opts);
+    return await r.json();
+  } catch(e) { return {error: e.message}; }
+}
+
+function fmt(n) { return (n||0).toLocaleString(); }
+
+function toast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type==='err'?'err':'ok');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// Init
+if (JWT) showDashboard();
+</script>
+</body>
+</html>

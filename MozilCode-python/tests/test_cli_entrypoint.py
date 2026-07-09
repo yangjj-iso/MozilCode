@@ -10,20 +10,30 @@ from mozilcode import __main__ as cli
 from mozilcode.permissions import PermissionMode
 
 
-def test_main_without_prompt_requires_headless_prompt(
+def test_main_without_prompt_launches_tui(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Without -p, the CLI should launch the TUI app instead of exiting."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["mozilcode"])
 
-    with pytest.raises(SystemExit) as exc:
-        cli.main()
+    launched: dict[str, bool] = {}
 
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "A prompt is required for headless CLI execution" in err
+    class FakeApp:
+        def __init__(self, **kwargs):
+            launched["app_created"] = True
+
+        def run(self):
+            launched["app_run"] = True
+
+    monkeypatch.setattr("mozilcode.app.MozilCodeApp", FakeApp)
+    monkeypatch.setattr("mozilcode.driver.NoAltScreenDriver", object)
+
+    cli.main()
+
+    assert launched.get("app_created") is True
+    assert launched.get("app_run") is True
 
 
 def test_drain_cli_notifications_uses_shared_task_format() -> None:
