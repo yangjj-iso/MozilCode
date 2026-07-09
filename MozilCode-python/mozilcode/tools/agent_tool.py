@@ -23,11 +23,14 @@ from mozilcode.tools.agent_tool_messages import (
     worktree_preserved_suffix,
 )
 from mozilcode.tools.agent_tool_support import (
-    create_subagent_permission_checker,
     parent_has_full_registry,
     resolve_parent_registry,
     resolve_parent_trace_id,
     unique_agent_name,
+)
+from mozilcode.tools.agent_tool_runtime import (
+    complete_trace_from_agent,
+    create_child_agent,
 )
 from mozilcode.tools.base import Tool, ToolResult
 
@@ -124,7 +127,6 @@ class AgentTool(Tool):
         from mozilcode.agents.fork import ForkError, build_forked_messages
         from mozilcode.agents.parser import AgentDef
         from mozilcode.agents.tool_filter import resolve_agent_tools
-        from mozilcode.agent import Agent as AgentClass
         from mozilcode.conversation import ConversationManager
 
         definition: AgentDef | None = None
@@ -183,26 +185,14 @@ class AgentTool(Tool):
             self._parent_agent.work_dir,
         )
 
-        # 为子 agent 创建权限检查器
-        checker = create_subagent_permission_checker(
-            self._parent_agent.work_dir,
-            definition.permission_mode,
-        )
-
         # 创建子 agent
-        sub_agent = AgentClass(
+        sub_agent = create_child_agent(
+            parent_agent=self._parent_agent,
             client=client,
             registry=filtered_registry,
-            protocol=self._parent_agent.protocol,
             work_dir=self._parent_agent.work_dir,
-            max_iterations=definition.max_turns,
-            permission_checker=checker,
-            context_window=self._parent_agent.context_window,
-            instructions_content=definition.system_prompt,
-            hook_engine=self._parent_agent.hook_engine,
+            definition=definition,
         )
-        sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
 
         # fork 子 agent 继承父 agent 的替换状态，确保共享的 tool_use_id 做出一致的
         # 决策——这样父子共享的 prompt cache 前缀才能保持字节级一致
@@ -252,12 +242,7 @@ class AgentTool(Tool):
                 output=f"Sub-agent failed: {e}", is_error=True
             )
 
-        self._trace_manager.update(
-            trace_node.agent_id,
-            input_tokens=sub_agent.total_input_tokens,
-            output_tokens=sub_agent.total_output_tokens,
-        )
-        self._trace_manager.complete(trace_node.agent_id, "completed")
+        complete_trace_from_agent(self._trace_manager, trace_node, sub_agent)
 
         return ToolResult(output=empty_subagent_output(result_text))
 
@@ -270,7 +255,6 @@ class AgentTool(Tool):
         from mozilcode.agents.fork import ForkError, build_forked_messages
         from mozilcode.agents.parser import AgentDef
         from mozilcode.agents.tool_filter import build_teammate_tools
-        from mozilcode.agent import Agent as AgentClass
         from mozilcode.conversation import ConversationManager
         from mozilcode.teams.models import BackendType, TeammateInfo
         from mozilcode.teams.registry import AgentNameRegistry
@@ -365,27 +349,18 @@ class AgentTool(Tool):
         # 6. 创建子 agent 并附加队友专属指令
         instructions = (definition.system_prompt or "") + TEAMMATE_ADDENDUM
 
-        checker = create_subagent_permission_checker(
-            wt.path,
-            "dontAsk",
-        )
-
-        sub_agent = AgentClass(
+        sub_agent = create_child_agent(
+            parent_agent=self._parent_agent,
             client=client,
             registry=teammate_registry,
-            protocol=self._parent_agent.protocol,
             work_dir=wt.path,
-            max_iterations=definition.max_turns,
-            permission_checker=checker,
-            context_window=self._parent_agent.context_window,
+            definition=definition,
+            permission_mode="dontAsk",
             instructions_content=instructions,
-            hook_engine=self._parent_agent.hook_engine,
+            agent_id=agent_id,
+            team_name=p.team_name,
+            team_manager=self._team_manager,
         )
-        sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
-        sub_agent.agent_id = agent_id
-        sub_agent.team_name = p.team_name
-        sub_agent._team_manager = self._team_manager
 
         # 7. 注册名称和成员信息
         AgentNameRegistry.instance().register(teammate_name, agent_id)
@@ -487,8 +462,6 @@ class AgentTool(Tool):
 
         from mozilcode.agents.parser import AgentDef
         from mozilcode.agents.tool_filter import resolve_agent_tools
-        from mozilcode.agent import Agent as AgentClass
-        from mozilcode.conversation import ConversationManager
         from mozilcode.worktree.integration import (
             build_worktree_notice,
             generate_worktree_name,
@@ -533,24 +506,13 @@ class AgentTool(Tool):
         )
         filtered_registry = rebase_file_tools(filtered_registry, wt.path)
 
-        checker = create_subagent_permission_checker(
-            wt.path,
-            definition.permission_mode,
-        )
-
-        sub_agent = AgentClass(
+        sub_agent = create_child_agent(
+            parent_agent=self._parent_agent,
             client=client,
             registry=filtered_registry,
-            protocol=self._parent_agent.protocol,
             work_dir=wt.path,
-            max_iterations=definition.max_turns,
-            permission_checker=checker,
-            context_window=self._parent_agent.context_window,
-            instructions_content=definition.system_prompt,
-            hook_engine=self._parent_agent.hook_engine,
+            definition=definition,
         )
-        sub_agent.parent_id = self._parent_agent.agent_id
-        sub_agent.trace_id = resolve_parent_trace_id(self._parent_agent)
 
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,
@@ -568,12 +530,7 @@ class AgentTool(Tool):
                 is_error=True,
             )
 
-        self._trace_manager.update(
-            trace_node.agent_id,
-            input_tokens=sub_agent.total_input_tokens,
-            output_tokens=sub_agent.total_output_tokens,
-        )
-        self._trace_manager.complete(trace_node.agent_id, "completed")
+        complete_trace_from_agent(self._trace_manager, trace_node, sub_agent)
 
         cleanup = await self._worktree_manager.auto_cleanup(wt_name, wt.head_commit)
         if cleanup.kept:
