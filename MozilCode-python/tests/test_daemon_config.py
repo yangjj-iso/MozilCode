@@ -12,7 +12,7 @@ from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime
 from mozilcode.daemon.session.store import SessionStore
 from mozilcode.permissions.modes import PermissionMode
-from mozilcode.removed_capabilities import (
+from mozilcode.config.removed_capabilities import (
     REMOVED_APP_SHELL_PATHS,
     REMOVED_MANAGEMENT_PATHS,
     find_removed_route_paths,

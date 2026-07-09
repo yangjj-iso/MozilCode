@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from mozilcode.client import _is_local_base_url, _resolve_openai_api_key
 from mozilcode.config import ProviderConfig
-from mozilcode.provider_auth import (
+from mozilcode.client.auth import (
     LOCAL_OPENAI_API_KEY,
     is_local_base_url,
     resolve_openai_api_key,

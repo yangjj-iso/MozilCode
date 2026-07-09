@@ -6,7 +6,7 @@ from typing import Any
 
 from starlette.routing import BaseRoute, Route, WebSocketRoute
 
-from mozilcode.removed_capabilities import assert_no_removed_route_paths
+from mozilcode.config.removed_capabilities import assert_no_removed_route_paths
 from mozilcode.daemon.a2a_routes import (
     a2a_agent_card,
     a2a_message_send,

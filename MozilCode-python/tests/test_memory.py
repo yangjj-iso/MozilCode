@@ -41,7 +41,7 @@ from mozilcode.memory.providers import (
     MemoryScope,
     build_memory_hub,
 )
-from mozilcode.validator import validate_memory
+from mozilcode.config.validator import validate_memory
 
 # =========================================================================
 # A. 指令文件（MOZILCODE.md）

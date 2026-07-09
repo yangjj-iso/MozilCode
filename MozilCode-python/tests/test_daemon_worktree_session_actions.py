@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from mozilcode.daemon.responses import DaemonActionResult
-from mozilcode.daemon.worktree_session_actions import (
+from mozilcode.daemon.actions.worktree_session import (
     create_session_worktree,
     enter_session_worktree,
     list_session_worktrees,

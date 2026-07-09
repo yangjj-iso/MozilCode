@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from mozilcode.daemon.permission_mode_actions import set_session_permission_mode
+from mozilcode.daemon.actions.permission_mode import set_session_permission_mode
 from mozilcode.daemon.session.status import command_acceptance_mode
 from mozilcode.permissions import PermissionMode
 

@@ -20,7 +20,7 @@ from mozilcode.daemon.session.payloads import (
     parse_permission_resolution_body,
     parse_start_task_body,
 )
-from mozilcode.llm_errors import LLMError
+from mozilcode.client.errors import LLMError
 
 USER_CONFIG_FILE = Path.home() / ".mozilcode" / "config.yaml"
 

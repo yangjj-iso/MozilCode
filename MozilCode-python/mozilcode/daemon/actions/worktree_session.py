@@ -8,7 +8,7 @@ from mozilcode.daemon.responses import (
     bad_request_result,
 )
 from mozilcode.daemon.workspace_payloads import worktree_to_dict
-from mozilcode.daemon.worktree_actions import (
+from mozilcode.daemon.actions.worktree import (
     create_and_enter_worktree,
     enter_worktree as enter_worktree_action,
     exit_worktree as exit_worktree_action,

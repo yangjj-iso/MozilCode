@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 
 from mozilcode.config import ConfigError, load_config
-from mozilcode.removed_capabilities import (
+from mozilcode.config.removed_capabilities import (
     REMOVED_CONFIG_SECTIONS,
     assert_no_removed_route_paths,
     find_removed_config_sections,
     find_removed_route_paths,
     removed_route_terms,
 )
-from mozilcode.validator import (
+from mozilcode.config.validator import (
     REMOVED_CONFIG_SECTIONS as VALIDATOR_REMOVED_CONFIG_SECTIONS,
 )
 

@@ -19,7 +19,7 @@ import logging
 from starlette.applications import Starlette
 
 from mozilcode.config import load_config, AppConfig
-from mozilcode.validator import ConfigError
+from mozilcode.config.validator import ConfigError
 from mozilcode.hooks import HookEngine, load_hooks
 
 from mozilcode.daemon.routes import build_routes

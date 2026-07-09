@@ -10,7 +10,7 @@ from mozilcode.daemon.server import create_app
 from mozilcode.daemon.responses import DaemonActionResult
 from mozilcode.daemon.session.store import SessionStore
 from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
-from mozilcode.daemon.worktree_actions import (
+from mozilcode.daemon.actions.worktree import (
     create_and_enter_worktree,
     exit_worktree as exit_worktree_action,
     list_worktrees_payload,

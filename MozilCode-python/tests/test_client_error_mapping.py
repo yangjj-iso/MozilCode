@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from mozilcode.client_error_mapping import ProviderErrorMapper
-from mozilcode.llm_errors import (
+from mozilcode.client.error_mapping import ProviderErrorMapper
+from mozilcode.client.errors import (
     AuthenticationError,
     LLMError,
     NetworkError,

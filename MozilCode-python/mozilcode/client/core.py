@@ -14,9 +14,9 @@ from mozilcode.providers.anthropic_request import (
     supports_adaptive_thinking as _supports_adaptive_thinking,
 )
 from mozilcode.providers.anthropic_streaming import AnthropicStreamState
-from mozilcode.client_error_mapping import provider_error_mapper
+from mozilcode.client.error_mapping import provider_error_mapper
 from mozilcode.config import ProviderConfig
-from mozilcode.context_window_resolver import (
+from mozilcode.client.context_window import (
     resolve_context_window as _resolve_context_window,
 )
 from mozilcode.conversation import ConversationManager
@@ -25,7 +25,7 @@ from mozilcode.serialization import (
     build_chat_completion_messages,
     build_openai_input,
 )
-from mozilcode.llm_errors import (
+from mozilcode.client.errors import (
     AuthenticationError,
     LLMError,
     NetworkError,
@@ -46,7 +46,7 @@ from mozilcode.providers.openai_streaming import (
 )
 from mozilcode.providers.openai_compat_request import build_chat_completion_request_kwargs
 from mozilcode.providers.openai_responses_request import build_openai_response_request_kwargs
-from mozilcode.provider_auth import (
+from mozilcode.client.auth import (
     is_local_base_url as _is_local_base_url,
     resolve_openai_api_key as _resolve_openai_api_key,
 )

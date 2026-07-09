@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozilcode.daemon.background_task_actions import (
+from mozilcode.daemon.actions.background_task import (
     cancel_session_background_task,
     list_session_background_tasks,
 )

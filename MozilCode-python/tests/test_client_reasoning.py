@@ -15,7 +15,7 @@ from mozilcode.client import (
 )
 from mozilcode.config import ProviderConfig
 from mozilcode.conversation import ConversationManager
-from mozilcode.llm_errors import (
+from mozilcode.client.errors import (
     LLMError as BASE_LLM_ERROR,
     RateLimitError,
     rate_limit_error,

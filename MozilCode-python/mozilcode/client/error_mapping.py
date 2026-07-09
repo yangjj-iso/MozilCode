@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import ModuleType
 
-from mozilcode.llm_errors import (
+from mozilcode.client.errors import (
     AuthenticationError,
     LLMError,
     NetworkError,

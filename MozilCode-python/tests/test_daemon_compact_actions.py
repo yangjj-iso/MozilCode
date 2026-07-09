@@ -4,7 +4,7 @@ import pytest
 
 from mozilcode.agent import CompactNotification, ErrorEvent
 from mozilcode.context import compute_compact_threshold
-from mozilcode.daemon.compact_actions import run_manual_compact
+from mozilcode.daemon.actions.compact import run_manual_compact
 from mozilcode.daemon.responses import DaemonActionResult
 
 

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from mozilcode.model_context import (
+from mozilcode.config.model_context import (
     DEFAULT_CONTEXT_WINDOW,
     MODEL_CONTEXT_WINDOWS,
     lookup_model_context_window,
 )
-from mozilcode.removed_capabilities import (
+from mozilcode.config.removed_capabilities import (
     REMOVED_CONFIG_SECTIONS,
     find_removed_config_sections,
 )
