@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from mozilcode.agent import Agent
-from mozilcode.agent_factory import AgentDeps, create_agent_from_config
+from mozilcode.agent.factory import AgentDeps, create_agent_from_config
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
 from mozilcode.daemon.session import SessionManager

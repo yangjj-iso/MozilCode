@@ -14,7 +14,7 @@ from mozilcode.daemon.a2a_routes import (
     a2a_task_cancel,
     a2a_task_get,
 )
-from mozilcode.daemon.session_routes import (
+from mozilcode.daemon.session.routes import (
     cancel_active_task,
     cancel_background_task,
     close_session,

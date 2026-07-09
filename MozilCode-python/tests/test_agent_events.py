@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import mozilcode.agent as agent_module
-from mozilcode.agent_events import PermissionResponse, StreamText, UsageEvent
+from mozilcode.agent.events import PermissionResponse, StreamText, UsageEvent
 from mozilcode.daemon.serialize import serialize_event
 
 

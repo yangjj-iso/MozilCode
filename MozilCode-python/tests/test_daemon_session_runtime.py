@@ -4,7 +4,7 @@ import pytest
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.session_runtime import create_daemon_session_runtime
+from mozilcode.daemon.session.runtime import create_daemon_session_runtime
 from mozilcode.permissions import PermissionMode
 
 

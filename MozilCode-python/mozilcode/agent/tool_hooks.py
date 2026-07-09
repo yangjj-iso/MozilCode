@@ -4,9 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from mozilcode.agent_events import HookEvent
-from mozilcode.agent_helpers import infer_tool_file_path
-from mozilcode.agent_hook_events import BuildHookContext, DrainHookEvents
+from mozilcode.agent.events import HookEvent
+from mozilcode.agent.helpers import infer_tool_file_path
+from mozilcode.agent.hook_events import BuildHookContext, DrainHookEvents
 from mozilcode.hooks import HookContext, ToolRejectedError
 from mozilcode.tools.base import ToolCallComplete
 

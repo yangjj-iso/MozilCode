@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozilcode.agent_llm_preparation import (
+from mozilcode.agent.llm_preparation import (
     build_deferred_tool_reminder,
     inject_deferred_tool_reminder,
     prepare_api_conversation,

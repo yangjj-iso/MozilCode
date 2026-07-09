@@ -5,15 +5,15 @@ from collections.abc import MutableMapping
 from pathlib import Path
 from typing import Any
 
-from mozilcode.agent_factory import create_agent_from_config
+from mozilcode.agent.factory import create_agent_from_config
 from mozilcode.config import AppConfig
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.session_runtime import (
+from mozilcode.daemon.session.runtime import (
     AgentFactory,
     DaemonSessionRuntime,
     create_daemon_session_runtime,
 )
-from mozilcode.daemon.session_store import validate_session_id
+from mozilcode.daemon.session.store import validate_session_id
 from mozilcode.hooks import HookEngine
 from mozilcode.permissions import PermissionMode
 

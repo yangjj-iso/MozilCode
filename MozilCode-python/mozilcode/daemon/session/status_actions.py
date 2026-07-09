@@ -5,8 +5,8 @@ from typing import Any, Protocol
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.session_runtime import DaemonSessionRuntime
-from mozilcode.daemon.session_status import (
+from mozilcode.daemon.session.runtime import DaemonSessionRuntime
+from mozilcode.daemon.session.status import (
     build_session_status,
     command_acceptance_mode,
 )

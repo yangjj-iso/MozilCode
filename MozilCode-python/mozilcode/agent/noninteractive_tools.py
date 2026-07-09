@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from mozilcode.agent_helpers import infer_tool_file_path
-from mozilcode.agent_tool_execution import execute_validated_tool
+from mozilcode.agent.helpers import infer_tool_file_path
+from mozilcode.agent.tool_execution import execute_validated_tool
 from mozilcode.hooks import HookContext, ToolRejectedError
 from mozilcode.permissions import PermissionChecker, PermissionMode
 from mozilcode.tools import ToolRegistry

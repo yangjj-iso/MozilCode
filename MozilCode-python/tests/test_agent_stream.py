@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import mozilcode.agent as agent_module
-from mozilcode.agent_events import StreamText, ThinkingText, ToolUseEvent
-from mozilcode.agent_stream import LLMResponse, StreamCollector, ThinkingBlock
+from mozilcode.agent.events import StreamText, ThinkingText, ToolUseEvent
+from mozilcode.agent.stream import LLMResponse, StreamCollector, ThinkingBlock
 from mozilcode.tools.base import (
     StreamEnd,
     TextDelta,

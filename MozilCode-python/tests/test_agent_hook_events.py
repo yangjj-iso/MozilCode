@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from mozilcode.agent_helpers import build_hook_context
-from mozilcode.agent_hook_events import (
+from mozilcode.agent.helpers import build_hook_context
+from mozilcode.agent.hook_events import (
     drain_hook_events,
     hook_notification_to_event,
     hook_notifications_to_events,

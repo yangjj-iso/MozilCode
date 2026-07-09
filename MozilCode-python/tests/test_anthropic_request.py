@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.anthropic_request import (
+from mozilcode.providers.anthropic_request import (
     EPHEMERAL_CACHE_CONTROL,
     build_anthropic_request_kwargs,
     mark_last_tool_for_cache,

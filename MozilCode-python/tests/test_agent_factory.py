@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from mozilcode.config import AppConfig, ProviderConfig
-from mozilcode import agent_factory
-from mozilcode.agent_factory import create_agent_from_config
+from mozilcode.agent import factory as agent_factory
+from mozilcode.agent.factory import create_agent_from_config
 from mozilcode.permissions import PermissionMode
 
 

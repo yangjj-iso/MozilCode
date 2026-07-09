@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Callable
 
 from pydantic import ValidationError
 
-from mozilcode.agent_events import (
+from mozilcode.agent.events import (
     AgentEvent,
     AskUserRequest,
     CompactNotification,
@@ -27,45 +27,45 @@ from mozilcode.agent_events import (
     TurnComplete,
     UsageEvent,
 )
-from mozilcode.agent_compaction import (
+from mozilcode.agent.compaction import (
     compact_noop_notification,
     compact_success_notification,
     inject_agent_context,
     reinject_after_compact,
 )
-from mozilcode.agent_stream import LLMResponse, StreamCollector, ThinkingBlock
-from mozilcode.agent_helpers import (
+from mozilcode.agent.stream import LLMResponse, StreamCollector, ThinkingBlock
+from mozilcode.agent.helpers import (
     build_hook_context,
     build_permission_description,
     infer_tool_file_path,
     latest_user_query,
 )
-from mozilcode.agent_hook_events import (
+from mozilcode.agent.hook_events import (
     drain_hook_events as drain_hook_engine_events,
     run_lifecycle_hook,
 )
-from mozilcode.agent_llm_preparation import (
+from mozilcode.agent.llm_preparation import (
     inject_deferred_tool_reminder,
     prepare_api_conversation,
 )
-from mozilcode.agent_memory import AgentMemoryBridge
-from mozilcode.agent_notifications import (
+from mozilcode.agent.memory import AgentMemoryBridge
+from mozilcode.agent.notifications import (
     consume_team_mailbox,
     inject_external_notifications,
 )
-from mozilcode.agent_noninteractive_tools import execute_noninteractive_tool_call
-from mozilcode.agent_output_recovery import (
+from mozilcode.agent.noninteractive_tools import execute_noninteractive_tool_call
+from mozilcode.agent.output_recovery import (
     OutputRecoveryState,
     handle_output_token_limit,
 )
-from mozilcode.agent_recovery import record_tool_recovery_snapshot
-from mozilcode.agent_response_history import (
+from mozilcode.agent.recovery import record_tool_recovery_snapshot
+from mozilcode.agent.response_history import (
     add_final_response,
     add_tool_call_response,
     response_thinking_blocks,
     snapshot_file_history,
 )
-from mozilcode.agent_tool_execution import (
+from mozilcode.agent.tool_execution import (
     StreamingExecutor,
     ToolBatch,
     _AuthResult,
@@ -74,14 +74,14 @@ from mozilcode.agent_tool_execution import (
     execute_validated_tool,
     partition_tool_calls,
 )
-from mozilcode.agent_tool_authorization import authorize_tool_call
-from mozilcode.agent_tool_hooks import run_post_tool_hook, run_pre_tool_hook
-from mozilcode.agent_tool_results import (
+from mozilcode.agent.tool_authorization import authorize_tool_call
+from mozilcode.agent.tool_hooks import run_post_tool_hook, run_pre_tool_hook
+from mozilcode.agent.tool_results import (
     hook_rejected_result,
     tool_result_block,
     tool_result_event,
 )
-from mozilcode.agent_usage import (
+from mozilcode.agent.usage import (
     UsageTotals,
     accumulate_response_usage,
     usage_callback_payload,
@@ -128,7 +128,7 @@ MEMORY_EXTRACTION_INTERVAL = 5
 # AgentEvent 事件类型
 # ---------------------------------------------------------------------------
 
-# Event DTOs are defined in mozilcode.agent_events and imported here so existing
+# Event DTOs are defined in mozilcode.agent.events and imported here so existing
 # public imports from mozilcode.agent remain valid.
 
 

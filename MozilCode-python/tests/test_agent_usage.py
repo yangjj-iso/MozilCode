@@ -5,8 +5,8 @@ from typing import Any, AsyncIterator
 import pytest
 
 from mozilcode.agent import Agent
-from mozilcode.agent_stream import LLMResponse
-from mozilcode.agent_usage import (
+from mozilcode.agent.stream import LLMResponse
+from mozilcode.agent.usage import (
     UsageTotals,
     accumulate_response_usage,
     response_context_tokens,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol
 
-from mozilcode.agent_events import HookEvent
+from mozilcode.agent.events import HookEvent
 from mozilcode.hooks import HookContext
 from mozilcode.hooks.engine import HookNotification
 

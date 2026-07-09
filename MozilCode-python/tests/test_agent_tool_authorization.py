@@ -6,9 +6,9 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-from mozilcode.agent_events import PermissionRequest, PermissionResponse
-from mozilcode.agent_tool_authorization import authorize_tool_call
-from mozilcode.agent_tool_execution import _AuthResult
+from mozilcode.agent.events import PermissionRequest, PermissionResponse
+from mozilcode.agent.tool_authorization import authorize_tool_call
+from mozilcode.agent.tool_execution import _AuthResult
 from mozilcode.permissions import (
     DangerousCommandDetector,
     PathSandbox,

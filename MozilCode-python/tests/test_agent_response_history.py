@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.agent_response_history import (
+from mozilcode.agent.response_history import (
     add_final_response,
     add_tool_call_response,
     response_snapshot_summary,
@@ -8,7 +8,7 @@ from mozilcode.agent_response_history import (
     snapshot_file_history,
     tool_use_blocks,
 )
-from mozilcode.agent_stream import LLMResponse, ThinkingBlock
+from mozilcode.agent.stream import LLMResponse, ThinkingBlock
 from mozilcode.conversation import ConversationManager
 from mozilcode.tools.base import ToolCallComplete
 

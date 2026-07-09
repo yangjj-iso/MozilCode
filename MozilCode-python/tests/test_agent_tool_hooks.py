@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from mozilcode.agent_events import HookEvent
-from mozilcode.agent_helpers import build_hook_context, infer_tool_file_path
-from mozilcode.agent_tool_hooks import (
+from mozilcode.agent.events import HookEvent
+from mozilcode.agent.helpers import build_hook_context, infer_tool_file_path
+from mozilcode.agent.tool_hooks import (
     build_tool_hook_context,
     run_post_tool_hook,
     run_pre_tool_hook,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from mozilcode.anthropic_streaming import AnthropicStreamState, parse_tool_arguments
+from mozilcode.providers.anthropic_streaming import AnthropicStreamState, parse_tool_arguments
 from mozilcode.tools.base import (
     ThinkingComplete,
     ThinkingDelta,

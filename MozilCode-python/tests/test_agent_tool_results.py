@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.agent_tool_results import (
+from mozilcode.agent.tool_results import (
     hook_rejected_result,
     tool_result_block,
     tool_result_event,

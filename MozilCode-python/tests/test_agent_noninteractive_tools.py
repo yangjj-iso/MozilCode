@@ -6,8 +6,8 @@ import pytest
 import yaml
 from pydantic import BaseModel
 
-from mozilcode.agent_helpers import build_hook_context, infer_tool_file_path
-from mozilcode.agent_noninteractive_tools import execute_noninteractive_tool_call
+from mozilcode.agent.helpers import build_hook_context, infer_tool_file_path
+from mozilcode.agent.noninteractive_tools import execute_noninteractive_tool_call
 from mozilcode.hooks import HookContext, ToolRejectedError
 from mozilcode.permissions import (
     DangerousCommandDetector,

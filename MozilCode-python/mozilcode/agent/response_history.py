@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from mozilcode.agent_stream import LLMResponse
+from mozilcode.agent.stream import LLMResponse
 from mozilcode.conversation import ConversationManager, ToolUseBlock
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
 from mozilcode.tools.base import ToolCallComplete

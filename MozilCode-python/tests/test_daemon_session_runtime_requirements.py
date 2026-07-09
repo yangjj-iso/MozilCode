@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from mozilcode.daemon.responses import session_not_found_result
-from mozilcode.daemon.session_runtime import DaemonSessionRuntime
-from mozilcode.daemon.session_runtime_requirements import SessionRuntimeRequirements
+from mozilcode.daemon.session.runtime import DaemonSessionRuntime
+from mozilcode.daemon.session.runtime_requirements import SessionRuntimeRequirements
 
 
 class _EnsureAgent:

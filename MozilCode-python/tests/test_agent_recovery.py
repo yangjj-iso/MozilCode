@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozilcode.agent_recovery import record_tool_recovery_snapshot
+from mozilcode.agent.recovery import record_tool_recovery_snapshot
 from mozilcode.context import RecoveryState
 from mozilcode.tools.base import ToolCallComplete, ToolResult
 

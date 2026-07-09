@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.agent_helpers import (
+from mozilcode.agent.helpers import (
     build_hook_context,
     build_permission_description,
     infer_tool_file_path,

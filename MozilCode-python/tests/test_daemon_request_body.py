@@ -13,7 +13,7 @@ from mozilcode.daemon.request_body import (
     string_mapping_field,
 )
 from mozilcode.daemon.server import create_app
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.store import SessionStore
 
 
 def _app(tmp_path):

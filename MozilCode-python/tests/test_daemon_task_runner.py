@@ -8,7 +8,7 @@ import pytest
 from mozilcode.agent import PermissionRequest, PermissionResponse, StreamText
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.server_state import DaemonServer, DaemonSessionRuntime
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.store import SessionStore
 from mozilcode.permissions import PermissionMode
 
 

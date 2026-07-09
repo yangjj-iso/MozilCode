@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.openai_compat_request import (
+from mozilcode.providers.openai_compat_request import (
     build_chat_completion_request_kwargs,
     convert_tools_for_chat_completions,
 )

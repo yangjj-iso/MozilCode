@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.agent_events import CompactNotification
+from mozilcode.agent.events import CompactNotification
 from mozilcode.context import CompactEvent
 from mozilcode.conversation import ConversationManager
 

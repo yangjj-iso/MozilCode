@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mozilcode.daemon.session_store import SessionStore, validate_session_id
+from mozilcode.daemon.session.store import SessionStore, validate_session_id
 
 
 def test_session_store_persists_and_loads_meta_and_events(tmp_path):

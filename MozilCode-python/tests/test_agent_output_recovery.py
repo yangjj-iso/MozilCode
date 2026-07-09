@@ -5,15 +5,15 @@ from typing import Any, AsyncIterator
 import pytest
 
 from mozilcode.agent import Agent
-from mozilcode.agent_events import LoopComplete, RetryEvent
-from mozilcode.agent_output_recovery import (
+from mozilcode.agent.events import LoopComplete, RetryEvent
+from mozilcode.agent.output_recovery import (
     MAX_TOKENS_CEILING,
     MAX_TOKENS_ESCALATION_PROMPT,
     MAX_TOKENS_RECOVERY_PROMPT,
     OutputRecoveryState,
     handle_output_token_limit,
 )
-from mozilcode.agent_stream import LLMResponse
+from mozilcode.agent.stream import LLMResponse
 from mozilcode.client import LLMClient
 from mozilcode.conversation import ConversationManager
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock

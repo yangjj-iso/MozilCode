@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mozilcode.agent_notifications import (
+from mozilcode.agent.notifications import (
     consume_team_mailbox,
     format_mailbox_message,
     inject_external_notifications,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mozilcode.daemon.request_body import BodyFieldError
-from mozilcode.daemon.session_payloads import (
+from mozilcode.daemon.session.payloads import (
     AskUserResolutionBody,
     CreateSessionBody,
     PermissionResolutionBody,

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mozilcode.agent_events import UsageEvent
-from mozilcode.agent_stream import LLMResponse
+from mozilcode.agent.events import UsageEvent
+from mozilcode.agent.stream import LLMResponse
 
 
 @dataclass(frozen=True)

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 
-from mozilcode.daemon.session_meta import (
+from mozilcode.daemon.session.meta import (
     new_session_meta,
     session_info_from_meta,
     session_work_dir_from_meta,
     sort_session_ids_by_created_at,
 )
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.store import SessionStore
 
 log = logging.getLogger(__name__)
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
-from mozilcode.agent_events import PermissionRequest, PermissionResponse
-from mozilcode.agent_tool_execution import _AuthResult
+from mozilcode.agent.events import PermissionRequest, PermissionResponse
+from mozilcode.agent.tool_execution import _AuthResult
 from mozilcode.permissions import PermissionChecker
 from mozilcode.permissions.rules import Rule, extract_content
 from mozilcode.tools import ToolRegistry

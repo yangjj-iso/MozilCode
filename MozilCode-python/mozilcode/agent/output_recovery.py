@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from mozilcode.agent_events import RetryEvent
-from mozilcode.agent_stream import LLMResponse
+from mozilcode.agent.events import RetryEvent
+from mozilcode.agent.stream import LLMResponse
 from mozilcode.conversation import ConversationManager
 from mozilcode.conversation import ThinkingBlock as ConvThinkingBlock
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.agent_compaction import (
+from mozilcode.agent.compaction import (
     compact_noop_notification,
     compact_success_notification,
     inject_agent_context,

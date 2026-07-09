@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 
 from mozilcode.agent import Agent
-from mozilcode.agent_events import PermissionResponse
+from mozilcode.agent.events import PermissionResponse
 from mozilcode.config import AppConfig
 from mozilcode.conversation import ConversationManager
-from mozilcode.agent_factory import AgentDeps, create_agent_from_config
+from mozilcode.agent.factory import AgentDeps, create_agent_from_config
 from mozilcode.daemon.active_tasks import ActiveTaskRegistry
 from mozilcode.daemon.agent_task_runner import AgentTaskRunner
 from mozilcode.daemon.background_task_actions import (
@@ -16,24 +16,24 @@ from mozilcode.daemon.background_task_actions import (
 from mozilcode.daemon.compact_actions import run_manual_compact
 from mozilcode.daemon.foreground_task_actions import start_session_task
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.session_records import SessionRecords
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.records import SessionRecords
+from mozilcode.daemon.session.store import SessionStore
 from mozilcode.daemon.responses import (
     DaemonActionResult,
 )
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.pending_prompt_actions import resolve_session_pending_prompt
 from mozilcode.daemon.permission_mode_actions import set_session_permission_mode
-from mozilcode.daemon.session_close_actions import close_daemon_session
-from mozilcode.daemon.session_lifecycle_actions import (
+from mozilcode.daemon.session.close_actions import close_daemon_session
+from mozilcode.daemon.session.lifecycle_actions import (
     ensure_session_runtime,
     init_daemon_session,
 )
-from mozilcode.daemon.session_runtime import (
+from mozilcode.daemon.session.runtime import (
     DaemonSessionRuntime,
 )
-from mozilcode.daemon.session_runtime_requirements import SessionRuntimeRequirements
-from mozilcode.daemon.session_status_actions import build_daemon_session_status
+from mozilcode.daemon.session.runtime_requirements import SessionRuntimeRequirements
+from mozilcode.daemon.session.status_actions import build_daemon_session_status
 from mozilcode.daemon.worktree_session_actions import (
     create_session_worktree,
     enter_session_worktree,

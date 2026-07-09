@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.openai_responses_request import build_openai_response_request_kwargs
+from mozilcode.providers.openai_responses_request import build_openai_response_request_kwargs
 
 
 def test_build_openai_response_request_kwargs_keeps_required_shape() -> None:

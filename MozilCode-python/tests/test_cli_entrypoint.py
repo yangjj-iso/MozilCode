@@ -98,7 +98,7 @@ async def test_run_prompt_uses_shared_agent_factory(
         )
         return agent, deps
 
-    import mozilcode.agent_factory as agent_factory
+    import mozilcode.agent.factory as agent_factory
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
@@ -160,7 +160,7 @@ async def test_run_prompt_shutdowns_memory_hub_when_agent_fails(
             team_manager=SimpleNamespace(),
         )
 
-    import mozilcode.agent_factory as agent_factory
+    import mozilcode.agent.factory as agent_factory
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(

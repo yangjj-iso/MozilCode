@@ -10,7 +10,7 @@ from mozilcode.daemon.routes import HTTP_ROUTES, WEBSOCKET_ROUTES, build_routes
 from mozilcode.daemon.server import create_app
 from mozilcode.daemon.server import DaemonServer
 from mozilcode.daemon.server_state import DaemonSessionRuntime
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.store import SessionStore
 from mozilcode.permissions.modes import PermissionMode
 from mozilcode.removed_capabilities import (
     REMOVED_APP_SHELL_PATHS,

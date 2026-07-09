@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 
-from mozilcode.agent_events import (
+from mozilcode.agent.events import (
     AgentEvent,
     StreamText,
     ThinkingText,

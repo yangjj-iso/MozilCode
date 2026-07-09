@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from mozilcode.agent_memory import AgentMemoryBridge
+from mozilcode.agent.memory import AgentMemoryBridge
 from mozilcode.conversation import ConversationManager
 from mozilcode.memory.providers import (
     MEMORY_EVENT_TURN_COMMITTED,

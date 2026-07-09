@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mozilcode.daemon.session_status import resolve_mode_transition
+from mozilcode.daemon.session.status import resolve_mode_transition
 from mozilcode.permissions import PermissionMode
 
 EnsureAgent = Callable[[str], Awaitable[bool]]

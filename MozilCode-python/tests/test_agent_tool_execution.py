@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 import mozilcode.agent as agent_module
-from mozilcode.agent_tool_execution import (
+from mozilcode.agent.tool_execution import (
     StreamingExecutor,
     ToolBatch,
     _ToolExecResult,

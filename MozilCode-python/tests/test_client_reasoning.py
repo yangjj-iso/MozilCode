@@ -20,7 +20,7 @@ from mozilcode.llm_errors import (
     RateLimitError,
     rate_limit_error,
 )
-from mozilcode.openai_streaming import (
+from mozilcode.providers.openai_streaming import (
     stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage,
 )

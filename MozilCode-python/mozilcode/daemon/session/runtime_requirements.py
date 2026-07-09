@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 
 from mozilcode.agent import Agent
-from mozilcode.agent_factory import AgentDeps
+from mozilcode.agent.factory import AgentDeps
 from mozilcode.conversation import ConversationManager
 from mozilcode.daemon.responses import DaemonActionResult, session_not_found_result
-from mozilcode.daemon.session_runtime import DaemonSessionRuntime
+from mozilcode.daemon.session.runtime import DaemonSessionRuntime
 
 EnsureAgent = Callable[[str], Awaitable[bool]]
 

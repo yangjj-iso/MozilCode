@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.daemon.session_meta import (
+from mozilcode.daemon.session.meta import (
     new_session_meta,
     session_info_from_meta,
     session_work_dir_from_meta,

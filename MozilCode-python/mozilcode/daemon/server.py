@@ -24,7 +24,7 @@ from mozilcode.hooks import HookEngine, load_hooks
 
 from mozilcode.daemon.routes import build_routes
 from mozilcode.daemon.server_state import DaemonServer
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.store import SessionStore
 from mozilcode.a2a.bridge import A2ABridge
 
 log = logging.getLogger(__name__)

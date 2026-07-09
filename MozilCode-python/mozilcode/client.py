@@ -6,14 +6,14 @@ from typing import Any, AsyncIterator
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
-from mozilcode.anthropic_request import (
+from mozilcode.providers.anthropic_request import (
     ANTHROPIC_MODEL_FETCH_TIMEOUT,
     build_anthropic_request_kwargs,
     mark_last_tool_for_cache as _mark_last_tool_for_cache,
     mark_last_user_tail_for_cache as _mark_last_user_tail_for_cache,
     supports_adaptive_thinking as _supports_adaptive_thinking,
 )
-from mozilcode.anthropic_streaming import AnthropicStreamState
+from mozilcode.providers.anthropic_streaming import AnthropicStreamState
 from mozilcode.client_error_mapping import provider_error_mapper
 from mozilcode.config import ProviderConfig
 from mozilcode.context_window_resolver import (
@@ -32,7 +32,7 @@ from mozilcode.llm_errors import (
     RateLimitError,
     rate_limit_error as _rate_limit_error,
 )
-from mozilcode.openai_streaming import (
+from mozilcode.providers.openai_streaming import (
     OpenAIChatToolCallState,
     OpenAIReasoningState,
     OpenAIResponseToolCallState,
@@ -44,8 +44,8 @@ from mozilcode.openai_streaming import (
     stream_end_from_openai_chat_usage as _stream_end_from_openai_chat_usage,
     stream_end_from_openai_response_usage as _stream_end_from_openai_response_usage,
 )
-from mozilcode.openai_compat_request import build_chat_completion_request_kwargs
-from mozilcode.openai_responses_request import build_openai_response_request_kwargs
+from mozilcode.providers.openai_compat_request import build_chat_completion_request_kwargs
+from mozilcode.providers.openai_responses_request import build_openai_response_request_kwargs
 from mozilcode.provider_auth import (
     is_local_base_url as _is_local_base_url,
     resolve_openai_api_key as _resolve_openai_api_key,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mozilcode.daemon.session_status import (
+from mozilcode.daemon.session.status import (
     build_session_status,
     command_acceptance_mode,
     resolve_mode_transition,

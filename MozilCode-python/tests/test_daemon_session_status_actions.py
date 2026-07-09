@@ -6,8 +6,8 @@ import pytest
 
 from mozilcode.config import AppConfig, ProviderConfig
 from mozilcode.daemon.active_tasks import ActiveTaskRegistry
-from mozilcode.daemon.session_runtime import DaemonSessionRuntime
-from mozilcode.daemon.session_status_actions import (
+from mozilcode.daemon.session.runtime import DaemonSessionRuntime
+from mozilcode.daemon.session.status_actions import (
     build_daemon_session_status,
     configured_provider,
     session_command_acceptance_mode,

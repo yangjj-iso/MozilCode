@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from mozilcode.agent_events import CompactStarted, ErrorEvent, UsageEvent
+from mozilcode.agent.events import CompactStarted, ErrorEvent, UsageEvent
 from mozilcode.context import compute_compact_threshold
 from mozilcode.daemon.responses import DaemonActionResult
 from mozilcode.daemon.serialize import serialize_event

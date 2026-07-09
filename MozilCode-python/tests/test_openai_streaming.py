@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from mozilcode.openai_streaming import (
+from mozilcode.providers.openai_streaming import (
     OpenAIChatToolCallState,
     OpenAIReasoningState,
     OpenAIResponseToolCallState,

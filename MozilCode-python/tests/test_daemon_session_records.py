@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from mozilcode.daemon.session_records import SessionRecords
-from mozilcode.daemon.session_store import SessionStore
+from mozilcode.daemon.session.records import SessionRecords
+from mozilcode.daemon.session.store import SessionStore
 
 
 def test_session_records_loads_persisted_sessions_sorted_by_created_at(tmp_path):

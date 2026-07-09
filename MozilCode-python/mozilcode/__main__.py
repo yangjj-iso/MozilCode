@@ -71,7 +71,7 @@ def main() -> None:
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str) -> None:
     work_dir = os.getcwd()
-    from mozilcode.agent_factory import create_agent_from_config
+    from mozilcode.agent.factory import create_agent_from_config
 
     agent, deps = await create_agent_from_config(
         config,

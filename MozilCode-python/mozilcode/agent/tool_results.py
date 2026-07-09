@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mozilcode.agent_events import ToolResultEvent
+from mozilcode.agent.events import ToolResultEvent
 from mozilcode.context import prepare_tool_result_content
 from mozilcode.conversation import ToolResultBlock
 from mozilcode.tools.base import ToolCallComplete, ToolResult

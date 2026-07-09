@@ -7,7 +7,7 @@ from typing import Any
 from mozilcode.daemon.active_tasks import ActiveTaskRegistry
 from mozilcode.daemon.pending_prompts import PendingPromptRegistry
 from mozilcode.daemon.session import SessionManager
-from mozilcode.daemon.session_store import validate_session_id
+from mozilcode.daemon.session.store import validate_session_id
 from mozilcode.permissions import PermissionMode
 
 ValidateSessionId = Callable[[str], str]
