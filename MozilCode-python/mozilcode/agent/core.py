@@ -1,3 +1,9 @@
+"""Agent 核心运行循环。
+
+Agent.run() 是异步生成器，产出事件流供 TUI/Daemon/GUI 消费。
+主路径：注入上下文 → 循环(压缩/pre_send/LLM/post_receive/工具执行) → 收敛结束。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -123,41 +129,13 @@ from mozilcode.tools.base import (
 
 log = logging.getLogger(__name__)
 
-# 每隔多少轮对话触发一次记忆提取（用 LLM 从对话中提取值得长期记忆的信息）
+# 每隔 N 轮触发一次记忆提取
 MEMORY_EXTRACTION_INTERVAL = 5
-# ---------------------------------------------------------------------------
-# AgentEvent 事件类型定义在 mozilcode.agent.events 中，此处导入是为了保持
-# mozilcode.agent 包的公开导入路径不变。
-# ---------------------------------------------------------------------------
 
-
-# ---------------------------------------------------------------------------
-# Agent 主循环
-#
-# Agent 是整个系统的核心引擎。它的 run() 方法是一个异步生成器，产出事件流
-#（StreamText / ToolUseEvent / ToolResultEvent / LoopComplete 等），
-# 由 TUI / Daemon / GUI 等前端消费。
-#
-# 核心循环逻辑：
-#   1. 加载环境上下文 + 记忆 → 注入对话 → 触发 session_start Hook
-#   2. while True:
-#      a. turn_start Hook
-#      b. Layer 2 上下文压缩检查（接近窗口上限时自动摘要历史）
-#      c. pre_send Hook → 构建 system prompt + tools schema
-#      d. Layer 1 超大工具结果按 token 预算截断
-#      e. 调用 LLM（流式）→ yield StreamText
-#      f. post_receive Hook → 记录 token 用量
-#      g. 如果 LLM 返回 tool_call → pre_tool_use Hook → 权限检查 → 执行 → post_tool_use Hook
-#      h. 如果 LLM 没有返回 tool_call → 任务完成 → 触发记忆观察/提取 → session_end Hook → yield LoopComplete
-# ---------------------------------------------------------------------------
 
 class Agent:
-    """AI 编码助手的核心引擎。
+    """AI 编码助手核心引擎：循环调用 LLM + 工具，直到收敛或达上限。"""
 
-    Agent 接收对话历史，循环调用 LLM + 执行工具，直到 LLM 不再请求工具调用
-    或达到最大迭代次数。整个过程通过异步生成器产出事件流，前端消费事件
-    来实时展示 LLM 文本、工具调用、权限请求等。
-    """
 
     def __init__(
         self,
@@ -186,9 +164,7 @@ class Agent:
         self.session_dir = ensure_session_dir(work_dir)           # 会话持久化目录
         self.compact_breaker = CompactCircuitBreaker()            # 上下文压缩熔断器（防频繁压缩）
         self.replacement_state: ContentReplacementState = create_replacement_state()  # Layer 1 替换状态
-        # 保存重建工作上下文所需的快照，在 Layer 2 压缩对话后使用：
-        # 最近的文件读取和 skill 调用。每次 ReadFile / skill 调用时记录，
-        # auto_compact 触发阈值时消费。
+        # Layer2 压缩后用于恢复近期读文件/skill 快照
         self.recovery_state: RecoveryState = RecoveryState()
         self.total_input_tokens = 0                                # 累计输入 token
         self.total_output_tokens = 0                               # 累计输出 token
@@ -263,12 +239,14 @@ class Agent:
             self._agent_catalog_list = catalog_list
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
+        # 把事件名 + 可选字段打成 HookContext（供 condition / 模板变量 $FILE_PATH 等展开）
         return build_hook_context(event, **kwargs)
 
     def _infer_file_path(self, args: dict) -> str:
         return infer_tool_file_path(args)
 
     def _drain_hook_events(self) -> list[HookEvent]:
+        # HookEngine 执行中写入的通知出队 → 转成 Agent 事件流用的 HookEvent 列表
         return drain_hook_engine_events(self.hook_engine)
 
     async def _run_lifecycle_hook(
@@ -276,6 +254,7 @@ class Agent:
         event: str,
         **context_kwargs: Any,
     ) -> list[HookEvent]:
+        # 生命周期 Hook 薄封装：构造 context → run_hooks → drain 成 HookEvent
         return await run_lifecycle_hook(
             hook_engine=self.hook_engine,
             build_hook_context=self._build_hook_context,
@@ -296,20 +275,16 @@ class Agent:
         return latest_user_query(conversation)
 
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
-        """Agent 主循环 —— 模型↔工具流式交互至收敛。
-
-        这是一个异步生成器，产出事件流供前端消费。循环逻辑：
-        1. 会话初始化：注入环境上下文 + 记忆 → 触发 session_start Hook
-        2. 每轮迭代：上下文压缩检查 → pre_send Hook → 调用 LLM → post_receive Hook
-           → 如果 LLM 请求工具：pre_tool_use Hook → 权限检查 → 执行 → post_tool_use Hook → 下一轮
-           → 如果 LLM 不再请求工具：记忆观察/提取 → session_end Hook → yield LoopComplete
-        """
+        """主循环：注入上下文后反复 LLM↔工具，直到无 tool_call 或达上限。"""
         self._current_conversation = conversation
         # 构建环境上下文（工作目录、激活的 Skill、可用 Agent 类型清单）
         env_context = build_environment_context(
-            self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
+            self.work_dir,
+            self.active_skills,
+            self._skill_catalog,
+            self._agent_catalog,
         )
-        # 加载记忆上下文（用最近一条用户消息做语义检索）
+        # 用最近真实 user 消息做记忆检索 query
         memory_content = await self._load_memory_context(self._latest_user_query(conversation))
         # 将环境上下文、项目指令、记忆内容注入对话开头
         inject_agent_context(
@@ -319,7 +294,7 @@ class Agent:
             memory_content=memory_content,
         )
 
-        # 触发 session_start 生命周期 Hook
+        # session_start：await 列表后再 yield 给前端
         for he in await self._run_lifecycle_hook("session_start"):
             yield he
 
@@ -341,7 +316,7 @@ class Agent:
             for he in await self._run_lifecycle_hook("turn_start"):
                 yield he
 
-            # 注入外部通知（Team mailbox 消息、后台任务完成通知等）
+            # 注入外部通知（Team mailbox / notification_fn），供本轮 LLM 可见
             self._inject_external_notifications(conversation)
 
             # ② Layer 2: 接近 context window 上限时自动 compact（摘要历史对话）
@@ -406,7 +381,7 @@ class Agent:
                 agent_catalog=self._agent_catalog_list or None,
             )
 
-            # Plan 模式：注入计划文件提醒，LLM 只能读不能写
+            # Plan 模式：仅允许改计划文件，并注入计划提醒
             if self.plan_mode:
                 plan_path = str(self._get_plan_path())
                 if self.permission_checker:
@@ -417,25 +392,23 @@ class Agent:
                 )
                 conversation.add_system_reminder(plan_reminder)
 
-            # 将 Hook 执行结果的通知注入对话作为 system reminder
+            # 兜底残留 hook 通知 → system-reminder（pre_send 通常已 drain 过）
             if self.hook_engine:
                 for note in self.hook_engine.drain_notifications():
                     conversation.add_system_reminder(
                         f"Hook [{note.hook_id}] {note.event}: {note.output}"
                     )
 
-            # 注入延迟工具（ToolSearch）的提醒，让 LLM 知道有按需加载的工具
+            # 提醒 LLM 还有可 ToolSearch 加载的 deferred 工具
             inject_deferred_tool_reminder(
                 conversation,
                 self.registry.get_deferred_tool_names(),
             )
 
-            # 获取所有工具的 schema（按协议格式）
+            # 本轮 tools schema（跳过未发现 deferred / disabled）
             tools = self.registry.get_all_schemas(self.protocol)
 
-            # ④ Layer 1: 在 LLM 调用前应用 tool-result budget，确保 api_conv 反映
-            # 本轮迭代中所有已发生的写入（system reminders、hook 通知等）。
-            # 原始 conversation 不会被修改；替换决策保存在 self.replacement_state 中。
+            # ④ Layer1：按 tool-result 预算生成 api_conv（不改原始 conversation）
             api_conv, _ = prepare_api_conversation(
                 conversation,
                 self.session_dir,
@@ -468,7 +441,7 @@ class Agent:
 
             conv_thinking = response_thinking_blocks(response)
 
-            # ⑧ max_tokens 触顶恢复：如果 LLM 输出被截断，尝试提额+续写
+            # ⑧ max_tokens 触顶：提输出上限 + 续写提示，必要时 continue 再调 LLM
             output_recovery_decision = handle_output_token_limit(
                 response=response,
                 conversation=conversation,
@@ -521,18 +494,14 @@ class Agent:
                 response,
                 thinking_blocks=conv_thinking,
             )
-
+            
             tool_results: list[ToolResultBlock] = []
             # 按并发安全对工具调用分区（只读安全工具可批量并行，写/执行类串行）
             batches = partition_tool_calls(response.tool_calls, self.registry)
 
             for batch in batches:
                 if batch.concurrent and len(batch.calls) > 1:
-                    # === 并发路径 ===
-                    # 并发执行前先逐个做授权预检：pre_tool_use hook + 权限检查。
-                    # 只有通过的调用才进入并行执行，避免并发路径绕过 PathSandbox、
-                    # 权限规则和 hooks（历史上 _execute_single_tool_direct 直接执行，
-                    # 造成批量只读工具能逃逸沙箱、hooks 不触发）。
+                    # 并发路径：先逐个 pre_tool_use + 权限预检，通过后再并行执行
                     approved: list[ToolCallComplete] = []
                     pre_failed: dict[str, ToolResult] = {}
                     for tc in batch.calls:
@@ -551,6 +520,7 @@ class Agent:
                             )
                             continue
 
+                        # 权限预检（不执行工具）；ask 时先 yield 给前端
                         auth: _AuthResult | None = None
                         async for item in self._authorize_tool(tc):
                             if isinstance(item, (PermissionRequest, AskUserRequest)):
@@ -566,6 +536,7 @@ class Agent:
                             continue
                         approved.append(tc)
 
+                    # 并行执行通过预检的调用，再跑 post_tool_use
                     exec_results: dict[str, _ToolExecResult] = {}
                     if approved:
                         for br in await self._execute_batch_parallel(approved):
@@ -580,8 +551,7 @@ class Agent:
                             ):
                                 yield he
 
-                    # 并发批次内均为已知且已启用的工具，重置连续 unknown 计数
-                    # （与串行路径中非 unknown 结果的处理保持一致）。
+                    # 按原始调用顺序汇总结果
                     consecutive_unknown = 0
                     for tc in batch.calls:
                         if tc.tool_id in pre_failed:
@@ -596,7 +566,7 @@ class Agent:
                         )
                         yield tool_result_event(tc, result, elapsed)
                 else:
-                    # === 串行路径 ===
+                    # 串行路径
                     for tc in batch.calls:
                         result: ToolResult | None = None
                         elapsed = 0.0
@@ -679,6 +649,7 @@ class Agent:
         )
 
     def _inject_external_notifications(self, conversation: ConversationManager) -> None:
+        # mailbox / notification_fn → 注入对话
         inject_external_notifications(
             conversation,
             team_name=self.team_name,
@@ -693,8 +664,7 @@ class Agent:
     async def _execute_single_tool_direct(
         self, tc: ToolCallComplete
     ) -> _ToolExecResult:
-        # 纯执行器：不做权限检查 / hooks。仅供并发批处理使用，授权预检由
-        # 调用方（Agent.run 的并发分支通过 _authorize_tool）在执行前完成。
+        # 仅执行工具（无权限/hooks）；调用方须先完成授权预检
         exec_result = await execute_direct_tool_call(self.registry, tc)
         self._snapshot_for_recovery(tc, exec_result.result)
         return exec_result
@@ -709,12 +679,7 @@ class Agent:
     async def _authorize_tool(
         self, tc: ToolCallComplete
     ) -> AsyncIterator["PermissionRequest | AskUserRequest | _AuthResult"]:
-        """并发执行前的授权预检。
-
-        复用与 _execute_tool 完全相同的权限决策逻辑（deny / ask / allow_always），
-        但不执行工具本身。ask 决策通过 yield PermissionRequest 交回调用方处理，
-        最终 yield 一个 _AuthResult 表示是否放行。
-        """
+        """并发前授权预检：deny/ask/allow，不执行工具。"""
         async for item in authorize_tool_call(
             registry=self.registry,
             permission_checker=self.permission_checker,
@@ -755,9 +720,7 @@ class Agent:
         try:
             params = tool.params_model.model_validate(tc.arguments)
 
-            # AskUserQuestion: yield an AskUserRequest event so the caller
-            # (daemon / embedding runtime) can handle it via the event stream,
-            # instead of the old _pending_event side-channel.
+            # AskUserQuestion：经事件流向调用方提问，不再走旧 side-channel
             if tc.tool_name == "AskUserQuestion":
                 from mozilcode.tools.ask_user import AskUserParams
 
@@ -845,10 +808,7 @@ class Agent:
     async def manual_compact(
         self, conversation: ConversationManager
     ) -> CompactNotification | ErrorEvent:
-        # auto_compact 会用摘要替换 conversation.history，所有 tool-result 内容
-        # （原始或已替换的）都将被丢弃。这里跳过 apply_tool_result_budget —
-        # 它在主循环中的唯一目的是为 LLM 调用生成 api_conv，而本路径不需要
-        # 发起看到替换结果的 LLM 调用（auto_compact 内部的摘要调用操作的是原始对话）。
+        # 手动压缩：直接 auto_compact 原始对话，无需先做 Layer1 budget
         result = await auto_compact(
             conversation,
             self.client,
@@ -886,11 +846,7 @@ class Agent:
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
-        """非交互式执行模式：子 Agent 用此方法运行到完成，不产出事件流。
-
-        与 run() 的区别：不 yield 事件，不处理权限请求（用 dontAsk 模式），
-        通过 event_callback 回调通知进度。返回最终的文本回复。
-        """
+        """子 Agent 非交互执行到完成；不 yield 事件，返回最终文本。"""
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )
