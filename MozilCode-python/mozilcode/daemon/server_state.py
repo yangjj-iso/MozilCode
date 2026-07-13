@@ -91,7 +91,10 @@ class DaemonServer:
         self._records.set_title_from_prompt(sid, prompt)
 
     async def init_session(
-        self, session_id: str | None = None, work_dir: str | None = None
+        self,
+        session_id: str | None = None,
+        work_dir: str | None = None,
+        provider_name: str | None = None,
     ) -> str:
         """Create a new Agent session in the given workspace. Returns session_id."""
         sid = await init_daemon_session(
@@ -104,6 +107,7 @@ class DaemonServer:
             runtimes=self._agents,
             records=self._records,
             agent_factory=create_agent_from_config,
+            provider_name=provider_name or "",
         )
         log.info("Session %s initialized (work_dir=%s)", sid, self.session_work_dir(sid))
         return sid
@@ -134,6 +138,12 @@ class DaemonServer:
 
     def list_session_infos(self) -> list[dict]:
         return self._records.list_infos()
+
+    def config_application_status(self) -> dict[str, object]:
+        return {
+            "applies_to": "new_sessions",
+            "active_sessions_unchanged": len(self._agents),
+        }
 
     def session_work_dir(self, sid: str) -> str | None:
         return self._records.work_dir(sid)

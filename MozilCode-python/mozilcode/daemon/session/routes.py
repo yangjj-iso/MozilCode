@@ -45,7 +45,7 @@ async def create_session(request: Request) -> JSONResponse:
         return parsed.error
     body = parsed.unwrap()
     try:
-        sid = await server.init_session(body.session_id, body.work_dir)
+        sid = await server.init_session(body.session_id, body.work_dir, body.provider_name)
     except ValueError as e:
         return bad_request_response(str(e), configured=server.config is not None)
     return JSONResponse({"session_id": sid, **server.session_info(sid)})

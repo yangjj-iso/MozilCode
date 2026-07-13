@@ -33,9 +33,9 @@ class SessionRecords:
             log.info("Loaded %d persisted session(s)", len(self.session_meta))
         return len(self.session_meta)
 
-    def create(self, sid: str, work_dir: str) -> None:
+    def create(self, sid: str, work_dir: str, provider_name: str = "") -> None:
         self.event_logs[sid] = []
-        self.session_meta[sid] = new_session_meta(work_dir)
+        self.session_meta[sid] = new_session_meta(work_dir, provider_name=provider_name)
         self.persisted_count[sid] = 0
         self.persist_meta(sid)
 

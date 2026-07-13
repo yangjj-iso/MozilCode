@@ -3,13 +3,16 @@ package com.mewcode.cloud.db;
 import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import com.mewcode.cloud.config.CloudConfig;
 
 @Component
 public class DatabaseInitializer {
   private final JdbcTemplate db;
+  private final CloudConfig config;
 
-  public DatabaseInitializer(JdbcTemplate db) {
+  public DatabaseInitializer(JdbcTemplate db, CloudConfig config) {
     this.db = db;
+    this.config = config;
   }
 
   @PostConstruct
@@ -19,6 +22,16 @@ public class DatabaseInitializer {
   }
 
   private void migrate() {
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+          version INT PRIMARY KEY,
+          applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """);
+    db.update("""
+        INSERT INTO schema_version (version)
+        SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version WHERE version = 1)
+        """);
     db.execute("""
         CREATE TABLE IF NOT EXISTS users (
           id INT PRIMARY KEY AUTO_INCREMENT,
@@ -121,7 +134,7 @@ public class DatabaseInitializer {
           """, "标准套餐", 5_000_000L, 30, "500万 token，30天有效");
     }
 
-    if (count("redeem_codes") == 0) {
+    if (!config.isProduction() && count("redeem_codes") == 0) {
       db.update("INSERT INTO redeem_codes (code, plan_id) VALUES (?, ?)", "MEWCODE-FREE-500K", 1);
       db.update("INSERT INTO redeem_codes (code, plan_id) VALUES (?, ?)", "MEWCODE-PRO-5M", 2);
     }

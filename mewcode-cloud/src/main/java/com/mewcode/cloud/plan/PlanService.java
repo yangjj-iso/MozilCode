@@ -99,16 +99,17 @@ public class PlanService {
     }
   }
 
-  public void addUsage(int userId, int inputTokens, int outputTokens) {
+  public boolean addUsage(int userId, int inputTokens, int outputTokens) {
     int total = inputTokens + outputTokens;
-    db.update("""
+    int updated = db.update("""
         UPDATE subscriptions SET token_used = token_used + ?
         WHERE id = (
           SELECT id FROM subscriptions
           WHERE user_id = ? AND expires_at > NOW()
           ORDER BY id DESC LIMIT 1
-        )
-        """, total, userId);
+        ) AND token_used + ? <= token_quota
+        """, total, userId, total);
+    return updated > 0;
   }
 
   public boolean hasQuota(int userId) {

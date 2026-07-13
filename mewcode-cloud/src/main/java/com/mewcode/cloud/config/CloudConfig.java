@@ -10,37 +10,44 @@ public class CloudConfig {
   private final String dbUser;
   private final String dbPassword;
   private final String dbDriver;
+  private final boolean production;
 
   public CloudConfig(Environment environment) {
+    this.production = isProduction(environment);
     this.jwtSecret = settingOrDefault(
         environment,
         "mewcode.jwt.secret",
         "MEWCODE_JWT_SECRET",
-        "mewcode-dev-secret-change-in-prod"
+        "mewcode-dev-secret-change-in-prod",
+        true
     );
     this.dbUrl = settingOrDefault(
         environment,
         "mewcode.db.url",
         "MEWCODE_DB_URL",
-        "jdbc:mysql://127.0.0.1:3306/mewcode?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false"
+        "jdbc:mysql://127.0.0.1:3306/mewcode?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false",
+        true
     );
     this.dbUser = settingOrDefault(
         environment,
         "mewcode.db.user",
         "MEWCODE_DB_USER",
-        "root"
+        "root",
+        true
     );
     this.dbPassword = settingOrDefault(
         environment,
         "mewcode.db.password",
         "MEWCODE_DB_PASSWORD",
-        ""
+        "",
+        true
     );
     this.dbDriver = settingOrDefault(
         environment,
         "mewcode.db.driver",
         "MEWCODE_DB_DRIVER",
-        "com.mysql.cj.jdbc.Driver"
+        "com.mysql.cj.jdbc.Driver",
+        false
     );
   }
 
@@ -64,16 +71,31 @@ public class CloudConfig {
     return dbDriver;
   }
 
-  private static String settingOrDefault(
+  public boolean isProduction() {
+    return production;
+  }
+
+  private String settingOrDefault(
       Environment environment,
       String propertyName,
       String envName,
-      String fallback
+      String fallback,
+      boolean rejectDefaultInProduction
   ) {
     String value = environment.getProperty(propertyName);
     if (value == null || value.isBlank()) {
       value = System.getenv(envName);
     }
-    return value == null || value.isBlank() ? fallback : value;
+    value = value == null || value.isBlank() ? fallback : value;
+    if (rejectDefaultInProduction && production && fallback.equals(value)) {
+      throw new IllegalStateException(envName + " must be configured in production");
+    }
+    return value;
+  }
+
+  private static boolean isProduction(Environment environment) {
+    String profile = environment.getProperty("spring.profiles.active", "");
+    String env = environment.getProperty("mewcode.environment", "");
+    return profile.toLowerCase().contains("prod") || env.equalsIgnoreCase("production");
   }
 }

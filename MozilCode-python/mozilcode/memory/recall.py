@@ -10,16 +10,22 @@ from typing import Awaitable, Callable
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# 常量
 # ---------------------------------------------------------------------------
 
+# 最多扫描的记忆文件数量上限
 MAX_MEMORY_FILES = 200
+# 读取 frontmatter 时只读前 N 行（避免读取整个大文件）
 FRONTMATTER_MAX_LINES = 30
+# 入口文件名（扫描时跳过，不作为记忆文件）
 ENTRYPOINT_NAME = "MEMORY.md"
+# 有效的记忆类型集合（对应 frontmatter 中的 type 字段）
 VALID_TYPES = {"user", "feedback", "project", "reference"}
 
+# frontmatter 正则：匹配 --- 包裹的 YAML 头部
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
+# 选择器 LLM 的 system prompt：让 LLM 从清单中选出最多 5 个相关记忆文件
 SELECTOR_SYSTEM_PROMPT = (
     "You are selecting memories that will be useful to MozilCode as it processes "
     "a user's query. You will be given the user's query and a list of available "
@@ -40,42 +46,44 @@ SELECTOR_SYSTEM_PROMPT = (
     '{"selected_memories": ["filename1.md", "filename2.md"]}'
 )
 
-# Type alias for the side-query selector function.
+# 选择器函数类型：接收 system_prompt 和 user_message，返回 LLM 的原始响应文本
 SelectorFn = Callable[[str, str], Awaitable[str]]
 
 
 # ---------------------------------------------------------------------------
-# Data classes
+# 数据类
 # ---------------------------------------------------------------------------
 
 @dataclass
 class MemoryHeader:
-    filename: str      # path relative to memory_dir
-    file_path: str     # absolute path
-    scope: str         # "user" or "project"
-    mtime_ms: int      # modification time, ms since epoch
-    description: str   # frontmatter description; "" if absent
-    type: str          # frontmatter type; "" if unrecognized
+    """记忆文件的元信息（从 frontmatter 和文件系统中提取）。"""
+    filename: str      # 相对于 memory_dir 的路径
+    file_path: str     # 绝对路径
+    scope: str         # 作用域："user" 或 "project"
+    mtime_ms: int      # 修改时间（毫秒时间戳）
+    description: str   # frontmatter 中的描述；无则为 ""
+    type: str          # frontmatter 中的类型；无法识别则为 ""
 
 
 @dataclass
 class RelevantMemory:
+    """被选择器选中的记忆文件（路径 + 修改时间）。"""
     path: str
     mtime_ms: int
 
 
 # ---------------------------------------------------------------------------
-# Memory age helpers
+# 记忆时效性辅助函数
 # ---------------------------------------------------------------------------
 
 def memory_age_days(mtime_ms: int) -> int:
-    """Floor-rounded days since mtime. 0 for today, 1 for yesterday, etc."""
+    """返回记忆文件的年龄（天数，向下取整）。今天为 0，昨天为 1。"""
     d = (int(time.time() * 1000) - mtime_ms) // 86_400_000
     return max(d, 0)
 
 
 def memory_age(mtime_ms: int) -> str:
-    """Human-readable age: 'today', 'yesterday', or 'N days ago'."""
+    """返回人类可读的年龄描述：'today' / 'yesterday' / 'N days ago'。"""
     d = memory_age_days(mtime_ms)
     if d == 0:
         return "today"
@@ -85,7 +93,10 @@ def memory_age(mtime_ms: int) -> str:
 
 
 def memory_freshness_text(mtime_ms: int) -> str:
-    """Staleness warning for memories older than 1 day. Returns '' for fresh."""
+    """为超过 1 天的记忆生成过期警告文本。新记忆返回空字符串。
+
+    提醒 LLM：记忆是历史快照而非实时状态，引用前需核实当前代码。
+    """
     d = memory_age_days(mtime_ms)
     if d <= 1:
         return ""
@@ -98,14 +109,14 @@ def memory_freshness_text(mtime_ms: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Frontmatter parsing
+# Frontmatter 解析
 # ---------------------------------------------------------------------------
 
 def parse_frontmatter(content: str) -> dict[str, str]:
-    """Extract name/description/type from YAML-ish frontmatter.
+    """从 YAML 风格的 frontmatter 中提取 name / description / type 三个字段。
 
-    Only the three known fields are read; everything else is ignored.
-    Files without frontmatter return empty fields.
+    只读取这三个已知字段，其余内容忽略。无 frontmatter 的文件返回空值。
+    采用简化解析（不依赖 PyYAML），逐行找冒号分隔。
     """
     m = FRONTMATTER_RE.match(content)
     if not m:
@@ -136,13 +147,13 @@ def parse_frontmatter(content: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Scanning
+# 文件扫描
 # ---------------------------------------------------------------------------
 
 def scan_memory_files(memory_dir: Path, scope: str) -> list[MemoryHeader]:
-    """Walk memory_dir for .md files (excluding MEMORY.md), read frontmatter
-    from each, and return a header list sorted newest-first, capped at
-    MAX_MEMORY_FILES.
+    """递归扫描 memory_dir 下的 .md 文件（排除 MEMORY.md），
+    读取每个文件的 frontmatter，返回按修改时间降序排列的头部列表，
+    最多 MAX_MEMORY_FILES 个。
     """
     if not memory_dir.is_dir():
         return []
@@ -171,6 +182,9 @@ def scan_memory_files(memory_dir: Path, scope: str) -> list[MemoryHeader]:
 def _read_memory_header(
     file_path: Path, memory_dir: Path, scope: str
 ) -> MemoryHeader | None:
+    """读取单个记忆文件的头部信息（修改时间 + frontmatter）。
+    只读前 FRONTMATTER_MAX_LINES 行以避免读取大文件。
+    """
     try:
         mtime_ms = int(file_path.stat().st_mtime * 1000)
     except OSError:
@@ -205,11 +219,14 @@ def _read_memory_header(
 
 
 # ---------------------------------------------------------------------------
-# Manifest formatting
+# 清单格式化
 # ---------------------------------------------------------------------------
 
 def format_memory_manifest(memories: list[MemoryHeader]) -> str:
-    """Format memory headers as a text manifest for the selector prompt."""
+    """将记忆头部列表格式化为文本清单，供选择器 LLM 阅读。
+
+    每行包含：scope 标签 / type 标签 / 文件路径 / 时间戳 / 描述。
+    """
     if not memories:
         return ""
     lines: list[str] = []
@@ -228,7 +245,7 @@ def format_memory_manifest(memories: list[MemoryHeader]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Find relevant memories
+# 语义召回
 # ---------------------------------------------------------------------------
 
 async def find_relevant_memories(
@@ -239,11 +256,15 @@ async def find_relevant_memories(
     already_surfaced: set[str] | None,
     selector: SelectorFn,
 ) -> list[RelevantMemory]:
-    """Scan both dirs, filter already-surfaced, ask selector to pick up to 5
-    relevant filenames, and return the corresponding paths + mtimes.
+    """语义召回：扫描两个记忆目录 → 过滤已展示的 → 让 LLM 选择器选出最多 5 个相关文件。
 
-    Selector failures are silent — recall is best-effort and must never block
-    the main conversation.
+    流程：
+    1. 扫描用户级和项目级记忆目录
+    2. 过滤掉已经展示过的文件（避免重复）
+    3. 格式化清单 → 调用选择器 LLM → 解析 JSON 响应
+    4. 返回选中文件的路径 + 修改时间
+
+    选择器失败时静默返回空列表（记忆召回是 best-effort，不阻断主对话）。
     """
     all_headers: list[MemoryHeader] = []
     if user_mem_dir is not None:
@@ -280,7 +301,7 @@ async def _select_relevant_memories(
     recent_tools: list[str] | None,
     selector: SelectorFn,
 ) -> list[str]:
-    """Format manifest, call selector, parse JSON, return valid filenames."""
+    """格式化清单 → 调用选择器 LLM → 解析 JSON → 返回合法文件名列表。"""
     valid_filenames = {m.filename for m in memories}
 
     manifest = format_memory_manifest(memories)
@@ -311,8 +332,8 @@ async def _select_relevant_memories(
 
 
 def _extract_json_object(raw: str) -> str:
-    """Return the first {...} substring found in raw. Tolerates markdown
-    fences or prose around the JSON.
+    """从 LLM 原始响应中提取第一个 {...} 子串。
+    容忍 markdown 代码块或散文包裹的 JSON。
     """
     trimmed = raw.strip()
     if trimmed.startswith("{"):
@@ -327,12 +348,14 @@ def _extract_json_object(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Reminder rendering
+# 提醒渲染
 # ---------------------------------------------------------------------------
 
 def render_reminder(memories: list[RelevantMemory]) -> str:
-    """Read each selected memory file's full content and format a single
-    system-reminder body with freshness headers.
+    """读取每个选中记忆文件的完整内容，格式化为 system-reminder 文本。
+
+    每个记忆块包含：文件名 / 保存时间 / 过期警告（如果有）/ 文件内容。
+    最终作为 system-reminder 注入对话，让 LLM 参考历史记忆。
     """
     if not memories:
         return ""

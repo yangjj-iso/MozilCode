@@ -19,19 +19,32 @@ class HookNotification:
 
 
 class HookEngine:
+    """Hook 引擎：管理所有 Hook 配置，在生命周期事件触发时匹配并执行。
+
+    核心职责：
+    1. find_matching_hooks(): 根据事件名 + 条件匹配 Hook
+    2. run_hooks(): 同步执行匹配的 Hook（阻塞 Agent 循环）
+    3. run_pre_tool_hooks(): 执行 pre_tool_use Hook，可以 reject 拦截工具
+    4. _schedule_background_hook(): 异步执行 Hook（不阻塞 Agent 循环）
+    """
     def __init__(
         self,
         hooks: list[Hook] | None = None,
         agent_runner: AgentActionRunner | None = None,
     ) -> None:
         self.hooks: list[Hook] = hooks or []
-        self.agent_runner = agent_runner
-        self._prompt_messages: list[str] = []
-        self._notifications: list[HookNotification] = []
-        self._background_tasks: set[asyncio.Task[None]] = set()
+        self.agent_runner = agent_runner       # agent 类型 action 的执行器
+        self._prompt_messages: list[str] = []   # prompt action 产生的注入消息
+        self._notifications: list[HookNotification] = []  # Hook 执行结果通知
+        self._background_tasks: set[asyncio.Task[None]] = set()  # 后台异步任务集
 
 
     def find_matching_hooks(self, event: str, ctx: HookContext) -> list[Hook]:
+        """根据事件名和条件匹配 Hook。检查三个条件：
+        1. 事件名匹配
+        2. once 标记检查（已执行过的 once Hook 跳过）
+        3. condition 条件评估（如果配置了条件）
+        """
         matched: list[Hook] = []
         for hook in self.hooks:
             if hook.event != event:
@@ -45,6 +58,11 @@ class HookEngine:
 
 
     async def run_hooks(self, event: str, ctx: HookContext) -> None:
+        """执行匹配的 Hook。支持同步和异步两种模式。
+
+        - 同步模式（默认）：阻塞 Agent 循环，等 Hook 执行完毕
+        - 异步模式（async_exec=True）：后台 asyncio.Task 执行，不阻塞
+        """
         matched = self.find_matching_hooks(event, ctx)
         for hook in matched:
             hook.mark_executed()
@@ -97,6 +115,12 @@ class HookEngine:
     async def run_pre_tool_hooks(
         self, ctx: HookContext
     ) -> ToolRejectedError | None:
+        """执行 pre_tool_use Hook，可以拒绝工具执行。
+
+        与普通 run_hooks 的区别：
+        - 如果 Hook 配置了 reject: true，返回 ToolRejectedError
+        - Agent 收到 rejection 后跳过工具执行，将拒绝原因返回给 LLM
+        """
         matched = self.find_matching_hooks("pre_tool_use", ctx)
         for hook in matched:
             hook.mark_executed()
@@ -107,7 +131,7 @@ class HookEngine:
                     self.agent_runner,
                 )
                 self._record_result(hook, "pre_tool_use", result)
-                if hook.reject:
+                if hook.reject:                     # 配置了拒绝标记
                     return ToolRejectedError(
                         tool=ctx.tool_name,
                         reason=result.output,
@@ -144,12 +168,16 @@ class HookEngine:
         )
 
     def get_prompt_messages(self) -> list[str]:
+        """取出并清空 prompt action 产生的注入消息。
+        Agent 在 pre_send Hook 后调用，将这些消息注入 system prompt。"""
         messages = list(self._prompt_messages)
         self._prompt_messages.clear()
         return messages
 
 
     def drain_notifications(self) -> list[HookNotification]:
+        """取出并清空 Hook 执行结果通知。
+        Agent 在每轮迭代中调用，将通知作为 system reminder 注入对话。"""
         notifications = list(self._notifications)
         self._notifications.clear()
         return notifications

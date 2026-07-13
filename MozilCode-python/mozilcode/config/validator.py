@@ -24,10 +24,22 @@ VALID_PERMISSION_MODES = {
 }
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
+CURRENT_CONFIG_SCHEMA_VERSION = 1
 
 
 class ConfigError(Exception):
     pass
+
+
+def validate_schema_version(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ConfigError("'schema_version' must be a positive integer")
+    if value > CURRENT_CONFIG_SCHEMA_VERSION:
+        raise ConfigError(
+            f"Config schema version {value} is newer than supported version "
+            f"{CURRENT_CONFIG_SCHEMA_VERSION}"
+        )
+    return value
 
 
 def _required_name(raw_name: object, item_label: str) -> str:
@@ -215,6 +227,9 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
         item_label = f"MCP server #{i + 1}"
         name = _required_name(entry.get("name"), item_label)
         _remember_unique_name(name, seen_names, item_label="MCP server")
+        enabled = entry.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ConfigError(f"MCP server '{name}': enabled must be a boolean")
         has_command = "command" in entry
         has_url = "url" in entry
         if has_command and has_url:
@@ -234,6 +249,7 @@ def validate_mcp_servers(raw_mcp: list | None) -> list[dict]:
         servers.append(
             {
                 "name": name,
+                "enabled": enabled,
                 "command": command,
                 "args": _string_list_field(entry, "args", item_label),
                 "url": url,
@@ -398,10 +414,14 @@ def validate_config_structure(raw: object, *, require_providers: bool = True) ->
     if require_providers and "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
     reject_removed_config_sections(raw)
+    schema_version = validate_schema_version(
+        raw.get("schema_version", CURRENT_CONFIG_SCHEMA_VERSION)
+    )
 
     providers = validate_providers(raw["providers"]) if "providers" in raw else []
 
     return {
+        "schema_version": schema_version,
         "providers": providers,
         "permission_mode": validate_permission_mode(raw.get("permission_mode", "default")),
         "mcp_servers": validate_mcp_servers(raw.get("mcp_servers")),

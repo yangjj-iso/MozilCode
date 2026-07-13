@@ -40,6 +40,10 @@ async def close_daemon_session(
     hub = getattr(runtime.agent, "memory_hub", None) if runtime is not None else None
     if hub is not None:
         await hub.shutdown()
+    deps = getattr(runtime, "deps", None) if runtime is not None else None
+    mcp_manager = getattr(deps, "mcp_manager", None)
+    if mcp_manager is not None:
+        await mcp_manager.shutdown()
 
     records.close(sid)
     pre_plan_modes.pop(sid, None)

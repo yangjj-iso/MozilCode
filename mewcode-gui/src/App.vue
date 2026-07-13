@@ -918,6 +918,19 @@ function httpToWs(value) {
 
 const API = stripTrailingSlash(import.meta.env.VITE_MEWCODE_DAEMON_HTTP || DEFAULT_DAEMON_HTTP);
 const WS_URL = stripTrailingSlash(import.meta.env.VITE_MEWCODE_DAEMON_WS || httpToWs(API));
+const DAEMON_TOKEN = (import.meta.env.VITE_MEWCODE_DAEMON_TOKEN || '').trim();
+
+function daemonFetch(input, init = {}) {
+  const headers = new Headers(init.headers || {});
+  if (DAEMON_TOKEN) headers.set('Authorization', `Bearer ${DAEMON_TOKEN}`);
+  return globalThis.fetch(input, { ...init, headers });
+}
+
+function daemonWebSocketUrl(path) {
+  const url = new URL(`${WS_URL}${path}`);
+  if (DAEMON_TOKEN) url.searchParams.set('token', DAEMON_TOKEN);
+  return url.toString();
+}
 
 const connected = ref(false);
 const sessions = ref([]);
@@ -1172,7 +1185,7 @@ watch(filteredSlashCommands, (items) => {
 
 async function checkHealth() {
   try {
-    const r = await fetch(`${API}/api/health`);
+    const r = await daemonFetch(`${API}/api/health`);
     const d = await r.json();
     connected.value = d.status === 'ok';
     if (typeof d.configured === 'boolean') configStatus.value.configured = d.configured;
@@ -1292,7 +1305,7 @@ function loadConfigIntoForm(data, provider = null) {
 
 async function loadConfig() {
   try {
-    const r = await fetch(`${API}/api/config`);
+    const r = await daemonFetch(`${API}/api/config`);
     const d = await r.json();
     applyConfigPayload(d);
     loadConfigIntoForm(d);
@@ -1305,7 +1318,7 @@ async function loadConfig() {
 }
 
 async function saveProviderList(providers, message = '模型配置已保存') {
-  const r = await fetch(`${API}/api/config`, {
+  const r = await daemonFetch(`${API}/api/config`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1321,7 +1334,8 @@ async function saveProviderList(providers, message = '模型配置已保存') {
   }
   applyConfigPayload(d);
   loadConfigIntoForm(d);
-  toast(message, 'ok');
+  const runtimeNotice = Number(d.active_sessions_unchanged || 0) > 0 ? '，新会话生效' : '';
+  toast(`${message}${runtimeNotice}`, 'ok');
   await refreshSessions();
   if (!activeSessionId.value && configStatus.value.configured) {
     if (sessions.value.length > 0) await selectSession(sessions.value[0].id);
@@ -1459,7 +1473,7 @@ function openContextInfo() {
 
 async function refreshSessions() {
   try {
-    const r = await fetch(`${API}/api/sessions`);
+    const r = await daemonFetch(`${API}/api/sessions`);
     const d = await r.json();
     // Sessions are now objects: { id, work_dir, title }.
     sessions.value = (d.sessions || []).map((s) => (typeof s === 'string' ? { id: s, work_dir: '', title: '' } : s));
@@ -1493,7 +1507,7 @@ function applySessionStatus(data) {
 async function loadStatus() {
   if (!activeSessionId.value) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/status`);
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/status`);
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || '状态获取失败');
     applySessionStatus(d);
@@ -1502,7 +1516,7 @@ async function loadStatus() {
 
 async function postSessionMode(mode) {
   if (!activeSessionId.value) return;
-  const r = await fetch(`${API}/api/session/${activeSessionId.value}/mode`, {
+  const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/mode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode }),
@@ -1542,7 +1556,7 @@ async function manualCompact() {
     context_window: sessionStatus.value.context_window || modelConfig.value.context_window || 0,
   });
   try {
-    const r = await fetch(`${API}/api/compact/${activeSessionId.value}`, { method: 'POST' });
+    const r = await daemonFetch(`${API}/api/compact/${activeSessionId.value}`, { method: 'POST' });
     const d = await r.json();
     if (!r.ok) {
       const part = findCompactPartById(localPart.id) || localPart;
@@ -1629,7 +1643,7 @@ async function runSlashCommand(cmd) {
 async function cancelActive() {
   if (!activeSessionId.value) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/cancel`, { method: 'POST' });
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/cancel`, { method: 'POST' });
     const d = await r.json();
     if (!r.ok || !d.cancelled) {
       toast(d.error || '没有正在运行的任务', 'err');
@@ -1644,8 +1658,11 @@ async function cancelActive() {
 
 // Create a session in the given workspace (defaults to the daemon's work_dir).
 async function createSession(workDir) {
-  const body = JSON.stringify(workDir ? { work_dir: workDir } : {});
-  const r = await fetch(`${API}/api/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  const payload = {};
+  if (workDir) payload.work_dir = workDir;
+  if (activeConfiguredProvider.value?.name) payload.provider_name = activeConfiguredProvider.value.name;
+  const body = JSON.stringify(payload);
+  const r = await daemonFetch(`${API}/api/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
   const d = await r.json();
   if (!r.ok || !d.session_id) {
     if (d.configured === false) {
@@ -1689,7 +1706,7 @@ function toggleGroup(wd) {
 async function fetchDir(rel) {
   if (!activeSessionId.value) return [];
   try {
-    const r = await fetch(`${API}/api/fs/${activeSessionId.value}?path=${encodeURIComponent(rel)}`);
+    const r = await daemonFetch(`${API}/api/fs/${activeSessionId.value}?path=${encodeURIComponent(rel)}`);
     const d = await r.json();
     return d.entries || [];
   } catch {
@@ -1741,7 +1758,7 @@ function selectTab(t) {
 async function loadTasks() {
   if (!activeSessionId.value) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/tasks`);
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/tasks`);
     const d = await r.json();
     tasks.value = d.tasks || [];
   } catch {
@@ -1752,7 +1769,7 @@ async function loadTasks() {
 async function cancelTask(taskId) {
   if (!activeSessionId.value) return;
   try {
-    await fetch(`${API}/api/session/${activeSessionId.value}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
+    await daemonFetch(`${API}/api/session/${activeSessionId.value}/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
     await loadTasks();
   } catch {}
 }
@@ -1760,7 +1777,7 @@ async function cancelTask(taskId) {
 async function loadWorktrees() {
   if (!activeSessionId.value) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees`);
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/worktrees`);
     const d = await r.json();
     worktreeState.value = { current: d.current || '', worktrees: d.worktrees || [] };
   } catch {
@@ -1773,7 +1790,7 @@ async function createWorktree() {
   const name = newWorktree.value.name.trim();
   if (!name) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees`, {
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/worktrees`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, base_branch: newWorktree.value.base_branch.trim() || 'HEAD' }),
@@ -1797,7 +1814,7 @@ async function createWorktree() {
 async function enterWorktree(name) {
   if (!activeSessionId.value) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees/${encodeURIComponent(name)}/enter`, { method: 'POST' });
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/worktrees/${encodeURIComponent(name)}/enter`, { method: 'POST' });
     const d = await r.json();
     if (!r.ok) {
       toast(d.error || '进入 worktree 失败', 'err');
@@ -1816,7 +1833,7 @@ async function exitWorktree(remove) {
   if (!activeSessionId.value) return;
   if (remove && !window.confirm('退出并删除当前 worktree？有未提交改动时后端会阻止删除。')) return;
   try {
-    const r = await fetch(`${API}/api/session/${activeSessionId.value}/worktrees/exit`, {
+    const r = await daemonFetch(`${API}/api/session/${activeSessionId.value}/worktrees/exit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ remove, discard: false }),
@@ -1851,19 +1868,19 @@ function setSettingsTab(t) {
 }
 async function loadSkills() {
   try {
-    const r = await fetch(`${API}/api/skills`);
+    const r = await daemonFetch(`${API}/api/skills`);
     skills.value = (await r.json()).skills || [];
   } catch { skills.value = []; }
 }
 async function toggleSkill(s) {
   s.enabled = !s.enabled;
-  try { await fetch(`${API}/api/skills/${encodeURIComponent(s.name)}/toggle`, { method: 'POST' }); } catch {}
+  try { await daemonFetch(`${API}/api/skills/${encodeURIComponent(s.name)}/toggle`, { method: 'POST' }); } catch {}
 }
 async function addSkill() {
   const n = (newSkill.value.name || '').trim();
   if (!n || !newSkill.value.description.trim()) { toast('名称和描述必填', 'err'); return; }
   try {
-    const r = await fetch(`${API}/api/skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newSkill.value) });
+    const r = await daemonFetch(`${API}/api/skills`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newSkill.value) });
     const d = await r.json();
     if (!r.ok) { toast(d.error || '创建失败', 'err'); return; }
     newSkill.value = { name: '', description: '', body: '' };
@@ -1875,7 +1892,7 @@ async function addSkill() {
 async function delSkill(name) {
   if (!window.confirm(`删除技能 “${name}”？`)) return;
   try {
-    const r = await fetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    const r = await daemonFetch(`${API}/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
     const d = await r.json();
     if (!r.ok) { toast(d.error || '删除失败', 'err'); return; }
   } catch {}
@@ -1883,20 +1900,20 @@ async function delSkill(name) {
 }
 async function loadMcp() {
   try {
-    const r = await fetch(`${API}/api/settings/mcp`);
+    const r = await daemonFetch(`${API}/api/settings/mcp`);
     mcpServers.value = (await r.json()).servers || [];
   } catch { mcpServers.value = []; }
 }
 async function toggleMcp(name) {
   const m = mcpServers.value.find((x) => x.name === name);
   if (m) m.enabled = !m.enabled;
-  try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}/toggle`, { method: 'POST' }); } catch {}
+  try { await daemonFetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}/toggle`, { method: 'POST' }); } catch {}
 }
 async function addMcp() {
   const n = (newMcp.value.name || '').trim();
   if (!n) { toast('请填写名称', 'err'); return; }
   try {
-    await fetch(`${API}/api/settings/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMcp.value) });
+    await daemonFetch(`${API}/api/settings/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newMcp.value) });
     newMcp.value = { name: '', command: '', args: '', url: '' };
     showAddMcp.value = false;
     await loadMcp();
@@ -1904,7 +1921,7 @@ async function addMcp() {
 }
 async function delMcp(name) {
   if (!window.confirm(`删除 MCP 服务器 “${name}”？`)) return;
-  try { await fetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }); } catch {}
+  try { await daemonFetch(`${API}/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }); } catch {}
   await loadMcp();
 }
 function defaultMemoryConfig(type) {
@@ -1958,7 +1975,7 @@ function applyNewMemoryType() {
 }
 async function loadMemorySettings() {
   try {
-    const r = await fetch(`${API}/api/settings/memory`);
+    const r = await daemonFetch(`${API}/api/settings/memory`);
     const d = await r.json();
     if (!r.ok) { toast(d.error || '记忆配置读取失败', 'err'); return; }
     memorySettings.value = {
@@ -1977,7 +1994,7 @@ async function saveMemorySettings() {
       enabled: memorySettings.value.enabled !== false,
       providers: memorySettings.value.providers.map(memoryProviderPayload),
     };
-    const r = await fetch(`${API}/api/settings/memory`, {
+    const r = await daemonFetch(`${API}/api/settings/memory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -2092,7 +2109,7 @@ function applyQqBotPayload(d) {
 }
 async function loadQqBot() {
   try {
-    const r = await fetch(`${API}/api/settings/qqbot`);
+    const r = await daemonFetch(`${API}/api/settings/qqbot`);
     const d = await r.json();
     if (!r.ok) { toast(d.error || 'QQ Bot 状态读取失败', 'err'); return; }
     applyQqBotPayload(d);
@@ -2106,7 +2123,7 @@ async function saveQqBot() {
     return;
   }
   try {
-    const r = await fetch(`${API}/api/settings/qqbot`, {
+    const r = await daemonFetch(`${API}/api/settings/qqbot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(qqBotConfig.value),
@@ -2143,7 +2160,7 @@ function applyTelegramBotPayload(d) {
 }
 async function loadTelegramBot() {
   try {
-    const r = await fetch(`${API}/api/settings/telegrambot`);
+    const r = await daemonFetch(`${API}/api/settings/telegrambot`);
     const d = await r.json();
     if (!r.ok) { toast(d.error || 'Telegram Bot 状态读取失败', 'err'); return; }
     applyTelegramBotPayload(d);
@@ -2157,7 +2174,7 @@ async function saveTelegramBot() {
     return;
   }
   try {
-    const r = await fetch(`${API}/api/settings/telegrambot`, {
+    const r = await daemonFetch(`${API}/api/settings/telegrambot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(telegramBotConfig.value),
@@ -2182,7 +2199,7 @@ function openInfo() {
 async function deleteSession(sid) {
   if (!window.confirm('删除该会话？此操作不可撤销。')) return;
   try {
-    await fetch(`${API}/api/session/${sid}`, { method: 'DELETE' });
+    await daemonFetch(`${API}/api/session/${sid}`, { method: 'DELETE' });
   } catch {}
   const wasActive = sid === activeSessionId.value;
   await refreshSessions();
@@ -2232,7 +2249,7 @@ function connectWS(sid) {
   // to rebuild cleanly (also avoids duplicates on a transient reconnect).
   messages.value = [];
   _replaying = true; // ignore historical permission prompts until ReplayDone
-  ws = new WebSocket(`${WS_URL}/api/stream/${sid}`);
+  ws = new WebSocket(daemonWebSocketUrl(`/api/stream/${sid}`));
   ws._gen = gen;
   ws._dead = false; // set once the daemon says this session no longer exists
   ws.onopen = () => { connected.value = true; };
@@ -2458,7 +2475,7 @@ async function send() {
   if (inputEl.value) inputEl.value.style.height = 'auto';
   scrollDown();
   try {
-    const r = await fetch(`${API}/api/task`, {
+    const r = await daemonFetch(`${API}/api/task`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: activeSessionId.value, prompt: text }),
@@ -2490,7 +2507,7 @@ async function send() {
 async function resolvePerm(response) {
   const rid = perm.value.request_id;
   perm.value = null;
-  await fetch(`${API}/api/permission/${activeSessionId.value}`, {
+  await daemonFetch(`${API}/api/permission/${activeSessionId.value}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: rid, response }),
@@ -2512,7 +2529,7 @@ async function advanceAsk() {
     const rid = ask.value.request_id;
     const answers = ask.value.answers;
     ask.value = null;
-    await fetch(`${API}/api/askuser/${activeSessionId.value}`, {
+    await daemonFetch(`${API}/api/askuser/${activeSessionId.value}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request_id: rid, answers }),

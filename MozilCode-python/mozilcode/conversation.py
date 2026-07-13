@@ -7,31 +7,39 @@ from typing import Any
 
 @dataclass
 class ToolUseBlock:
-    tool_use_id: str
-    tool_name: str
-    arguments: dict[str, Any]
+    """LLM 请求调用工具的完整描述（工具名 + 参数）。"""
+    tool_use_id: str          # 工具调用唯一 ID（用于关联结果）
+    tool_name: str            # 工具名称
+    arguments: dict[str, Any] # 工具参数
 
 
 @dataclass
 class ToolResultBlock:
-    tool_use_id: str
-    content: str
-    is_error: bool = False
+    """工具执行结果（关联到对应的 ToolUseBlock）。"""
+    tool_use_id: str    # 关联的工具调用 ID
+    content: str        # 结果内容（文本）
+    is_error: bool = False  # 是否为错误结果
 
 
 @dataclass
 class ThinkingBlock:
-    thinking: str
-    signature: str
+    """LLM 的思考过程块（extended thinking），包含思考和签名。"""
+    thinking: str    # 思考内容
+    signature: str   # 思考签名（用于 API 验证）
 
 
 @dataclass
 class Message:
+    """对话历史中的一条消息，统一表示 user/assistant 消息。
+
+    采用 Anthropic 风格的多块结构：一条消息可同时包含文本内容、
+    工具调用请求（assistant）、工具执行结果（user）和思考块（assistant）。
+    """
     role: str  # "user" | "assistant"
     content: str
-    tool_uses: list[ToolUseBlock] = field(default_factory=list)
-    tool_results: list[ToolResultBlock] = field(default_factory=list)
-    thinking_blocks: list[ThinkingBlock] = field(default_factory=list)
+    tool_uses: list[ToolUseBlock] = field(default_factory=list)        # 工具调用
+    tool_results: list[ToolResultBlock] = field(default_factory=list)  # 工具结果
+    thinking_blocks: list[ThinkingBlock] = field(default_factory=list) # 思考块
 
 
 # 估算最后一次 API 用量锚点之后追加的消息 token 开销时使用的字符/token 比率。
@@ -63,9 +71,17 @@ def estimate_tokens(messages: list[Message]) -> int:
 
 @dataclass
 class ConversationManager:
+    """对话管理器：维护对话历史、环境注入状态和 token 用量锚点。
+
+    职责：
+    1. 管理消息历史（add_user_message / add_assistant_message / add_tool_results 等）
+    2. 环境上下文和长期记忆的一次性注入（inject_environment / inject_long_term_memory）
+    3. token 用量估算（基于 API 锚点 + 字符估算的混合策略）
+    4. 上下文压缩后替换历史（replace_history）
+    """
     history: list[Message] = field(default_factory=list)
-    env_injected: bool = field(default=False, init=False)
-    ltm_injected: bool = field(default=False, init=False)
+    env_injected: bool = field(default=False, init=False)  # 环境上下文是否已注入
+    ltm_injected: bool = field(default=False, init=False)   # 长期记忆是否已注入
     # API 报告的每轮真实 prompt 大小，保留用于向后兼容。
     # 现在与 baseline_tokens 一致（input + cache_read + cache_creation + output）。
     last_input_tokens: int = field(default=0, init=False)
@@ -111,6 +127,7 @@ class ConversationManager:
         return self.baseline_tokens + estimate_tokens(tail)
 
     def add_user_message(self, content: str) -> None:
+        """追加一条用户消息。"""
         self.history.append(Message(role="user", content=content))
 
     def add_assistant_message(
@@ -119,6 +136,7 @@ class ConversationManager:
         tool_uses: list[ToolUseBlock] | None = None,
         thinking_blocks: list[ThinkingBlock] | None = None,
     ) -> None:
+        """追加一条 assistant 消息，可携带工具调用和思考块。"""
         self.history.append(
             Message(
                 role="assistant",
@@ -129,6 +147,11 @@ class ConversationManager:
         )
 
     def add_system_reminder(self, content: str) -> None:
+        """以 system-reminder 标签包裹的方式追加一条用户消息。
+
+        用于注入 Hook 通知、记忆提醒等系统级上下文，
+        LLM 会将其视为系统提示而非用户直接输入。
+        """
         self.history.append(
             Message(
                 role="user",
@@ -137,12 +160,17 @@ class ConversationManager:
         )
 
     def add_tool_results_message(self, tool_results: list[ToolResultBlock]) -> None:
+        """追加一条携带工具结果的用户消息（content 为空，结果在 tool_results 中）。"""
         self.history.append(
             Message(role="user", content="", tool_results=tool_results)
         )
 
 
     def inject_environment(self, context: str) -> None:
+        """在历史最前面插入环境上下文（只注入一次）。
+
+        包含工作目录、可用 Skill、Agent 类型清单等信息。
+        """
         if not self.env_injected:
             self.history.insert(0, Message(role="user", content=context))
             self.env_injected = True
@@ -150,6 +178,13 @@ class ConversationManager:
     def inject_long_term_memory(
         self, instructions: str, memories: str
     ) -> None:
+        """在环境上下文之后插入长期记忆（只注入一次）。
+
+        包含两部分：
+        1. MOZILCODE.md 指令文件内容（项目级 + 用户级）
+        2. 自动提取的记忆（来自 memories.md）
+        以及当前日期。全部包裹在 system-reminder 标签中。
+        """
         if self.ltm_injected:
             return
         sections: list[str] = []
@@ -182,6 +217,11 @@ class ConversationManager:
         self.ltm_injected = True
 
     def replace_history(self, new_messages: list[Message]) -> None:
+        """用新消息列表替换整个历史（上下文压缩后调用）。
+
+        重置 env_injected / ltm_injected 标记，使下一轮可以重新注入环境。
+        清除用量锚点，使 current_tokens() 退化为字符估算。
+        """
         self.history = new_messages
         self.env_injected = False
         self.ltm_injected = False
@@ -194,4 +234,5 @@ class ConversationManager:
 
 
     def get_messages(self) -> list[Message]:
+        """返回历史消息的副本。"""
         return list(self.history)

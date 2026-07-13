@@ -27,17 +27,13 @@ REMOVED_ROUTE_TERMS = frozenset(
         "auth",
         "cloud",
         "frontend",
-        "gui",
         "hosted",
         "login",
         "official",
-        "qqbot",
-        "settings",
-        "telegrambot",
     }
 )
 
-REMOVED_APP_SHELL_PATHS = frozenset({"/", "/app", "/cloud", "/login", "/models"})
+REMOVED_APP_SHELL_PATHS = frozenset({"/app", "/cloud", "/login", "/models"})
 
 REMOVED_MANAGEMENT_PATHS = frozenset(
     {
@@ -45,8 +41,6 @@ REMOVED_MANAGEMENT_PATHS = frozenset(
         "/api/cloud/status",
         "/api/models/official",
         "/api/settings/gui",
-        "/api/settings/qqbot",
-        "/api/settings/telegrambot",
     }
 )
 

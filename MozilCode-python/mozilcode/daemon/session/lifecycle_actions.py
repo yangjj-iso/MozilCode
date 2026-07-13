@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import MutableMapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +28,14 @@ async def create_session_runtime(
     session_mgr: SessionManager,
     runtimes: MutableMapping[str, DaemonSessionRuntime],
     agent_factory: AgentFactory = create_agent_from_config,
+    provider_name: str = "",
 ) -> DaemonSessionRuntime:
     if config is None:
         raise ValueError("model provider is not configured")
+    selected_config = _select_provider(config, provider_name)
     runtime = await create_daemon_session_runtime(
         sid=sid,
-        config=config,
+        config=selected_config,
         work_dir=work_dir,
         permission_mode=PermissionMode(config.permission_mode),
         hook_engine=hook_engine,
@@ -54,6 +57,7 @@ async def init_daemon_session(
     runtimes: MutableMapping[str, DaemonSessionRuntime],
     records: Any,
     agent_factory: AgentFactory = create_agent_from_config,
+    provider_name: str = "",
 ) -> str:
     if config is None:
         raise ValueError("model provider is not configured")
@@ -73,8 +77,12 @@ async def init_daemon_session(
         session_mgr=session_mgr,
         runtimes=runtimes,
         agent_factory=agent_factory,
+        provider_name=provider_name,
     )
-    records.create(sid, resolved_work_dir)
+    if provider_name:
+        records.create(sid, resolved_work_dir, provider_name=provider_name)
+    else:
+        records.create(sid, resolved_work_dir)
     return sid
 
 
@@ -103,6 +111,10 @@ async def ensure_session_runtime(
     if not Path(work_dir).is_dir():
         work_dir = default_work_dir
 
+    provider_name = meta.get("provider_name", "")
+    if not isinstance(provider_name, str):
+        provider_name = ""
+
     await create_session_runtime(
         sid=sid,
         config=config,
@@ -111,6 +123,17 @@ async def ensure_session_runtime(
         session_mgr=session_mgr,
         runtimes=runtimes,
         agent_factory=agent_factory,
+        provider_name=provider_name,
     )
     records.ensure_event_log(sid)
     return True
+
+
+def _select_provider(config: AppConfig, provider_name: str) -> AppConfig:
+    """Reorder providers for a session without mutating shared configuration."""
+    if not provider_name:
+        return config
+    selected = next((p for p in config.providers if p.name == provider_name), None)
+    if selected is None or config.providers[0] is selected:
+        return config
+    return replace(config, providers=[selected, *[p for p in config.providers if p is not selected]])

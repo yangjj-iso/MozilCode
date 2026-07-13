@@ -44,13 +44,14 @@ log = logging.getLogger(__name__)
 
 
 class AgentToolParams(BaseModel):
-    prompt: str
-    description: str
-    subagent_type: str | None = None
-    model: str | None = None
-    run_in_background: bool = False
-    name: str | None = None
-    isolation: str | None = None
+    """Agent 工具的参数定义。LLM 调用 Agent 工具时传入这些参数。"""
+    prompt: str                   # 给子 Agent 的任务描述
+    description: str              # 简短描述（用于 UI 展示）
+    subagent_type: str | None = None  # 预定义 Agent 类型名（None = fork 当前对话）
+    model: str | None = None     # 指定模型覆盖默认
+    run_in_background: bool = False  # 是否后台异步执行
+    name: str | None = None      # 自定义 Agent 名称
+    isolation: str | None = None # 隔离模式（如 "worktree"）
     team_name: str | None = Field(
         default=None,
         description=(
@@ -63,6 +64,7 @@ class AgentToolParams(BaseModel):
     )
 
 
+# 队友附加指令：提醒队友使用 SendMessage 通信、在 worktree 中工作、使用相对路径
 TEAMMATE_ADDENDUM = (
     "\n\nIMPORTANT: You are running as an agent in a team.\n"
     "Just writing a response in text is not visible to others\n"
@@ -77,6 +79,13 @@ TEAMMATE_ADDENDUM = (
 
 
 class AgentTool(Tool):
+    """Agent 工具：LLM 调用此工具来派生子 Agent。
+
+    三条执行路径：
+    1. _execute_as_teammate: team_name 不为空时，创建 Team 队友（长期运行 + worktree 隔离）
+    2. _execute_with_worktree: subagent_type 的 isolation 为 "worktree" 时，创建 worktree 隔离子 Agent
+    3. 默认路径: 创建一次性子 Agent 或 fork 当前对话
+    """
     name = "Agent"
     description = (
         "Launch a sub-agent to handle a task in an isolated context. "
@@ -110,20 +119,25 @@ class AgentTool(Tool):
         self._team_manager = team_manager
 
     async def execute(self, params: BaseModel) -> ToolResult:
+        """执行 Agent 工具：根据参数分发到三条路径之一。"""
         p: AgentToolParams = params  # type: ignore[assignment]
 
+        # 路径 1：team_name 不为空 → 创建 Team 队友
         if p.team_name:
             return await self._execute_as_teammate(p)
 
+        # 检查 subagent_type 是否配置了 worktree 隔离
         isolation = ""
         if p.subagent_type:
             defn = self._agent_loader.get(p.subagent_type)
             if defn and defn.isolation:
                 isolation = defn.isolation
 
+        # 路径 2：isolation 为 worktree → 创建 worktree 隔离子 Agent
         if isolation == "worktree":
             return await self._execute_with_worktree(p)
 
+        # 路径 3：默认 → 一次性子 Agent 或 fork 当前对话
         from mozilcode.agents.fork import ForkError, build_forked_messages
         from mozilcode.agents.parser import AgentDef
         from mozilcode.agents.tool_filter import resolve_agent_tools
@@ -132,6 +146,7 @@ class AgentTool(Tool):
         definition: AgentDef | None = None
         conversation: ConversationManager
 
+        # 3a: subagent_type 不为空 → 创建一次性子 Agent
         if p.subagent_type:
             definition = self._agent_loader.get(p.subagent_type)
             if definition is None:
@@ -144,6 +159,7 @@ class AgentTool(Tool):
                 )
             conversation = ConversationManager()
         else:
+            # 3b: subagent_type 为空 → fork 当前对话（需要 enable_fork）
             if not self._enable_fork:
                 return ToolResult(
                     output=fork_disabled_message(),
@@ -247,6 +263,18 @@ class AgentTool(Tool):
         return ToolResult(output=empty_subagent_output(result_text))
 
     async def _execute_as_teammate(self, p: AgentToolParams) -> ToolResult:
+        """路径 1：创建 Team 队友。
+
+        流程：
+        1. 加载 Agent 定义（subagent_type 或 fork）
+        2. 创建 Git worktree 隔离工作目录
+        3. 选择 LLM 客户端
+        4. 检测后端类型（tmux / iTerm2 / 进程内）
+        5. 构建队友工具集（含 SendMessage / TeamTask 等团队工具）
+        6. 创建子 Agent 并附加队友指令
+        7. 注册名称和成员信息
+        8. 按后端类型启动（tmux/iTerm2 开新终端面板，进程内直接启动）
+        """
         if self._team_manager is None:
             return ToolResult(output="TeamManager not configured.", is_error=True)
         if self._worktree_manager is None:
@@ -406,6 +434,9 @@ class AgentTool(Tool):
         self, p: Any, team: Any, member: Any, backend: Any, wt: Any,
         agent_id: str, teammate_name: str,
     ) -> ToolResult:
+        """在 tmux / iTerm2 中启动队友（开新终端面板）。
+        失败时返回错误信息，回退到进程内模式。
+        """
         from mozilcode.teams.models import BackendType
 
         mailbox = self._team_manager.get_mailbox(p.team_name)
@@ -454,6 +485,12 @@ class AgentTool(Tool):
 
 
     async def _execute_with_worktree(self, p: AgentToolParams) -> ToolResult:
+        """路径 2：创建 worktree 隔离子 Agent。
+
+        与路径 3 的区别：子 Agent 在独立的 Git worktree 中工作，
+        文件操作不会影响主工作目录。执行完成后自动清理 worktree
+        （有变更则保留，无变更则删除）。
+        """
         if self._worktree_manager is None:
             return ToolResult(
                 output="Worktree isolation is not available: WorktreeManager not configured.",

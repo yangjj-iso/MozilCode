@@ -104,6 +104,7 @@ def build_child_env(declared_env: dict[str, str] | None) -> dict[str, str]:
 @dataclass
 class MCPServerConfig:
     name: str
+    enabled: bool = True
     command: str | None = None
     args: list[str] = field(default_factory=list)
     url: str | None = None
@@ -144,9 +145,11 @@ class MemoryConfig:
 @dataclass
 class AppConfig:
     providers: list[ProviderConfig]
+    schema_version: int = 1
     permission_mode: str = "default"
     permission_mode_declared: bool = False
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    mcp_servers_declared: bool = False
     raw_hooks: list[dict] = field(default_factory=list)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     memory_declared: bool = False
@@ -189,6 +192,7 @@ def _load_single_file(path: Path, *, require_providers: bool = True) -> AppConfi
     mcp_servers = [
         MCPServerConfig(
             name=s["name"],
+            enabled=s["enabled"],
             command=s["command"],
             args=s["args"],
             url=s["url"],
@@ -221,9 +225,11 @@ def _load_single_file(path: Path, *, require_providers: bool = True) -> AppConfi
 
     return AppConfig(
         providers=providers,
+        schema_version=validated["schema_version"],
         permission_mode=validated["permission_mode"],
         permission_mode_declared="permission_mode" in raw_keys,
         mcp_servers=mcp_servers,
+        mcp_servers_declared="mcp_servers" in raw_keys,
         raw_hooks=validated["hooks"],
         memory=memory_cfg,
         memory_declared=memory_declared,
@@ -246,14 +252,18 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
     if override.permission_mode_declared:
         base.permission_mode = override.permission_mode
 
-    if override.mcp_servers:
-        by_name = {s.name: i for i, s in enumerate(base.mcp_servers)}
-        for s in override.mcp_servers:
-            if s.name in by_name:
-                base.mcp_servers[by_name[s.name]] = s
-            else:
-                base.mcp_servers.append(s)
-                by_name[s.name] = len(base.mcp_servers) - 1
+    if override.mcp_servers_declared:
+        if not override.mcp_servers:
+            base.mcp_servers = []
+        else:
+            by_name = {s.name: i for i, s in enumerate(base.mcp_servers)}
+            for s in override.mcp_servers:
+                if s.name in by_name:
+                    base.mcp_servers[by_name[s.name]] = s
+                else:
+                    base.mcp_servers.append(s)
+                    by_name[s.name] = len(base.mcp_servers) - 1
+        base.mcp_servers_declared = True
 
     base.raw_hooks.extend(override.raw_hooks)
     if override.memory_declared:

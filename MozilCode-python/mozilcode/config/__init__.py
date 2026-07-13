@@ -22,6 +22,7 @@ from mozilcode.config.removed_capabilities import (
     find_removed_config_sections,
 )
 from mozilcode.config.validator import (
+    CURRENT_CONFIG_SCHEMA_VERSION,
     VALID_PERMISSION_MODES,
     VALID_PROTOCOLS,
     VALID_TEAMMATE_MODES,
@@ -29,12 +30,14 @@ from mozilcode.config.validator import (
     validate_mcp_servers,
     validate_permission_mode,
     validate_providers,
+    validate_schema_version,
     validate_worktree,
 )
 
 __all__ = [
     "AppConfig",
     "ConfigError",
+    "CURRENT_CONFIG_SCHEMA_VERSION",
     "DEFAULT_CONTEXT_WINDOW",
     "MCPServerConfig",
     "MODEL_CONTEXT_WINDOWS",
@@ -55,5 +58,6 @@ __all__ = [
     "validate_mcp_servers",
     "validate_permission_mode",
     "validate_providers",
+    "validate_schema_version",
     "validate_worktree",
 ]

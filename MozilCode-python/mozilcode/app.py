@@ -579,8 +579,10 @@ class MozilCodeApp(App):
         teammate_mode: str = "",
         enable_coordinator_mode: bool = False,
         driver_class: type | None = None,
+        config: Any = None,
     ) -> None:
         super().__init__(driver_class=driver_class)
+        self.config = config
         self.providers = providers
         self._initial_permission_mode = permission_mode
         self._mcp_server_configs = mcp_servers or []

@@ -27,6 +27,7 @@ MODE_REQUESTS = {
 class CreateSessionBody:
     session_id: str | None
     work_dir: str | None
+    provider_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ def parse_create_session_body(body: dict[str, Any]) -> CreateSessionBody:
     return CreateSessionBody(
         session_id=string_field(body, "session_id") or None,
         work_dir=string_field(body, "work_dir") or None,
+        provider_name=string_field(body, "provider_name") or None,
     )
 
 

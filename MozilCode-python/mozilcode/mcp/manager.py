@@ -17,9 +17,15 @@ class MCPManager:
         self._stale_clients: list[tuple[str, MCPClient]] = []
 
     def load_configs(self, configs: list[MCPServerConfig]) -> None:
+        old_configs = self._configs
+        new_configs = {cfg.name: cfg for cfg in configs}
+        for name in set(self._clients) - set(new_configs):
+            client = self._clients.pop(name, None)
+            if client is not None:
+                self._stale_clients.append((name, client))
+        self._configs = new_configs
         for cfg in configs:
-            existing = self._configs.get(cfg.name)
-            self._configs[cfg.name] = cfg
+            existing = old_configs.get(cfg.name)
             if existing is not None and existing != cfg:
                 client = self._clients.pop(cfg.name, None)
                 if client is not None:
@@ -29,6 +35,9 @@ class MCPManager:
         await self._close_stale_clients()
         errors: list[str] = []
         for name, config in self._configs.items():
+            if not config.enabled:
+                logger.info("Skipping disabled MCP server '%s'", name)
+                continue
             try:
                 errors.extend(
                     await self._register_server_tools(name, config, registry)

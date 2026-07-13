@@ -123,33 +123,55 @@ from mozilcode.tools.base import (
 
 log = logging.getLogger(__name__)
 
+# 每隔多少轮对话触发一次记忆提取（用 LLM 从对话中提取值得长期记忆的信息）
 MEMORY_EXTRACTION_INTERVAL = 5
 # ---------------------------------------------------------------------------
-# AgentEvent 事件类型
+# AgentEvent 事件类型定义在 mozilcode.agent.events 中，此处导入是为了保持
+# mozilcode.agent 包的公开导入路径不变。
 # ---------------------------------------------------------------------------
-
-# Event DTOs are defined in mozilcode.agent.events and imported here so existing
-# public imports from mozilcode.agent remain valid.
 
 
 # ---------------------------------------------------------------------------
 # Agent 主循环
+#
+# Agent 是整个系统的核心引擎。它的 run() 方法是一个异步生成器，产出事件流
+#（StreamText / ToolUseEvent / ToolResultEvent / LoopComplete 等），
+# 由 TUI / Daemon / GUI 等前端消费。
+#
+# 核心循环逻辑：
+#   1. 加载环境上下文 + 记忆 → 注入对话 → 触发 session_start Hook
+#   2. while True:
+#      a. turn_start Hook
+#      b. Layer 2 上下文压缩检查（接近窗口上限时自动摘要历史）
+#      c. pre_send Hook → 构建 system prompt + tools schema
+#      d. Layer 1 超大工具结果按 token 预算截断
+#      e. 调用 LLM（流式）→ yield StreamText
+#      f. post_receive Hook → 记录 token 用量
+#      g. 如果 LLM 返回 tool_call → pre_tool_use Hook → 权限检查 → 执行 → post_tool_use Hook
+#      h. 如果 LLM 没有返回 tool_call → 任务完成 → 触发记忆观察/提取 → session_end Hook → yield LoopComplete
 # ---------------------------------------------------------------------------
 
 class Agent:
+    """AI 编码助手的核心引擎。
+
+    Agent 接收对话历史，循环调用 LLM + 执行工具，直到 LLM 不再请求工具调用
+    或达到最大迭代次数。整个过程通过异步生成器产出事件流，前端消费事件
+    来实时展示 LLM 文本、工具调用、权限请求等。
+    """
+
     def __init__(
         self,
-        client: LLMClient,
-        registry: ToolRegistry,
-        protocol: str,
-        work_dir: str = ".",
-        max_iterations: int = 50,
-        permission_checker: PermissionChecker | None = None,
-        context_window: int = 200_000,
-        instructions_content: str = "",
-        memory_manager: MemoryManager | None = None,
-        memory_hub: MemoryHub | None = None,
-        hook_engine: HookEngine | None = None,
+        client: LLMClient,              # LLM 客户端（Anthropic / OpenAI 统一接口）
+        registry: ToolRegistry,          # 工具注册表（23 个内置工具 + MCP/Skills 扩展）
+        protocol: str,                   # LLM 协议（anthropic / openai / openai-compat）
+        work_dir: str = ".",            # 工作目录（文件操作的基础路径）
+        max_iterations: int = 50,       # 最大循环次数（防止无限循环）
+        permission_checker: PermissionChecker | None = None,  # 权限检查器
+        context_window: int = 200_000,  # LLM 上下文窗口大小（tokens）
+        instructions_content: str = "",  # MOZILCODE.md 中的项目指令
+        memory_manager: MemoryManager | None = None,   # 旧版记忆管理器
+        memory_hub: MemoryHub | None = None,            # 新版可插拔记忆中心
+        hook_engine: HookEngine | None = None,          # Hook 引擎（生命周期钩子）
     ) -> None:
         self.client = client
         self.registry = registry
@@ -161,22 +183,24 @@ class Agent:
             permission_checker.mode if permission_checker else PermissionMode.DEFAULT
         )
         self.context_window = context_window
-        self.session_dir = ensure_session_dir(work_dir)
-        self.compact_breaker = CompactCircuitBreaker()
-        self.replacement_state: ContentReplacementState = create_replacement_state()
+        self.session_dir = ensure_session_dir(work_dir)           # 会话持久化目录
+        self.compact_breaker = CompactCircuitBreaker()            # 上下文压缩熔断器（防频繁压缩）
+        self.replacement_state: ContentReplacementState = create_replacement_state()  # Layer 1 替换状态
         # 保存重建工作上下文所需的快照，在 Layer 2 压缩对话后使用：
         # 最近的文件读取和 skill 调用。每次 ReadFile / skill 调用时记录，
         # auto_compact 触发阈值时消费。
         self.recovery_state: RecoveryState = RecoveryState()
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
+        self.total_input_tokens = 0                                # 累计输入 token
+        self.total_output_tokens = 0                               # 累计输出 token
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
         self.memory_hub = memory_hub
+        # 如果只传了旧版 memory_manager 而没传 memory_hub，自动包装为 Hub
         if self.memory_hub is None and self.memory_manager is not None:
             self.memory_hub = MemoryHub(
                 providers=[MarkdownMemoryProvider(work_dir, manager=self.memory_manager)]
             )
+        # 记忆桥接层：Agent 循环 ↔ MemoryHub 之间的适配器
         self.memory_bridge = AgentMemoryBridge(
             memory_hub=self.memory_hub,
             client=self.client,
@@ -184,23 +208,24 @@ class Agent:
             project_root=self.work_dir,
         )
         self.hook_engine = hook_engine
-        self._loop_count = 0
+        self._loop_count = 0                                       # 已完成的循环数（用于记忆提取间隔控制）
         self.session_id: str = ""
-        self.active_skills: dict[str, str] = {}
-        self._skill_catalog: str = ""
-        self._agent_catalog: str = ""
+        self.active_skills: dict[str, str] = {}                    # 当前激活的 Skill 提示体
+        self._skill_catalog: str = ""                              # 可用 Skill 清单（注入 system prompt）
+        self._agent_catalog: str = ""                              # 可用子 Agent 类型清单
         self._agent_catalog_list: list[tuple[str, str]] = []
-        self.agent_id: str = uuid.uuid4().hex[:12]
-        self.parent_id: str | None = None
-        self.trace_id: str | None = None
-        self.coordinator_mode: bool = False
-        self.team_name: str = ""
-        self._team_manager: Any = None
-        self.notification_fn: Callable[[], list[str]] | None = None
-        self.file_history: Any = None
+        self.agent_id: str = uuid.uuid4().hex[:12]                # Agent 唯一 ID
+        self.parent_id: str | None = None                          # 父 Agent ID（子 Agent 模式时设置）
+        self.trace_id: str | None = None                           # 追踪 ID（用于 trace 树）
+        self.coordinator_mode: bool = False                       # 协调者模式（只调度不执行）
+        self.team_name: str = ""                                  # 所属 Team 名称
+        self._team_manager: Any = None                             # Team 管理器
+        self.notification_fn: Callable[[], list[str]] | None = None  # 外部通知回调
+        self.file_history: Any = None                             # 文件历史快照管理器
 
     @property
     def _transcript_path(self) -> str:
+        """会话 JSONL 转录文件路径，用于持久化对话历史和回溯。"""
         if self.session_id:
             return str(Path(self.work_dir) / ".mozilcode" / "sessions" / f"{self.session_id}.jsonl")
         return ""
@@ -271,11 +296,22 @@ class Agent:
         return latest_user_query(conversation)
 
     async def run(self, conversation: ConversationManager) -> AsyncIterator[AgentEvent]:
+        """Agent 主循环 —— 模型↔工具流式交互至收敛。
+
+        这是一个异步生成器，产出事件流供前端消费。循环逻辑：
+        1. 会话初始化：注入环境上下文 + 记忆 → 触发 session_start Hook
+        2. 每轮迭代：上下文压缩检查 → pre_send Hook → 调用 LLM → post_receive Hook
+           → 如果 LLM 请求工具：pre_tool_use Hook → 权限检查 → 执行 → post_tool_use Hook → 下一轮
+           → 如果 LLM 不再请求工具：记忆观察/提取 → session_end Hook → yield LoopComplete
+        """
         self._current_conversation = conversation
+        # 构建环境上下文（工作目录、激活的 Skill、可用 Agent 类型清单）
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )
+        # 加载记忆上下文（用最近一条用户消息做语义检索）
         memory_content = await self._load_memory_context(self._latest_user_query(conversation))
+        # 将环境上下文、项目指令、记忆内容注入对话开头
         inject_agent_context(
             conversation,
             environment_context=env_context,
@@ -283,28 +319,32 @@ class Agent:
             memory_content=memory_content,
         )
 
+        # 触发 session_start 生命周期 Hook
         for he in await self._run_lifecycle_hook("session_start"):
             yield he
 
         iteration = 0
-        consecutive_unknown = 0
-        output_recovery_state = OutputRecoveryState()
+        consecutive_unknown = 0          # 连续未知工具调用计数（超过 3 次终止）
+        output_recovery_state = OutputRecoveryState()  # max_tokens 触顶恢复状态
 
         while True:
             iteration += 1
 
+            # 迭代次数保护：超过最大限制则终止
             if iteration > self.max_iterations:
                 yield ErrorEvent(
                     message=f"Agent reached maximum iterations ({self.max_iterations})"
                 )
                 break
 
+            # ① 触发 turn_start 生命周期 Hook
             for he in await self._run_lifecycle_hook("turn_start"):
                 yield he
 
+            # 注入外部通知（Team mailbox 消息、后台任务完成通知等）
             self._inject_external_notifications(conversation)
 
-            # Layer 2: 接近 context window 上限时自动 compact（操作原始对话）
+            # ② Layer 2: 接近 context window 上限时自动 compact（摘要历史对话）
             current_tokens = conversation.current_tokens()
             compact_threshold = compute_compact_threshold(self.context_window)
             compact_started = should_auto_compact(current_tokens, self.context_window)
@@ -326,6 +366,7 @@ class Agent:
                 transcript_path=self._transcript_path,
             )
             if isinstance(compact_result, CompactEvent):
+                # 压缩成功后重新注入环境上下文和记忆，保证工作集不丢失
                 mem = await self._load_memory_context()
                 after_tokens = reinject_after_compact(
                     conversation,
@@ -340,6 +381,7 @@ class Agent:
                     context_tokens=after_tokens,
                 )
             elif compact_result is None and compact_started:
+                # 近期内容不足以生成有效摘要，跳过本轮压缩
                 after_tokens = conversation.current_tokens()
                 yield CompactNotification(
                     before_tokens=current_tokens,
@@ -349,18 +391,22 @@ class Agent:
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
 
+            # ③ 触发 pre_send 生命周期 Hook（即将发送给 LLM）
             for he in await self._run_lifecycle_hook("pre_send"):
                 yield he
 
+            # 收集 Hook 产生的 prompt 注入消息（prompt 类型 action 的输出）
             hook_prompts = (
                 self.hook_engine.get_prompt_messages() if self.hook_engine else None
             )
+            # 构建 system prompt（包含环境信息、Hook 提示、协调者模式等）
             system = build_system_prompt(
                 hook_prompts=hook_prompts,
                 coordinator_mode=self.coordinator_mode,
                 agent_catalog=self._agent_catalog_list or None,
             )
 
+            # Plan 模式：注入计划文件提醒，LLM 只能读不能写
             if self.plan_mode:
                 plan_path = str(self._get_plan_path())
                 if self.permission_checker:
@@ -371,20 +417,23 @@ class Agent:
                 )
                 conversation.add_system_reminder(plan_reminder)
 
+            # 将 Hook 执行结果的通知注入对话作为 system reminder
             if self.hook_engine:
                 for note in self.hook_engine.drain_notifications():
                     conversation.add_system_reminder(
                         f"Hook [{note.hook_id}] {note.event}: {note.output}"
                     )
 
+            # 注入延迟工具（ToolSearch）的提醒，让 LLM 知道有按需加载的工具
             inject_deferred_tool_reminder(
                 conversation,
                 self.registry.get_deferred_tool_names(),
             )
 
+            # 获取所有工具的 schema（按协议格式）
             tools = self.registry.get_all_schemas(self.protocol)
 
-            # Layer 1: 在 LLM 调用前应用 tool-result budget，确保 api_conv 反映
+            # ④ Layer 1: 在 LLM 调用前应用 tool-result budget，确保 api_conv 反映
             # 本轮迭代中所有已发生的写入（system reminders、hook 通知等）。
             # 原始 conversation 不会被修改；替换决策保存在 self.replacement_state 中。
             api_conv, _ = prepare_api_conversation(
@@ -393,6 +442,7 @@ class Agent:
                 self.replacement_state,
             )
 
+            # ⑤ 调用 LLM（流式），通过 StreamCollector 收集事件并 yield 给前端
             collector = StreamCollector()
             llm_stream = self.client.stream(api_conv, system=system, tools=tools)
             async for event in collector.consume(llm_stream):
@@ -400,12 +450,14 @@ class Agent:
 
             response = collector.response
 
+            # ⑥ 触发 post_receive 生命周期 Hook（LLM 响应已收到）
             for he in await self._run_lifecycle_hook(
                 "post_receive",
                 message=response.text,
             ):
                 yield he
 
+            # ⑦ 记录 token 用量并产出 UsageEvent
             usage_update = accumulate_response_usage(
                 UsageTotals(self.total_input_tokens, self.total_output_tokens),
                 response,
@@ -416,6 +468,7 @@ class Agent:
 
             conv_thinking = response_thinking_blocks(response)
 
+            # ⑧ max_tokens 触顶恢复：如果 LLM 输出被截断，尝试提额+续写
             output_recovery_decision = handle_output_token_limit(
                 response=response,
                 conversation=conversation,
@@ -428,34 +481,41 @@ class Agent:
                 yield output_recovery_decision.retry_event
                 continue
 
+            # ⑨ 如果 LLM 没有返回工具调用 → 任务完成
             if not response.tool_calls:
                 add_final_response(
                     conversation,
                     response,
                     thinking_blocks=conv_thinking,
                 )
+                # 后台异步观察对话（轻量级，不阻塞）
                 if self.memory_hub:
                     asyncio.ensure_future(
                         self._observe_memories(conversation, MEMORY_EVENT_TURN_COMPLETED)
                     )
                 self._loop_count += 1
+                # 每 5 轮触发一次记忆提取（重量级，用 LLM 从对话中提取值得记忆的信息）
                 if (
                     self._loop_count % MEMORY_EXTRACTION_INTERVAL == 0
                     and self.memory_hub
                 ):
                     asyncio.ensure_future(self._extract_memories(conversation))
+                # 触发 turn_end 和 session_end 生命周期 Hook
                 for he in await self._run_lifecycle_hook("turn_end"):
                     yield he
                 for he in await self._run_lifecycle_hook("session_end"):
                     yield he
+                # 保存文件历史快照（用于回溯）
                 snapshot_file_history(
                     self.file_history,
                     conversation,
                     response.text,
                 )
+                # 产出 LoopComplete 事件，循环结束
                 yield LoopComplete(total_turns=iteration)
                 break
 
+            # ⑩ LLM 返回了工具调用 → 记录到对话历史
             add_tool_call_response(
                 conversation,
                 response,
@@ -463,10 +523,12 @@ class Agent:
             )
 
             tool_results: list[ToolResultBlock] = []
+            # 按并发安全对工具调用分区（只读安全工具可批量并行，写/执行类串行）
             batches = partition_tool_calls(response.tool_calls, self.registry)
 
             for batch in batches:
                 if batch.concurrent and len(batch.calls) > 1:
+                    # === 并发路径 ===
                     # 并发执行前先逐个做授权预检：pre_tool_use hook + 权限检查。
                     # 只有通过的调用才进入并行执行，避免并发路径绕过 PathSandbox、
                     # 权限规则和 hooks（历史上 _execute_single_tool_direct 直接执行，
@@ -534,11 +596,13 @@ class Agent:
                         )
                         yield tool_result_event(tc, result, elapsed)
                 else:
+                    # === 串行路径 ===
                     for tc in batch.calls:
                         result: ToolResult | None = None
                         elapsed = 0.0
                         is_unknown = False
 
+                        # ⑩a pre_tool_use Hook（可以 reject 拦截）
                         hook_result = await run_pre_tool_hook(
                             hook_engine=self.hook_engine,
                             build_hook_context=self._build_hook_context,
@@ -556,6 +620,7 @@ class Agent:
                             yield tool_result_event(tc, result, 0.0)
                             continue
 
+                        # ⑩b 执行工具（含权限检查，可能 yield PermissionRequest）
                         async for item in self._execute_tool(tc):
                             if isinstance(item, (PermissionRequest, AskUserRequest)):
                                 yield item
@@ -570,6 +635,7 @@ class Agent:
                         else:
                             consecutive_unknown = 0
 
+                        # ⑩c post_tool_use Hook
                         for he in await run_post_tool_hook(
                             hook_engine=self.hook_engine,
                             build_hook_context=self._build_hook_context,
@@ -633,10 +699,10 @@ class Agent:
         self._snapshot_for_recovery(tc, exec_result.result)
         return exec_result
 
-
     async def _execute_batch_parallel(
         self, calls: list[ToolCallComplete]
     ) -> list[_ToolExecResult]:
+        """并行执行多个安全工具调用（asyncio.gather）。"""
         tasks = [self._execute_single_tool_direct(tc) for tc in calls]
         return list(await asyncio.gather(*tasks))
 
@@ -752,6 +818,7 @@ class Agent:
     async def _extract_memories(
         self, conversation: ConversationManager
     ) -> None:
+        """后台提取记忆：用 LLM 从对话中提取值得长期记忆的信息，写入 memories.md。"""
         self.memory_bridge.memory_hub = self.memory_hub
         await self.memory_bridge.extract_memories(
             conversation,
@@ -765,6 +832,7 @@ class Agent:
         conversation: ConversationManager,
         event_type: str,
     ) -> None:
+        """后台观察对话：通知记忆系统发生了一轮对话（轻量级，不提取）。"""
         self.memory_bridge.memory_hub = self.memory_hub
         await self.memory_bridge.observe(
             conversation,
@@ -818,6 +886,11 @@ class Agent:
         self, task: str, conversation: ConversationManager | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
+        """非交互式执行模式：子 Agent 用此方法运行到完成，不产出事件流。
+
+        与 run() 的区别：不 yield 事件，不处理权限请求（用 dontAsk 模式），
+        通过 event_callback 回调通知进度。返回最终的文本回复。
+        """
         env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )

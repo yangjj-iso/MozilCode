@@ -8,13 +8,17 @@ from typing import Any
 def new_session_meta(
     work_dir: str,
     *,
+    provider_name: str = "",
     created_at: float | None = None,
 ) -> dict[str, Any]:
-    return {
+    meta = {
         "work_dir": work_dir,
         "created_at": time.time() if created_at is None else created_at,
         "title": "",
     }
+    if provider_name:
+        meta["provider_name"] = provider_name
+    return meta
 
 
 def session_info_from_meta(

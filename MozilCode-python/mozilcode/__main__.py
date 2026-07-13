@@ -75,6 +75,7 @@ def main() -> None:
         teammate_mode=config.teammate_mode,
         enable_coordinator_mode=config.enable_coordinator_mode,
         driver_class=NoAltScreenDriver,
+        config=config,
     )
     app.run()
 

@@ -5,7 +5,9 @@ from typing import Any
 
 from mozilcode.conversation import ConversationManager, Message
 
+# 用户级记忆文件路径（~/.mozilcode/memories.md）
 USER_MEMORIES_RELPATH = ".mozilcode/memories.md"
+# 项目级记忆文件路径（<project>/.mozilcode/memories.md）
 PROJECT_MEMORIES_RELPATH = ".mozilcode/memories.md"
 
 MEMORY_EXTRACTION_PROMPT = """\
@@ -36,15 +38,25 @@ MEMORY_EXTRACTION_PROMPT = """\
 
 不要输出任何其他内容，不要调用任何工具。"""
 
+# 用户级记忆分类标题（写入 ~/.mozilcode/memories.md）
 _USER_LEVEL_HEADERS = {"用户偏好", "纠正反馈"}
+# 项目级记忆分类标题（写入 <project>/.mozilcode/memories.md）
 _PROJECT_LEVEL_HEADERS = {"项目知识", "参考资料"}
 
 
 class MemoryManager:
+    """基于 memories.md 的记忆存储与提取管理器。
+
+    双层存储：
+    - 用户级（~/.mozilcode/memories.md）：跨项目的用户偏好和纠正反馈
+    - 项目级（<project>/.mozilcode/memories.md）：项目特定知识
+
+    记忆提取用 LLM 从对话中提取值得记忆的信息，按 4 个分类分别写入对应文件。
+    """
     def __init__(self, project_root: str) -> None:
         self._user_path = Path.home() / USER_MEMORIES_RELPATH
         self._project_path = Path(project_root) / PROJECT_MEMORIES_RELPATH
-        self._last_extraction_msg_count = 0
+        self._last_extraction_msg_count = 0  # 上次提取时的消息数，用于增量提取
 
 
     @property
@@ -77,6 +89,7 @@ class MemoryManager:
         return self._project_path.parent / "memory"
 
     def load(self) -> str:
+        """加载用户级 + 项目级 memories.md 内容，拼接返回。"""
         sections: list[str] = []
 
         if self._user_path.exists():
@@ -97,6 +110,15 @@ class MemoryManager:
         conversation: ConversationManager,
         protocol: str,
     ) -> None:
+        """用 LLM 从最近对话中提取记忆，增量更新 memories.md。
+
+        流程：
+        1. 加载当前 memories.md 内容
+        2. 取上次提取之后的新消息（增量）
+        3. 构造提取 prompt（含当前记忆 + 新对话）
+        4. 调用 LLM 生成更新后的完整 memories.md
+        5. 按分类写入用户级 / 项目级文件
+        """
         from mozilcode.tools.base import StreamEnd, TextDelta
 
         current_memories = self.load()
@@ -148,6 +170,12 @@ class MemoryManager:
         self._write_memories(collected)
 
     def _write_memories(self, content: str) -> None:
+        """将 LLM 输出的记忆内容按分类写入用户级 / 项目级文件。
+
+        解析 ### 标题分节，根据标题关键词判断归属层级：
+        - 用户偏好 / 纠正反馈 → 用户级
+        - 项目知识 / 参考资料 → 项目级
+        """
         user_sections: list[str] = []
         project_sections: list[str] = []
 
@@ -184,6 +212,7 @@ class MemoryManager:
 
     @staticmethod
     def _is_placeholder(line: str) -> bool:
+        """检查一行是否是占位符（空 / ... / 无 / 暂无等），这些行不会被写入。"""
         stripped = line.strip().lstrip("- ").strip()
         return stripped in {"", "...", "…", "无", "暂无", "N/A"}
 
@@ -195,6 +224,8 @@ class MemoryManager:
         user_sections: list[str],
         project_sections: list[str],
     ) -> None:
+        """根据标题关键词将一个分节分配到用户级或项目级列表中。
+        只保留非占位符的条目行（以 '- ' 开头）。"""
         real_lines = [l for l in lines if l.strip().startswith("- ") and not MemoryManager._is_placeholder(l)]
         if not real_lines:
             return
@@ -213,12 +244,14 @@ class MemoryManager:
 
 
     def clear(self) -> None:
+        """清空用户级和项目级 memories.md 文件。"""
         if self._user_path.exists():
             self._user_path.write_text("", encoding="utf-8")
         if self._project_path.exists():
             self._project_path.write_text("", encoding="utf-8")
 
     def get_display_text(self) -> str:
+        """返回用于展示的记忆文本（带层级标签和文件路径）。"""
         parts: list[str] = []
 
         if self._user_path.exists():

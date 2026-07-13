@@ -14,6 +14,25 @@ from mozilcode.daemon.routes.a2a import (
     a2a_task_cancel,
     a2a_task_get,
 )
+from mozilcode.daemon.routes.config import get_config, save_config
+from mozilcode.daemon.routes.settings import (
+    create_mcp_server,
+    delete_mcp_server,
+    get_memory_settings,
+    get_qqbot_settings,
+    get_telegrambot_settings,
+    list_mcp_servers,
+    save_memory_settings,
+    save_qqbot_settings,
+    save_telegrambot_settings,
+    toggle_mcp_server,
+)
+from mozilcode.daemon.routes.skills import (
+    create_skill,
+    delete_skill,
+    list_skills,
+    toggle_skill,
+)
 from mozilcode.daemon.session.routes import (
     cancel_active_task,
     cancel_background_task,
@@ -61,6 +80,22 @@ HTTP_ROUTES: tuple[HttpRouteSpec, ...] = (
     HttpRouteSpec("/a2a/tasks/{task_id}", a2a_task_get, ("GET",)),
     HttpRouteSpec("/a2a/tasks/{task_id}:cancel", a2a_task_cancel, ("POST",)),
     HttpRouteSpec("/api/health", health, ("GET",)),
+    HttpRouteSpec("/api/config", get_config, ("GET",)),
+    HttpRouteSpec("/api/config", save_config, ("POST",)),
+    HttpRouteSpec("/api/skills", list_skills, ("GET",)),
+    HttpRouteSpec("/api/skills", create_skill, ("POST",)),
+    HttpRouteSpec("/api/skills/{name}/toggle", toggle_skill, ("POST",)),
+    HttpRouteSpec("/api/skills/{name}", delete_skill, ("DELETE",)),
+    HttpRouteSpec("/api/settings/mcp", list_mcp_servers, ("GET",)),
+    HttpRouteSpec("/api/settings/mcp", create_mcp_server, ("POST",)),
+    HttpRouteSpec("/api/settings/mcp/{name}/toggle", toggle_mcp_server, ("POST",)),
+    HttpRouteSpec("/api/settings/mcp/{name}", delete_mcp_server, ("DELETE",)),
+    HttpRouteSpec("/api/settings/memory", get_memory_settings, ("GET",)),
+    HttpRouteSpec("/api/settings/memory", save_memory_settings, ("POST",)),
+    HttpRouteSpec("/api/settings/qqbot", get_qqbot_settings, ("GET",)),
+    HttpRouteSpec("/api/settings/qqbot", save_qqbot_settings, ("POST",)),
+    HttpRouteSpec("/api/settings/telegrambot", get_telegrambot_settings, ("GET",)),
+    HttpRouteSpec("/api/settings/telegrambot", save_telegrambot_settings, ("POST",)),
     HttpRouteSpec("/api/session", create_session, ("POST",)),
     HttpRouteSpec("/api/sessions", list_sessions, ("GET",)),
     HttpRouteSpec("/api/task", start_task, ("POST",)),

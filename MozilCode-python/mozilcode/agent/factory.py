@@ -14,6 +14,7 @@ from mozilcode.config import AppConfig, ProviderConfig, WorktreeConfig
 from mozilcode.hooks import HookEngine
 from mozilcode.memory.instructions import load_instructions
 from mozilcode.memory.providers import build_memory_hub
+from mozilcode.mcp import MCPManager
 from mozilcode.permissions import (
     DangerousCommandDetector,
     PathSandbox,
@@ -42,6 +43,7 @@ class AgentDeps:
     agent_loader: AgentLoader
     worktree_manager: WorktreeManager
     provider: ProviderConfig
+    mcp_manager: MCPManager | None = None
 
 
 async def create_agent_from_config(
@@ -58,6 +60,13 @@ async def create_agent_from_config(
     instructions = load_instructions(work_dir)
     memory_hub = build_memory_hub(config.memory, work_dir)
     registry = _create_base_registry(provider.protocol, work_dir)
+    mcp_manager = MCPManager()
+    mcp_manager.load_configs(config.mcp_servers)
+    mcp_errors = await mcp_manager.register_all_tools(registry)
+    for error in mcp_errors:
+        # MCP is optional: a failed external server must not prevent local tools.
+        import logging
+        logging.getLogger(__name__).warning(error)
 
     agent = Agent(
         client=client,
@@ -71,7 +80,7 @@ async def create_agent_from_config(
         hook_engine=hook_engine,
     )
 
-    deps = _create_agent_deps(config, work_dir, provider, agent, registry)
+    deps = _create_agent_deps(config, work_dir, provider, agent, registry, mcp_manager)
     return agent, deps
 
 
@@ -107,6 +116,7 @@ def _create_agent_deps(
     provider: ProviderConfig,
     agent: Agent,
     registry: ToolRegistry,
+    mcp_manager: MCPManager | None = None,
 ) -> AgentDeps:
     wt_cfg = config.worktree or WorktreeConfig()
     wt_manager = WorktreeManager(
@@ -156,4 +166,5 @@ def _create_agent_deps(
         agent_loader=agent_loader,
         worktree_manager=wt_manager,
         provider=provider,
+        mcp_manager=mcp_manager,
     )

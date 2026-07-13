@@ -3,14 +3,17 @@ from __future__ import annotations
 from mozilcode.hooks.errors import HookConfigError
 from mozilcode.hooks.models import Action
 
+# 有效的 action 类型集合
 _VALID_ACTION_TYPES = {"command", "prompt", "http", "agent"}
 
+# 每种 action 类型必须配置的字段
 _REQUIRED_FIELDS: dict[str, list[str]] = {
     "command": ["command"],
     "prompt": ["message"],
     "http": ["url"],
     "agent": ["prompt"],
 }
+# 所有字符串类型的 action 字段名
 _ACTION_STRING_FIELDS = ("command", "message", "url", "method", "body", "prompt")
 
 
@@ -20,6 +23,7 @@ def _string_field(
     label: str,
     default: str = "",
 ) -> str:
+    """从原始配置字典中提取字符串字段，带类型校验。"""
     value = data.get(field_name, default)
     if value is None:
         return default
@@ -29,6 +33,7 @@ def _string_field(
 
 
 def _headers_field(data: dict, label: str) -> dict[str, str]:
+    """解析 http action 的 headers 字段，确保 key 和 value 都是字符串。"""
     value = data.get("headers", {})
     if value is None:
         return {}
@@ -43,6 +48,17 @@ def _headers_field(data: dict, label: str) -> dict[str, str]:
 
 
 def load_action(raw_action: object, label: str) -> Action:
+    """从 config.yaml 的原始字典解析出 Action 对象。
+
+    解析流程：
+    1. 校验 action type 是否合法
+    2. 提取所有字符串字段（统一处理，避免重复代码）
+    3. 校验必填字段是否已配置
+    4. 校验 timeout 为正整数
+    5. 构造并返回 Action 对象
+
+    label 参数用于错误消息定位（如 "hooks[0]"）。
+    """
     if not isinstance(raw_action, dict):
         raise HookConfigError(f"{label}: missing or invalid 'action' field")
 
