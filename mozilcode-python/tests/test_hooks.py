@@ -1,0 +1,954 @@
+"""Hook 引擎、条件与加载测试。"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from typing import Any, AsyncIterator
+from unittest.mock import patch
+
+import pytest
+
+from mozilcode.hooks import (
+    Action,
+    ActionResult,
+    Condition,
+    ConditionGroup,
+    ConditionParseError,
+    Hook,
+    HookConfigError,
+    HookContext,
+    HookEngine,
+    LifecycleEvent,
+    ToolRejectedError,
+    load_hooks,
+    parse_condition,
+)
+from mozilcode.hooks.actions import load_action
+
+# ---------------------------------------------------------------------------
+# LifecycleEvent
+# ---------------------------------------------------------------------------
+
+class TestLifecycleEvent:
+    def test_has_15_events(self):
+        assert len(LifecycleEvent) == 15
+
+    def test_string_comparison(self):
+        assert LifecycleEvent.SESSION_START == "session_start"
+        assert LifecycleEvent.PRE_TOOL_USE == "pre_tool_use"
+        assert LifecycleEvent.SHUTDOWN == "shutdown"
+
+    def test_all_values(self):
+        expected = {
+            "session_start", "session_end",
+            "turn_start", "turn_end",
+            "pre_tool_use", "post_tool_use",
+            "pre_send", "post_receive",
+            "startup", "shutdown", "error", "compact",
+            "permission_request", "file_change", "command_execute",
+        }
+        assert {e.value for e in LifecycleEvent} == expected
+
+# ---------------------------------------------------------------------------
+# HookContext
+# ---------------------------------------------------------------------------
+
+class TestHookContext:
+
+    def test_get_field_tool(self):
+        ctx = HookContext(tool_name="Bash")
+        assert ctx.get_field("tool") == "Bash"
+
+    def test_get_field_event(self):
+        ctx = HookContext(event_name="pre_tool_use")
+        assert ctx.get_field("event") == "pre_tool_use"
+
+    def test_get_field_args(self):
+        ctx = HookContext(tool_args={"command": "ls -la", "path": "/tmp"})
+        assert ctx.get_field("args.command") == "ls -la"
+        assert ctx.get_field("args.path") == "/tmp"
+
+    def test_get_field_preserves_falsy_args(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False, "empty": ""})
+        assert ctx.get_field("args.count") == "0"
+        assert ctx.get_field("args.enabled") == "False"
+        assert ctx.get_field("args.empty") == ""
+
+    def test_get_field_unknown(self):
+        ctx = HookContext()
+        assert ctx.get_field("nonexistent") == ""
+        assert ctx.get_field("args.missing") == ""
+
+    def test_expand_all_variables(self):
+        ctx = HookContext(
+            event_name="post_tool_use",
+            tool_name="WriteFile",
+            tool_args={"file_path": "src/main.py"},
+            file_path="src/main.py",
+            message="done",
+            error="",
+        )
+        template = "Event=$EVENT Tool=$TOOL_NAME File=$FILE_PATH Msg=$MESSAGE Err=$ERROR Arg=$TOOL_ARGS.file_path"
+        result = ctx.expand(template)
+        assert "Event=post_tool_use" in result
+        assert "Tool=WriteFile" in result
+        assert "File=src/main.py" in result
+        assert "Msg=done" in result
+        assert "Err=" in result
+        assert "Arg=src/main.py" in result
+
+    def test_expand_undefined_variable(self):
+        ctx = HookContext()
+        assert ctx.expand("hello $UNKNOWN world") == "hello $UNKNOWN world"
+        assert ctx.expand("$FILE_PATH") == ""
+        assert ctx.expand("$TOOL_ARGS.missing") == "$TOOL_ARGS.missing"
+
+    def test_expand_preserves_falsy_args(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False, "empty": ""})
+        result = ctx.expand(
+            "count=$TOOL_ARGS.count enabled=$TOOL_ARGS.enabled empty=$TOOL_ARGS.empty"
+        )
+        assert result == "count=0 enabled=False empty="
+
+    def test_expand_tool_args_does_not_replace_prefixes(self):
+        ctx = HookContext(tool_args={"path": "short", "path_extra": "long"})
+        assert ctx.expand("$TOOL_ARGS.path $TOOL_ARGS.path_extra") == "short long"
+
+# ---------------------------------------------------------------------------
+# 条件解析
+# ---------------------------------------------------------------------------
+
+class TestParseCondition:
+    def test_single_condition(self):
+        group = parse_condition('tool == "Bash"')
+        assert group is not None
+        assert len(group.conditions) == 1
+        assert group.conditions[0].field == "tool"
+        assert group.conditions[0].operator == "=="
+        assert group.conditions[0].value == "Bash"
+        assert group.logic == "and"
+
+    def test_and_combination(self):
+        group = parse_condition('tool == "Bash" && args.command =~ /rm/')
+        assert group is not None
+        assert len(group.conditions) == 2
+        assert group.logic == "and"
+
+    def test_or_combination(self):
+        group = parse_condition('tool == "Bash" || tool == "WriteFile"')
+        assert group is not None
+        assert len(group.conditions) == 2
+        assert group.logic == "or"
+
+    def test_mixed_operators_error(self):
+        with pytest.raises(ConditionParseError, match="Cannot mix"):
+            parse_condition('tool == "Bash" && args.x == "1" || args.y == "2"')
+
+    def test_empty_condition(self):
+        assert parse_condition("") is None
+        assert parse_condition("   ") is None
+
+    def test_regex_format(self):
+        group = parse_condition('args.command =~ /rm\\s+-rf/')
+        assert group is not None
+        c = group.conditions[0]
+        assert c.operator == "=~"
+        assert c.value == "/rm\\s+-rf/"
+
+    def test_operator_in_regex_value_does_not_override_condition_operator(self):
+        group = parse_condition('args.command =~ /foo==bar/')
+        assert group is not None
+        c = group.conditions[0]
+        assert c.field == "args.command"
+        assert c.operator == "=~"
+        assert c.value == "/foo==bar/"
+
+    def test_later_operator_like_text_stays_in_value(self):
+        group = parse_condition('tool != "Bash == nope"')
+        assert group is not None
+        c = group.conditions[0]
+        assert c.field == "tool"
+        assert c.operator == "!="
+        assert c.value == "Bash == nope"
+
+    def test_no_valid_operator(self):
+        with pytest.raises(ConditionParseError, match="No valid operator"):
+            parse_condition("tool Bash")
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            '== "Bash"',
+            'unknown == "Bash"',
+            'args. == "x"',
+            'args.bad key == "x"',
+        ],
+    )
+    def test_invalid_fields_are_rejected(self, expr):
+        with pytest.raises(ConditionParseError, match="field"):
+            parse_condition(expr)
+
+    def test_missing_value_is_rejected(self):
+        with pytest.raises(ConditionParseError, match="Missing value"):
+            parse_condition("tool ==")
+
+    def test_empty_segment_is_rejected(self):
+        with pytest.raises(ConditionParseError, match="Empty condition segment"):
+            parse_condition('tool == "Bash" && ')
+
+    def test_explicit_empty_string_value_is_allowed(self):
+        group = parse_condition('args.optional == ""')
+        assert group is not None
+        assert group.conditions[0].value == ""
+
+# ---------------------------------------------------------------------------
+# 条件求值
+# ---------------------------------------------------------------------------
+
+class TestConditionEvaluate:
+    def test_eq(self):
+        ctx = HookContext(tool_name="Bash")
+        c = Condition(field="tool", operator="==", value="Bash")
+        assert c.evaluate(ctx) is True
+        c2 = Condition(field="tool", operator="==", value="WriteFile")
+        assert c2.evaluate(ctx) is False
+
+    def test_neq(self):
+        ctx = HookContext(tool_name="Bash")
+        c = Condition(field="tool", operator="!=", value="ReadFile")
+        assert c.evaluate(ctx) is True
+        c2 = Condition(field="tool", operator="!=", value="Bash")
+        assert c2.evaluate(ctx) is False
+
+    def test_regex(self):
+        ctx = HookContext(tool_args={"command": "rm  -rf /"})
+        c = Condition(field="args.command", operator="=~", value="/rm\\s+-rf/")
+        assert c.evaluate(ctx) is True
+
+    def test_glob(self):
+        ctx = HookContext(tool_args={"path": "src/main.py"})
+        c = Condition(field="args.path", operator="~=", value="*.py")
+        assert c.evaluate(ctx) is True
+        c2 = Condition(field="args.path", operator="~=", value="*.go")
+        assert c2.evaluate(ctx) is False
+
+    def test_falsy_arg_values_are_matchable(self):
+        ctx = HookContext(tool_args={"count": 0, "enabled": False})
+        assert Condition("args.count", "==", "0").evaluate(ctx) is True
+        assert Condition("args.enabled", "==", "False").evaluate(ctx) is True
+
+class TestConditionGroupEvaluate:
+    def test_and_all_pass(self):
+        ctx = HookContext(tool_name="WriteFile", tool_args={"path": "src/app.py"})
+        group = ConditionGroup(
+            conditions=[
+                Condition("tool", "==", "WriteFile"),
+                Condition("args.path", "~=", "*.py"),
+            ],
+            logic="and",
+        )
+        assert group.evaluate(ctx) is True
+
+    def test_and_partial_fail(self):
+        ctx = HookContext(tool_name="WriteFile", tool_args={"path": "src/app.go"})
+        group = ConditionGroup(
+            conditions=[
+                Condition("tool", "==", "WriteFile"),
+                Condition("args.path", "~=", "*.py"),
+            ],
+            logic="and",
+        )
+        assert group.evaluate(ctx) is False
+
+    def test_or_any_pass(self):
+        ctx = HookContext(tool_name="Bash")
+        group = ConditionGroup(
+            conditions=[
+                Condition("tool", "==", "Bash"),
+                Condition("tool", "==", "WriteFile"),
+            ],
+            logic="or",
+        )
+        assert group.evaluate(ctx) is True
+
+    def test_or_all_fail(self):
+        ctx = HookContext(tool_name="ReadFile")
+        group = ConditionGroup(
+            conditions=[
+                Condition("tool", "==", "Bash"),
+                Condition("tool", "==", "WriteFile"),
+            ],
+            logic="or",
+        )
+        assert group.evaluate(ctx) is False
+
+    def test_empty_group(self):
+        ctx = HookContext()
+        group = ConditionGroup(conditions=[], logic="and")
+        assert group.evaluate(ctx) is True
+
+# ---------------------------------------------------------------------------
+# Executors
+# ---------------------------------------------------------------------------
+
+class TestCommandExecutor:
+    @pytest.mark.asyncio
+    async def test_normal_execution(self):
+        from mozilcode.hooks.executors import execute_command
+
+        action = Action(type="command", command="echo hello")
+        ctx = HookContext()
+        result = await execute_command(action, ctx)
+        assert result.success is True
+        assert "hello" in result.output
+
+    @pytest.mark.asyncio
+    async def test_variable_substitution(self):
+        from mozilcode.hooks.executors import execute_command
+
+        action = Action(type="command", command="echo $FILE_PATH")
+        ctx = HookContext(file_path="src/main.py")
+        result = await execute_command(action, ctx)
+        assert "src/main.py" in result.output
+
+    @pytest.mark.asyncio
+    async def test_timeout(self):
+        from mozilcode.hooks.executors import execute_command
+
+        action = Action(
+            type="command",
+            command=f'"{sys.executable}" -c "import time; time.sleep(2)"',
+            timeout=1,
+        )
+        ctx = HookContext()
+        result = await execute_command(action, ctx)
+        assert result.success is False
+        assert "timed out" in result.output
+        await asyncio.sleep(1.5)
+
+class TestPromptExecutor:
+    @pytest.mark.asyncio
+    async def test_returns_message(self):
+        from mozilcode.hooks.executors import execute_prompt
+
+        action = Action(type="prompt", message="Hello $TOOL_NAME")
+        ctx = HookContext(tool_name="WriteFile")
+        result = await execute_prompt(action, ctx)
+        assert result.success is True
+        assert result.output == "Hello WriteFile"
+
+class TestHttpExecutor:
+    @pytest.mark.asyncio
+    async def test_mock_request(self):
+        from mozilcode.hooks.executors import execute_http
+
+        action = Action(
+            type="http",
+            url="https://httpbin.org/post",
+            body='{"test": true}',
+            timeout=7,
+        )
+        ctx = HookContext()
+        # 用 mock 避免发起真实的网络请求
+        with patch("mozilcode.hooks.executors.urlopen") as mock_urlopen:
+            mock_resp = mock_urlopen.return_value.__enter__.return_value
+            mock_resp.status = 200
+            mock_resp.read.return_value = b'{"ok": true}'
+            result = await execute_http(action, ctx)
+            assert result.success is True
+            assert "200" in result.output
+            assert mock_urlopen.call_args.kwargs["timeout"] == 7
+
+class TestAgentExecutor:
+    @pytest.mark.asyncio
+    async def test_requires_configured_runner(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        action = Action(type="agent", prompt="Check $FILE_PATH")
+        ctx = HookContext(file_path="test.py")
+        result = await execute_agent(action, ctx)
+        assert result.success is False
+        assert "configured hook agent runner" in result.output
+
+    @pytest.mark.asyncio
+    async def test_runner_receives_expanded_prompt(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        captured = {}
+
+        def runner(prompt, ctx):
+            captured["prompt"] = prompt
+            captured["ctx"] = ctx
+            return "review complete"
+
+        action = Action(type="agent", prompt="Check $FILE_PATH")
+        ctx = HookContext(file_path="test.py")
+        result = await execute_agent(action, ctx, runner)
+
+        assert result.success is True
+        assert result.output == "review complete"
+        assert captured == {"prompt": "Check test.py", "ctx": ctx}
+
+    @pytest.mark.asyncio
+    async def test_async_runner_can_return_action_result(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        async def runner(_prompt, _ctx):
+            return ActionResult(output="blocked by reviewer", success=False)
+
+        result = await execute_agent(
+            Action(type="agent", prompt="Check"),
+            HookContext(),
+            runner,
+        )
+
+        assert result.success is False
+        assert result.output == "blocked by reviewer"
+
+    @pytest.mark.asyncio
+    async def test_runner_exception_returns_failed_result(self):
+        from mozilcode.hooks.executors import execute_agent
+
+        def runner(_prompt, _ctx):
+            raise RuntimeError("runner unavailable")
+
+        result = await execute_agent(
+            Action(type="agent", prompt="Check"),
+            HookContext(),
+            runner,
+        )
+
+        assert result.success is False
+        assert "runner unavailable" in result.output
+
+class TestExecuteAction:
+    @pytest.mark.asyncio
+    async def test_dispatch(self):
+        from mozilcode.hooks.executors import execute_action
+
+        action = Action(type="command", command="echo dispatch_test")
+        ctx = HookContext()
+        result = await execute_action(action, ctx)
+        assert "dispatch_test" in result.output
+
+    @pytest.mark.asyncio
+    async def test_unknown_type(self):
+        from mozilcode.hooks.executors import execute_action
+
+        action = Action(type="unknown")
+        ctx = HookContext()
+        result = await execute_action(action, ctx)
+        assert result.success is False
+
+# ---------------------------------------------------------------------------
+# Loader
+# ---------------------------------------------------------------------------
+
+class TestLoadAction:
+    def test_command_action_defaults(self):
+        action = load_action(
+            {"type": "command", "command": "echo ok"},
+            "hook 'x'",
+        )
+
+        assert action.type == "command"
+        assert action.command == "echo ok"
+        assert action.method == "POST"
+        assert action.headers == {}
+        assert action.timeout == 30
+
+    def test_http_action_preserves_fields(self):
+        action = load_action(
+            {
+                "type": "http",
+                "url": "https://example.test/hook",
+                "method": "PUT",
+                "body": "{}",
+                "headers": {"X-Hook": "1"},
+                "timeout": 9,
+            },
+            "hook 'http'",
+        )
+
+        assert action.url == "https://example.test/hook"
+        assert action.method == "PUT"
+        assert action.body == "{}"
+        assert action.headers == {"X-Hook": "1"}
+        assert action.timeout == 9
+
+    def test_missing_action_mapping_is_rejected(self):
+        with pytest.raises(HookConfigError, match="missing or invalid 'action'"):
+            load_action(None, "hook 'bad'")
+
+
+class TestLoadHooks:
+    def test_full_config(self):
+        raw = [
+            {
+                "id": "auto-format",
+                "event": "post_tool_use",
+                "if": 'tool == "WriteFile"',
+                "action": {"type": "command", "command": "echo formatted"},
+            }
+        ]
+        hooks = load_hooks(raw)
+        assert len(hooks) == 1
+        assert hooks[0].id == "auto-format"
+        assert hooks[0].event == "post_tool_use"
+        assert hooks[0].condition is not None
+
+    def test_auto_id(self):
+        raw = [
+            {"event": "session_start", "action": {"type": "prompt", "message": "hello"}}
+        ]
+        hooks = load_hooks(raw)
+        assert hooks[0].id == "session_start_0"
+
+    def test_empty(self):
+        assert load_hooks(None) == []
+        assert load_hooks([]) == []
+
+    def test_non_mapping_entry(self):
+        with pytest.raises(HookConfigError, match="hook #1: must be a mapping"):
+            load_hooks(["bad"])
+
+    def test_invalid_event(self):
+        with pytest.raises(HookConfigError, match="invalid event"):
+            load_hooks([{"event": "bad_event", "action": {"type": "command", "command": "x"}}])
+
+    def test_event_must_be_string(self):
+        with pytest.raises(HookConfigError, match="event.*string"):
+            load_hooks([{"event": 7, "action": {"type": "command", "command": "x"}}])
+
+    def test_hook_id_must_be_string(self):
+        with pytest.raises(HookConfigError, match="id.*string"):
+            load_hooks([
+                {
+                    "id": ["bad"],
+                    "event": "startup",
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_hook_id_must_not_be_empty(self):
+        with pytest.raises(HookConfigError, match="id.*empty"):
+            load_hooks([
+                {
+                    "id": "   ",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_duplicate_hook_ids_are_rejected(self):
+        with pytest.raises(HookConfigError, match="duplicate hook id 'same'"):
+            load_hooks([
+                {
+                    "id": " same ",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo one"},
+                },
+                {
+                    "id": "same",
+                    "event": "shutdown",
+                    "action": {"type": "command", "command": "echo two"},
+                },
+            ])
+
+    def test_auto_generated_hook_id_collisions_are_rejected(self):
+        with pytest.raises(
+            HookConfigError,
+            match="duplicate hook id 'startup_1'",
+        ):
+            load_hooks([
+                {
+                    "id": "startup_1",
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo one"},
+                },
+                {
+                    "event": "startup",
+                    "action": {"type": "command", "command": "echo two"},
+                },
+            ])
+
+    def test_condition_must_be_string(self):
+        with pytest.raises(HookConfigError, match="if.*string"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "if": ["tool == Bash"],
+                    "action": {"type": "command", "command": "x"},
+                }
+            ])
+
+    def test_empty_condition_is_ignored(self):
+        hooks = load_hooks([
+            {
+                "event": "startup",
+                "if": "   ",
+                "action": {"type": "command", "command": "x"},
+            }
+        ])
+        assert hooks[0].condition is None
+
+    def test_top_level_string_fields_are_trimmed(self):
+        hooks = load_hooks([
+            {
+                "id": "  trimmed  ",
+                "event": " startup ",
+                "if": ' tool == "Bash" ',
+                "action": {"type": "command", "command": "x"},
+            }
+        ])
+
+        assert hooks[0].id == "trimmed"
+        assert hooks[0].event == "startup"
+        assert hooks[0].condition is not None
+
+    def test_invalid_action_type(self):
+        with pytest.raises(HookConfigError, match="invalid action type"):
+            load_hooks([{"event": "startup", "action": {"type": "bad"}}])
+
+    def test_reject_on_non_pre_tool_use(self):
+        with pytest.raises(HookConfigError, match="reject.*pre_tool_use"):
+            load_hooks([{
+                "event": "post_tool_use",
+                "action": {"type": "command", "command": "x"},
+                "reject": True,
+            }])
+
+    def test_async_on_pre_tool_use(self):
+        with pytest.raises(HookConfigError, match="async.*pre_tool_use"):
+            load_hooks([{
+                "event": "pre_tool_use",
+                "action": {"type": "command", "command": "x"},
+                "async": True,
+            }])
+
+    def test_missing_required_field(self):
+        with pytest.raises(HookConfigError, match="requires.*command"):
+            load_hooks([{"event": "startup", "action": {"type": "command"}}])
+
+        with pytest.raises(HookConfigError, match="requires.*url"):
+            load_hooks([{"event": "startup", "action": {"type": "http"}}])
+
+        with pytest.raises(HookConfigError, match="requires.*message"):
+            load_hooks([{"event": "startup", "action": {"type": "prompt"}}])
+
+        with pytest.raises(HookConfigError, match="requires.*prompt"):
+            load_hooks([{"event": "startup", "action": {"type": "agent"}}])
+
+    @pytest.mark.parametrize("field_name", ["reject", "async", "once"])
+    def test_boolean_fields_must_be_booleans(self, field_name):
+        with pytest.raises(HookConfigError, match=f"{field_name}.*boolean"):
+            load_hooks([
+                {
+                    "event": "post_tool_use",
+                    "action": {"type": "command", "command": "echo ok"},
+                    field_name: "false",
+                }
+            ])
+
+    def test_action_string_fields_must_be_strings(self):
+        with pytest.raises(HookConfigError, match="command.*string"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {"type": "command", "command": ["echo", "bad"]},
+                }
+            ])
+
+    def test_http_headers_must_be_string_mapping(self):
+        with pytest.raises(HookConfigError, match="headers.*mapping"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "http",
+                        "url": "https://example.test",
+                        "headers": [],
+                    },
+                }
+            ])
+
+        with pytest.raises(HookConfigError, match="headers.*strings to strings"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "http",
+                        "url": "https://example.test",
+                        "headers": {"X-Test": 1},
+                    },
+                }
+            ])
+
+    def test_action_timeout_rejects_boolean(self):
+        with pytest.raises(HookConfigError, match="timeout.*positive integer"):
+            load_hooks([
+                {
+                    "event": "startup",
+                    "action": {
+                        "type": "command",
+                        "command": "echo ok",
+                        "timeout": True,
+                    },
+                }
+            ])
+
+# ---------------------------------------------------------------------------
+# HookEngine
+# ---------------------------------------------------------------------------
+
+class TestHookEngine:
+
+    def _make_hook(self, **kwargs) -> Hook:
+        defaults = {
+            "id": "test",
+            "event": "post_tool_use",
+            "action": Action(type="command", command="echo test"),
+        }
+        defaults.update(kwargs)
+        return Hook(**defaults)
+
+    def test_find_matching_hooks(self):
+        h1 = self._make_hook(id="h1", event="post_tool_use")
+        h2 = self._make_hook(id="h2", event="pre_tool_use")
+        engine = HookEngine([h1, h2])
+        ctx = HookContext(event_name="post_tool_use")
+        matched = engine.find_matching_hooks("post_tool_use", ctx)
+        assert len(matched) == 1
+        assert matched[0].id == "h1"
+
+    def test_find_with_condition_filter(self):
+        h = self._make_hook(
+            id="h1",
+            event="post_tool_use",
+            condition=ConditionGroup(
+                conditions=[Condition("tool", "==", "WriteFile")],
+                logic="and",
+            ),
+        )
+        engine = HookEngine([h])
+
+        ctx_match = HookContext(event_name="post_tool_use", tool_name="WriteFile")
+        assert len(engine.find_matching_hooks("post_tool_use", ctx_match)) == 1
+
+        ctx_no_match = HookContext(event_name="post_tool_use", tool_name="Bash")
+        assert len(engine.find_matching_hooks("post_tool_use", ctx_no_match)) == 0
+
+    def test_once_filter(self):
+        h = self._make_hook(id="h1", once=True)
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="post_tool_use")
+
+        assert len(engine.find_matching_hooks("post_tool_use", ctx)) == 1
+        h.mark_executed()
+        assert len(engine.find_matching_hooks("post_tool_use", ctx)) == 0
+
+    @pytest.mark.asyncio
+    async def test_run_pre_tool_hooks_reject(self):
+        h = self._make_hook(
+            id="block-vendor",
+            event="pre_tool_use",
+            action=Action(type="command", command="echo rejected"),
+            reject=True,
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="pre_tool_use", tool_name="WriteFile")
+        result = await engine.run_pre_tool_hooks(ctx)
+        assert result is not None
+        assert isinstance(result, ToolRejectedError)
+        assert "rejected" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_run_pre_tool_hooks_no_reject(self):
+        h = self._make_hook(
+            id="log-only",
+            event="pre_tool_use",
+            action=Action(type="command", command="echo ok"),
+            reject=False,
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="pre_tool_use", tool_name="WriteFile")
+        result = await engine.run_pre_tool_hooks(ctx)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_run_pre_tool_hook_exception_records_notification(self):
+        h = self._make_hook(
+            id="broken",
+            event="pre_tool_use",
+            action=Action(type="command", command="echo ok"),
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="pre_tool_use", tool_name="WriteFile")
+
+        with patch("mozilcode.hooks.engine.execute_action", side_effect=RuntimeError("boom")):
+            result = await engine.run_pre_tool_hooks(ctx)
+
+        assert result is None
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "broken"
+        assert notifications[0].event == "pre_tool_use"
+        assert notifications[0].success is False
+        assert "boom" in notifications[0].output
+
+    @pytest.mark.asyncio
+    async def test_prompt_message_collection(self):
+        h = self._make_hook(
+            id="inject",
+            event="session_start",
+            action=Action(type="prompt", message="Project info here"),
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="session_start")
+        await engine.run_hooks("session_start", ctx)
+        messages = engine.get_prompt_messages()
+        assert len(messages) == 1
+        assert "Project info" in messages[0]
+        assert engine.get_prompt_messages() == []
+
+    @pytest.mark.asyncio
+    async def test_error_does_not_raise(self):
+        h = self._make_hook(
+            id="bad",
+            event="post_tool_use",
+            action=Action(type="command", command="exit 1"),
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="post_tool_use")
+        await engine.run_hooks("post_tool_use", ctx)
+
+    @pytest.mark.asyncio
+    async def test_async_hook_does_not_block(self):
+        h = self._make_hook(
+            id="slow",
+            event="post_tool_use",
+            action=Action(
+                type="command",
+                command=f'"{sys.executable}" -c "import time; time.sleep(0.2)"',
+            ),
+            async_exec=True,
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="post_tool_use")
+        start = asyncio.get_running_loop().time()
+        await engine.run_hooks("post_tool_use", ctx)
+        assert asyncio.get_running_loop().time() - start < 0.1
+        await engine.wait_for_async_hooks()
+
+    @pytest.mark.asyncio
+    async def test_async_hook_can_be_drained(self):
+        h = self._make_hook(
+            id="tracked",
+            event="post_tool_use",
+            action=Action(type="prompt", message="async complete"),
+            async_exec=True,
+        )
+        engine = HookEngine([h])
+        ctx = HookContext(event_name="post_tool_use")
+
+        async def slow_execute(_action, _ctx, _agent_runner=None):
+            await asyncio.sleep(0.05)
+            return ActionResult(output="async complete", success=True)
+
+        with patch("mozilcode.hooks.engine.execute_action", side_effect=slow_execute):
+            await engine.run_hooks("post_tool_use", ctx)
+            assert engine.drain_notifications() == []
+            await engine.wait_for_async_hooks()
+
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "tracked"
+        assert notifications[0].success is True
+
+    @pytest.mark.asyncio
+    async def test_agent_action_uses_configured_runner(self):
+        hook = self._make_hook(
+            id="agent-hook",
+            event="post_tool_use",
+            action=Action(type="agent", prompt="Inspect $TOOL_NAME"),
+        )
+
+        async def runner(prompt, ctx):
+            assert prompt == "Inspect WriteFile"
+            assert ctx.tool_name == "WriteFile"
+            return "agent reviewed"
+
+        engine = HookEngine([hook], agent_runner=runner)
+        ctx = HookContext(event_name="post_tool_use", tool_name="WriteFile")
+
+        await engine.run_hooks("post_tool_use", ctx)
+
+        notifications = engine.drain_notifications()
+        assert len(notifications) == 1
+        assert notifications[0].hook_id == "agent-hook"
+        assert notifications[0].success is True
+        assert notifications[0].output == "agent reviewed"
+
+# ---------------------------------------------------------------------------
+# Agent 循环集成
+# ---------------------------------------------------------------------------
+
+class TestAgentHookIntegration:
+    """验证 pre_tool_use 拒绝会导致工具调用被跳过。"""
+
+    @pytest.mark.asyncio
+    async def test_pre_tool_use_reject_skips_tool(self):
+        from mozilcode.agent import Agent, ToolResultEvent
+        from mozilcode.client import LLMClient
+        from mozilcode.conversation import ConversationManager
+        from mozilcode.tools import create_default_registry
+        from mozilcode.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
+
+        class MockClient(LLMClient):
+            def __init__(self):
+                self._call = 0
+
+            async def stream(self, conversation, system="", tools=None):
+                self._call += 1
+                if self._call == 1:
+                    yield ToolCallComplete(
+                        tool_id="t1",
+                        tool_name="Bash",
+                        arguments={"command": "rm -rf /"},
+                    )
+                    yield StreamEnd(stop_reason="tool_use", input_tokens=10, output_tokens=5)
+                else:
+                    yield TextDelta(text="I understand, I won't do that.")
+                    yield StreamEnd(stop_reason="end_turn", input_tokens=10, output_tokens=5)
+
+        hook = Hook(
+            id="block-rm",
+            event="pre_tool_use",
+            action=Action(type="command", command="echo dangerous command blocked"),
+            condition=parse_condition('tool == "Bash" && args.command =~ /rm\\s+-rf/'),
+            reject=True,
+        )
+        engine = HookEngine([hook])
+
+        client = MockClient()
+        registry = create_default_registry()
+        conv = ConversationManager()
+        conv.add_user_message("delete everything")
+
+        agent = Agent(
+            client=client,
+            registry=registry,
+            protocol="anthropic",
+            hook_engine=engine,
+        )
+
+        events = []
+        async for event in agent.run(conv):
+            events.append(event)
+
+        tool_results = [e for e in events if isinstance(e, ToolResultEvent)]
+        assert len(tool_results) >= 1
+        rejected = tool_results[0]
+        assert rejected.is_error is True
+        assert "Hook rejected" in rejected.output

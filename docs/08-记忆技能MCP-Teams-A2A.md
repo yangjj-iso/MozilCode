@@ -2,6 +2,9 @@
 
 ## 1. 记忆系统（Memory）
 
+> 专章（四本账 / Layer1·2 / inject·extract 时序）：[10-上下文与记忆系统](./10-上下文与记忆系统.md)。  
+> 本节保留子系统总览；细节与排障以 10 为准。
+
 ### 1.1 为什么需要记忆？
 
 LLM 本身是无状态的——每次对话都是全新的。但实际使用中，用户希望 Agent "记住"项目偏好、历史决策、常见问题等。记忆系统通过在对话开始前注入相关记忆，在对话结束后提取新记忆来实现这一点。
@@ -498,3 +501,69 @@ class WorktreeManager:
         """移除 Worktree。"""
         subprocess.run(["git", "worktree", "remove", str(path)])
 ```
+
+## 7. 子系统如何挂到 Agent 主循环（补充）
+
+### 7.1 记忆（Memory）时序
+
+> 完整学习文档：[10-上下文与记忆系统](./10-上下文与记忆系统.md)（四本账、注入形状、extract 算法、排障）。
+
+```text
+agent.run 开始
+  最近 user query → memory_bridge.load_context → inject LTM
+
+循环结束（无 tool_calls）
+  observe() 轻量观察
+  每 N turn 后台 extract_memories() 写 memories.md
+
+记忆提取 ≠ 上下文 compact
+记忆文件是持久知识；history 是会话账本
+```
+
+### 7.2 Skills
+
+```text
+SkillLoader(work_dir)
+  → catalog 注入
+  → LoadSkill / 自定义 tool 模块
+```
+
+### 7.3 MCP
+
+```text
+config.mcp_servers → MCPManager → MCPToolWrapper → Registry
+多数 deferred → ToolSearch 后再进 schema
+```
+
+### 7.4 Teams
+
+```text
+Team 工具 → mailbox/spawn
+父 Agent turn 开头 inject_external_notifications
+```
+
+### 7.5 A2A
+
+```text
+Agent Card / JSON-RPC / message:send
+  → A2ABridge → Daemon init_session/start_task
+不是第二套 Agent 实现
+```
+
+### 7.6 Worktree
+
+```text
+进入 worktree → 更新 agent.work_dir + meta.work_dir
+history 可继续（同一 session）
+```
+
+### 7.7 相关路径
+
+| 子系统 | 路径 |
+|--------|------|
+| Memory | `memory/` + `agent/memory.py` |
+| Skills | `skills/` + `tools/load_skill.py` |
+| MCP | `mcp/` |
+| Teams | `teams/` |
+| A2A | `a2a/` + `daemon/routes/a2a.py` |
+| Worktree | `worktree/` + `daemon/actions/worktree*.py` |

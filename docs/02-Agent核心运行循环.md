@@ -963,3 +963,66 @@ def partition_tool_calls(tool_calls, registry):
 | `TurnComplete` | 每轮迭代结束时 | 更新轮次显示 |
 | `LoopComplete` | 任务完成、循环退出时 | 标记任务完成 |
 | `ErrorEvent` | 发生错误时 | 显示错误 |
+
+
+---
+
+## 7. 与 Daemon / Conversation 的接缝（补充）
+
+> 环境注入、Layer1/2、记忆 load/extract 的专章学习文档：[10-上下文与记忆系统](./10-上下文与记忆系统.md)。
+
+Agent.run(conversation) **不负责**创建会话或绑定项目目录。调用方必须先准备好：
+
+| 调用方 | 如何准备 conversation | 如何准备 work_dir |
+|--------|----------------------|-------------------|
+| Daemon AgentTaskRunner | 会话级复用同一 ConversationManager，每次 dd_user_message(prompt) | 创建 runtime 时 create_agent_from_config(..., work_dir) |
+| TUI pp.py | 通常进程内持有一个 conversation | 启动工作目录 / 用户切换 |
+| 子 Agent / AgentTool | 新建 conversation 或裁剪任务上下文 | 可能 rebase 到 worktree |
+
+### 7.1 run() 不重置 history
+
+`	ext
+run() 开始
+  读取 conversation 里已有消息
+  可能 inject 环境/记忆（若尚未注入）
+  循环中不断 append assistant / tool_results
+run() 结束
+  history 仍在，供下一次 run() 使用
+`
+
+因此“第二轮用户消息”的正确做法是：
+
+`python
+conversation.add_user_message(next_prompt)
+async for event in agent.run(conversation):
+    ...
+`
+
+而不是 ConversationManager() 新建一个空对象（除非你故意开新会话）。
+
+### 7.2 iteration 与用户“消息轮次”
+
+| 概念 | 含义 |
+|------|------|
+| 用户消息 / Daemon task | 一次 POST /api/task 或一次用户回车 |
+| iteration / turn | Agent.run 主循环里“调一次 LLM + 可能跑工具”的计数 |
+| max_iterations（默认约 50） | 单次 
+un() 内防止死循环的上限 |
+
+一次用户消息可能对应多次 iteration（因为工具调用会继续循环）。
+
+### 7.3 事件消费者契约
+
+消费者必须能处理：
+
+1. 流式文本乱序到达（按 yield 顺序拼接）
+2. PermissionRequest / AskUserRequest 需要外部 uture.set_result
+3. LoopComplete 表示**这一次 run 结束**，不是“会话销毁”
+4. 压缩事件只是通知 UI，history 已在 Agent 内部被替换
+
+Daemon 侧额外包装：
+
+- UserMessage（展示用，先于 agent 事件）
+- 任务级 	ask_id 写入每条序列化事件
+- Future → 
+equest_id 后走 HTTP 回传

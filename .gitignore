@@ -15,10 +15,9 @@ target/
 
 # Local runtime state
 .mozilcode/
-.mewcode/
 .workbuddy/
 .tools/
-MozilCode-python/.tools/
+mozilcode-python/.tools/
 *.log
 .env
 .env.*
@@ -35,3 +34,8 @@ MozilCode-python/.tools/
 .DS_Store
 Thumbs.db
 nul
+.cursor/mcp.json
+.cursor/tc-mcp/
+.cursor/tc-mcp-messages/
+.cursor/tc-chat-exports/
+.cursor/.tc-memory/

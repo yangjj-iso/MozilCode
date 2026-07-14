@@ -1,6 +1,7 @@
 # 07 - 权限、Hook 与上下文管理（超详细版）
 
-> 本文档把三大子系统——权限检查、Hook 引擎、上下文管理——的每一步触发条件、数据流转、判断逻辑全部讲透。
+> 本文档把三大子系统——权限检查、Hook 引擎、上下文管理——的每一步触发条件、数据流转、判断逻辑全部讲透。  
+> 若要从「系统如何整体驾驭 Agent」视角学习（圈地/放行/人在回路/取消/熔断），先读 [11-驾驭工程](./11-驾驭工程.md)。
 
 ---
 
@@ -968,3 +969,73 @@ async def manual_compact(self, conversation):
 │  调用 LLM → 正常继续...                                   │
 └──────────────────────────────────────────────────────────┘
 ```
+
+## 第四部分：概念对照与排障（补充）
+
+> 若要把「环境/指令/记忆注入 + Layer1/Layer2 + 记忆读写时序」从头走通，优先读专章：[10-上下文与记忆系统](./10-上下文与记忆系统.md)。本节保留权限/Hook 视角下的对照表。
+
+### A. 双层上下文一句话
+
+| 层 | 改不改真 history | 触发 | 目的 |
+|----|------------------|------|------|
+| Layer1 tool-result budget | 默认不改真历史（发送副本裁剪） | 每轮发送前 | 控制单次请求体积 |
+| Layer2 auto compact | **改** conversation.history（摘要+keep-tail） | 接近 context window | 保住长期可续聊 |
+
+### B. 权限 Future 在三条入口中的落点
+
+`	ext
+TUI:
+  yield PermissionRequest → Textual 弹窗 → future.set_result
+
+Daemon+GUI:
+  yield PermissionRequest
+  → serialize 去掉 future，换 request_id
+  → WS 推前端
+  → POST /api/permission/{sid}
+  → Session.resolve_future
+
+子 Agent 非交互:
+  可能自动 deny/allow 策略（见 noninteractive_tools）
+`
+
+### C. Hook 输出如何进模型视野
+
+`	ext
+Hook 执行
+  → 引擎记录 notification / prompt_messages
+  → Agent drain
+       notification → system-reminder 或 HookEvent
+       prompt_messages → 拼进 system prompt
+`
+
+### D. token 估算与压缩阈值
+
+ConversationManager.current_tokens()：
+
+- 有 API usage 锚点：baseline + 锚点后新消息字符估算
+- 无锚点：全历史字符估算
+- compact 后锚点清零，直到下一次 API 响应
+
+阈值大致：context_window - SUMMARY_OUTPUT_RESERVE - AUTO_COMPACT_SAFETY_MARGIN
+
+### E. 排障
+
+| 现象 | 检查 |
+|------|------|
+| 总是弹权限 | mode；规则；沙箱外路径 |
+| 从不弹权限 | bypass；规则 allow；Hook 拦截 |
+| 压缩后丢细节 | 有损摘要；看 recovery 附件 |
+| 模型侧 tool 结果变短 UI 仍长 | Layer1 只裁发送副本 |
+| Hook 不跑 | event 名；condition；load_hooks 失败 |
+
+### F. 相关文件速查
+
+| 主题 | 路径 |
+|------|------|
+| 权限检查链 | permissions/ |
+| 授权握手 | gent/tool_authorization.py |
+| Hook 引擎 | hooks/engine.py |
+| Layer1 | context/tool_results.py / gent/llm_preparation.py |
+| Layer2 | context/manager.py / gent/compaction.py |
+| 替换状态 | context/replacement.py |
+| 恢复附件 | context/recovery.py / gent/recovery.py |

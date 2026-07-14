@@ -4,7 +4,7 @@
 
 GUI 是一个基于 Vue 3 + Vite 的单页应用，作为 MozilCode Daemon 的 Web 前端。它通过 HTTP REST API 和 WebSocket 与 Daemon 通信，提供聊天界面、会话管理、设置面板等功能。同时支持通过 Tauri 打包为桌面应用。
 
-对应代码：`mewcode-gui/`
+对应代码：`mozilcode-gui/`
 
 ## 2. 基础概念
 
@@ -44,7 +44,7 @@ Vite 是一个现代化的前端构建工具，特点是开发时极速热更新
 // vite.config.js
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const daemonTarget = env.VITE_MEWCODE_DAEMON_HTTP || 'http://127.0.0.1:7800';
+  const daemonTarget = env.VITE_MOZILCODE_DAEMON_HTTP || 'http://127.0.0.1:7800';
 
   return {
     plugins: [vue()],
@@ -91,7 +91,7 @@ ws.send(JSON.stringify({ action: 'cancel' }));
 Tauri 是一个用 Rust 构建桌面应用的框架，类似 Electron 但更轻量。它用系统 WebView 渲染前端，不需要打包整个 Chromium。
 
 ```
-mewcode-gui/src-tauri/
+mozilcode-gui/src-tauri/
 ├── Cargo.toml          # Rust 依赖
 ├── tauri.conf.json     # Tauri 配置
 ├── src/
@@ -104,7 +104,7 @@ mewcode-gui/src-tauri/
 ## 3. 项目结构
 
 ```
-mewcode-gui/
+mozilcode-gui/
 ├── index.html              # HTML 入口
 ├── package.json            # Node.js 依赖
 ├── vite.config.js          # Vite 配置（含代理）
@@ -662,3 +662,85 @@ Daemon: WebSocket 推送
     ↓
 GUI: finalizeAssistant() → busy = false
 ```
+
+
+---
+
+## 13. 与 Daemon 协议的精确对接（补充）
+
+### 13.1 前端只做两件事
+
+1. **HTTP 发命令**（建会话、发任务、回权限、改设置）
+2. **WebSocket 收事件**（渲染消息、工具卡、权限弹窗）
+
+前端**不持有** ConversationManager，也不直接调 Agent。
+
+### 13.2 推荐会话生命周期（实现对照）
+
+`	ext
+启动页选择/确认 work_dir
+  POST /api/session { work_dir }
+  保存 activeSessionId
+  new WebSocket(/api/stream/{sid})
+  处理回放事件 → ReplayDone → 清空“回放中”状态
+
+用户输入
+  POST /api/task { session_id, prompt }
+  （可选乐观更新 UI）
+  真正内容以 WS 事件为准
+
+收到 PermissionRequest
+  弹窗
+  POST /api/permission/{sid} { request_id, ... }
+
+切换会话
+  断开旧 WS（注意 generation 防串线）
+  连接新 sid WS（自动回放该 sid 的 events）
+
+关闭会话
+  DELETE /api/session/{sid}
+`
+
+### 13.3 事件 → UI 状态机（逻辑）
+
+`	ext
+UserMessage          → 追加用户气泡
+StreamText           → 追加/创建 assistant 气泡并 append 文本
+ThinkingText         → 思考区
+ToolUseEvent         → 工具卡片 running
+ToolResultEvent      → 工具卡片完成/失败
+PermissionRequest    → 打开权限 modal（保存 request_id）
+AskUserRequest       → 打开提问 modal
+UsageEvent           → 状态栏 token
+Compact*             → 提示条
+ErrorEvent           → 错误气泡
+LoopComplete         → busy=false，允许再发送
+ReplayDone           → 回放结束
+SessionNotFound      → 提示会话失效，回到列表
+`
+
+### 13.4 鉴权与跨域（与当前 Daemon 对齐）
+
+若配置了 MOZILCODE_DAEMON_TOKEN：
+
+- HTTP 需 Authorization: Bearer ...
+- WS 需 ?token=...
+
+Origin 需在 MOZILCODE_CORS_ORIGINS 白名单（默认含 Vite 1420 与 tauri://localhost）。
+
+### 13.5 前端不能假设的三件事
+
+1. **events 回放 = 模型仍有完整 history**（Daemon 重启后 UI 有记录，模型可能空历史）
+2. **POST /api/task 的响应 body 含完整回答**（通常只有 task_id）
+3. **改 /api/config 立即作用于当前会话 Agent**（多为 new_sessions）
+
+### 13.6 调试建议
+
+- 浏览器 Network：看 WS 帧 type 序列是否完整
+- 对比 Daemon 日志：task 是否 start、permission 是否 resolve
+- 确认 ctiveSessionId 与 WS URL 中 sid 一致
+- 用 generation 计数丢弃旧 WS 的迟到消息
+
+### 13.7 相关后端文档
+
+深入协议与会话维护见 [05-Daemon服务](./05-Daemon服务.md)。

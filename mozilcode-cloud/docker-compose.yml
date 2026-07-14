@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: mozilcode-pg
+    environment:
+      POSTGRES_DB: mozilcode
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - mozilcode_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mozilcode"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Java cloud 镜像：本地 jar + 已有 alpine/postgres 基础镜像装 JRE
+  # 若 build 因网络失败，可用 README 的 host 启动方式：
+  #   mvn -DskipTests package && java -jar target/mozilcode-cloud-0.1.0.jar
+  cloud:
+    build: .
+    image: mozilcode-cloud:local
+    container_name: mozilcode-cloud
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    # 开发时直接挂本地最新 jar，避免 compose recreate 回退到镜像内旧包
+    volumes:
+      - ./target/mozilcode-cloud-0.1.0.jar:/app/app.jar:ro
+    environment:
+      PORT: "8000"
+      MOZILCODE_ENV: development
+      MOZILCODE_DB_DRIVER: org.postgresql.Driver
+      MOZILCODE_DB_URL: jdbc:postgresql://db:5432/mozilcode
+      MOZILCODE_DB_USER: postgres
+      MOZILCODE_DB_PASSWORD: postgres
+      MOZILCODE_JWT_SECRET: mozilcode-docker-dev-secret-change-me
+      MOZILCODE_ALLOWED_ORIGINS: http://localhost:1420,http://127.0.0.1:1420,http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173
+    restart: unless-stopped
+
+volumes:
+  mozilcode_pg_data:

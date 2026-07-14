@@ -365,3 +365,80 @@ def build_chat_completion_messages(conversation, system) -> list[dict]:
             messages.append({"role": "tool", "content": tr.content})
     return messages
 ```
+
+
+---
+
+## 12. 请求构造与流式适配（补充细节）
+
+### 12.1 一次 LLM 调用的输入从哪来
+
+`	ext
+Agent.run 当前轮
+  system = build_system_prompt(...)          # 字符串，通常不进 history
+  tools  = registry.get_schemas / 协议适配    # JSON Schema 列表
+  api_conv = prepare_api_conversation(history 的发送视图)
+  client.stream(api_conv, system=system, tools=tools)
+`
+
+注意：
+
+- **user prompt 在 messages 里**，不在单独字段（除 OpenAI 把 system 前置）
+- Layer1 只改 pi_conv，不改 conversation.history
+- Provider 差异集中在：消息形状、tool schema、thinking/cache 字段、usage 字段
+
+### 12.2 Anthropic vs OpenAI 消息形状对照
+
+| 概念 | Anthropic | OpenAI Chat Completions |
+|------|-----------|-------------------------|
+| system | 顶层 system 参数 | messages 里 
+ole=system |
+| 多段 content | content 数组（text/tool_use/tool_result/thinking） | 多拆成多条 message / tool_calls |
+| 工具结果 | user 消息里的 tool_result 块 | 
+ole=tool + 	ool_call_id |
+| 流式 | content_block_delta 等 | choices[].delta |
+| 缓存 | cache_control 等 | 视兼容实现而定 |
+
+### 12.3 流式事件如何回到 Agent
+
+`	ext
+Provider 原始 SSE/stream
+  → client 适配为内部流事件（TextDelta / ToolCallComplete / StreamEnd...）
+  → StreamCollector.consume
+       累积 response.text / tool_calls / thinking
+       同时 yield 给 UI 的 StreamText / ThinkingText
+  → response_history 写回 ConversationManager
+  → Usage 更新 record_usage_anchor（供 Layer2 阈值）
+`
+
+### 12.4 Context Window 解析策略
+
+context_window 配置为 0 时，客户端会尝试从模型元数据/默认表解析；解析结果影响：
+
+- Layer2 自动压缩阈值
+- 是否过早/过晚 compact
+
+详见 client/context_window.py 与配置项 ProviderConfig.context_window。
+
+### 12.5 错误映射使用姿势
+
+`	ext
+底层 SDK / httpx 抛错
+  → ProviderErrorMapper.map_error
+  → AuthenticationError / RateLimitError / NetworkError / LLMError
+  → Agent 或 Daemon 转 ErrorEvent / HTTP 错误响应
+`
+
+业务代码应依赖统一 LLMError 层级，而不是解析各家错误字符串。
+
+### 12.6 相关文件
+
+| 文件 | 职责 |
+|------|------|
+| client/core.py | 客户端核心 / 工厂 |
+| client/error_mapping.py | 错误统一 |
+| client/context_window.py | 窗口解析 |
+| client/auth.py | 鉴权辅助 |
+| gent/stream.py | 流聚合 |
+| gent/response_history.py | 写回 history |
+| provider 请求构造模块 | Anthropic/OpenAI 请求体 |

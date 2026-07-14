@@ -9,4 +9,4 @@ dependencies = []
 package = false
 
 [tool.uv.workspace]
-members = ["MozilCode-python"]
+members = ["mozilcode-python"]

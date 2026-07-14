@@ -2,11 +2,11 @@
 
 MozilCode is a local-first coding assistant:
 
-- `MozilCode-python`: Python runtime, daemon, TUI, tools, and tests.
-- `mewcode-gui`: local Vue/Tauri desktop GUI for the daemon.
+- `mozilcode-python`: Python runtime, daemon, TUI, tools, and tests.
+- `mozilcode-gui`: local Vue/Tauri desktop GUI for the daemon.
 
 The local runtime is the primary product path and uses file-based configuration
-under `.mozilcode/config.yaml`. The optional `mewcode-cloud` directory is not
+under `.mozilcode/config.yaml`. The optional `mozilcode-cloud` directory is not
 required to build or run the local assistant.
 
 ## Common Commands
@@ -14,14 +14,14 @@ required to build or run the local assistant.
 Python core:
 
 ```powershell
-cd MozilCode-python
+cd mozilcode-python
 uv run pytest -q -k "not daemon"
 ```
 
 Local GUI:
 
 ```powershell
-cd mewcode-gui
+cd mozilcode-gui
 npm install
 npm run dev
 ```
